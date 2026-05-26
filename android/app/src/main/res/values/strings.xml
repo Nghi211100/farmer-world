@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Farmer World</string>
+    <string name="title_activity_main">Farmer World</string>
+    <string name="package_name">com.farmerworld.app</string>
+    <string name="custom_url_scheme">com.farmerworld.app</string>
+</resources>

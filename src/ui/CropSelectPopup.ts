@@ -3,7 +3,7 @@ import { CROP_IDS, CROPS, CROP_UI_ICON_KEYS, type CropId } from '../config/CropC
 import { CROP_TO_SEED } from '../config/gameConfig';
 import type { GridSystem } from '../systems/GridSystem';
 import type { InventorySystem } from '../systems/InventorySystem';
-import { placePopupAboveTile } from '../utils/popupPosition';
+import { farmMainCameraZoom, placePopupAboveTile } from '../utils/popupPosition';
 import { applyImageArtRegionStretch } from './ShopPanel';
 import { assertFarmPopupLayoutAligned } from './FarmActionPopup';
 import {
@@ -52,6 +52,7 @@ export interface CropSelectPopupVisualMetrics {
   bgBoundsH: number;
   containerScaleX: number;
   containerScaleY: number;
+  cameraZoom: number;
   viewportW: number;
   viewportH: number;
   textureW: number;
@@ -115,6 +116,7 @@ export class CropSelectPopup {
       bgBoundsH: bounds?.height ?? 0,
       containerScaleX: this.container.scaleX,
       containerScaleY: this.container.scaleY,
+      cameraZoom: farmMainCameraZoom(this.scene),
       viewportW: this.scene.scale.width,
       viewportH: this.scene.scale.height,
       textureW: bg?.frame.width ?? 0,
@@ -135,6 +137,7 @@ export class CropSelectPopup {
     const { cx, cy: anchorCy } = placePopupAboveTile(this.scene, this.grid, gx, gy, {
       panelW,
       panelH,
+      containerVisualScale: TOOL_MODAL_VISUAL_SCALE,
       aboveOffsetPx: 12,
       anchorTop: true,
     });

@@ -89,6 +89,29 @@ export class CropSprite {
   /** Timer text below bar top edge (px) */
   private static readonly TIMER_ABOVE_BAR = 6;
 
+  private addSoilIdleDryIcon(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    depth: number,
+    tint = 0xc0392b
+  ): void {
+    const iconKey = scene.textures.exists('watering_can') ? 'watering_can' : 'seed';
+    this.waterIcon = scene.add.image(x, y, iconKey);
+    this.waterIcon.setDisplaySize(14, 14);
+    this.waterIcon.setTint(tint);
+    this.waterIcon.disableInteractive();
+    this.waterIcon.setDepth(depth);
+    scene.tweens.add({
+      targets: this.waterIcon,
+      y: this.waterIcon.y - 4,
+      duration: 600,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
   updateOverlays(
     scene: Phaser.Scene,
     grid: GridSystem,
@@ -134,6 +157,9 @@ export class CropSprite {
         .setOrigin(0.5)
         .setDepth(depth);
       this.timerText.disableInteractive();
+      if (farming.isSoilIdleDry(this.gridX, this.gridY)) {
+        this.addSoilIdleDryIcon(scene, anchorX, barY, depth);
+      }
       return;
     }
 
@@ -172,21 +198,14 @@ export class CropSprite {
         .setDepth(depth + 2);
       this.timerText.disableInteractive();
 
-      if (info.needsWater) {
-        const iconKey = scene.textures.exists('watering_can') ? 'watering_can' : 'seed';
-        this.waterIcon = scene.add.image(anchorX + barW / 2 + 4, barY - 2, iconKey);
-        this.waterIcon.setDisplaySize(14, 14);
-        this.waterIcon.setTint(0x3498db);
-        this.waterIcon.disableInteractive();
-        this.waterIcon.setDepth(depth + 2);
-        scene.tweens.add({
-          targets: this.waterIcon,
-          y: this.waterIcon.y - 4,
-          duration: 600,
-          yoyo: true,
-          repeat: -1,
-          ease: 'Sine.easeInOut',
-        });
+      if (info.needsWater || farming.isSoilIdleDry(this.gridX, this.gridY)) {
+        this.addSoilIdleDryIcon(
+          scene,
+          anchorX + barW / 2 + 4,
+          barY - 2,
+          depth + 2,
+          info.needsWater ? 0x3498db : 0xc0392b
+        );
       }
 
       if (isDebugMode()) {

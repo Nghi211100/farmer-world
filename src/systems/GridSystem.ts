@@ -7,6 +7,13 @@ import {
   type GroundDecorVariant,
 } from '../config/gameConfig';
 import {
+  computeFarmIslandWorldDepth,
+  FARM_ISLAND_RING_MARGIN,
+  getFarmLandGroundDepth,
+  ISLAND_GROUND_MIN_SEP,
+  isFarmNorthEdgeCell,
+} from '../farmIslandLayout';
+import {
   cartToIso,
   isoDepth,
   pickIsoTileAt,
@@ -34,8 +41,10 @@ export interface TileCell {
 export interface GroundTextureOptions {
   /** Dig animation: neutral farm_plot instead of moisture tiles */
   farmPlotGround?: boolean;
-  /** Dug empty soil (xới xong) — moisture bands use soil / mud / wet_soil */
+  /** Tilled plot — moisture bands use soil (dry) / mud / wet_soil */
   dug?: boolean;
+  /** Override cell {@link TileCell.soilWaterLevel} for texture pick (e.g. neglect-dry). */
+  soilWaterLevel?: number;
 }
 
 export class GridSystem {
@@ -66,25 +75,43 @@ export class GridSystem {
     this.originY = screenHeight / 4;
   }
 
+  /** Grid coords of unlocked planting soil centroid, else full patch center. */
+  getUnlockedFarmPlantingGridCenter(): { x: number; y: number } {
+    const unlocked = this.getSoilTileCoords().filter(
+      ({ x, y }) => this.isFarmPlantingCell(x, y) && this.isFarmUnlocked(x, y)
+    );
+    if (unlocked.length > 0) {
+      let sx = 0;
+      let sy = 0;
+      for (const { x, y } of unlocked) {
+        sx += x;
+        sy += y;
+      }
+      return { x: sx / unlocked.length, y: sy / unlocked.length };
+    }
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  }
+
   /**
-   * Lay out the grid so the farm soil bottom-right (tile maxX,maxY bottom vertex)
-   * sits at the target screen point (camera scroll 0, zoom 1 baseline).
+   * Lay out the grid so the farm soil patch center sits in the HUD playable band
+   * (camera scroll 0, zoom 1 baseline).
    */
   centerInViewport(
     viewW: number,
     viewH: number,
-    _hudTop = 56,
-    hudBottom = 72,
-    anchorMarginX = 16,
-    anchorMarginY = 16
+    hudTop = 56,
+    hudBottom = 72
   ): void {
-    const { maxX, maxY } = FARM_SOIL_BOUNDS;
-    const targetX = viewW - anchorMarginX;
-    const targetY = viewH - hudBottom - anchorMarginY;
-    const topOffsetX = (maxX - maxY) * (this.tileWidth / 2);
-    const topOffsetY = (maxX + maxY) * (this.tileHeight / 2);
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    const centerGx = (minX + maxX) / 2;
+    const centerGy = (minY + maxY) / 2;
+    const targetX = viewW / 2;
+    const targetY = (viewH + hudTop - hudBottom) / 2;
+    const topOffsetX = (centerGx - centerGy) * (this.tileWidth / 2);
+    const topOffsetY = (centerGx + centerGy) * (this.tileHeight / 2);
     this.originX = targetX - topOffsetX;
-    this.originY = targetY - topOffsetY - this.tileHeight;
+    this.originY = targetY - topOffsetY - this.tileHeight / 2;
   }
 
   /** Farm soil patch bottom-right anchor (SE corner tile bottom vertex). */
@@ -130,6 +157,62 @@ export class GridSystem {
     };
   }
 
+  /**
+   * Screen AABB of unlocked planting soil (diamond bottoms included).
+   * Falls back to the full farm soil rectangle when nothing is unlocked yet.
+   */
+  getUnlockedFarmPlantingScreenBounds(): {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const unlocked = this.getSoilTileCoords().filter(
+      ({ x, y }) => this.isFarmPlantingCell(x, y) && this.isFarmUnlocked(x, y)
+    );
+    if (unlocked.length === 0) {
+      return this.getFarmSoilScreenBounds();
+    }
+    const corners: [number, number][] = unlocked.map(({ x, y }) => [x, y]);
+    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    this.accumulateIsoBounds(corners, box);
+    const anchor = this.getFarmSoilCameraAnchor();
+    return {
+      ...box,
+      centerX: anchor.x,
+      centerY: anchor.y,
+    };
+  }
+
+  /**
+   * Outer iso rhombus of FARM_SOIL_BOUNDS: N/E/S/W apexes of the 8×8 soil cluster
+   * (not the axis-aligned AABB from {@link getFarmSoilScreenBounds}).
+   */
+  getFarmSoilScreenRhombus(): {
+    north: { x: number; y: number };
+    east: { x: number; y: number };
+    south: { x: number; y: number };
+    west: { x: number; y: number };
+    center: { x: number; y: number };
+  } {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    const northTop = this.gridToScreen(minX, minY);
+    const eastTop = this.gridToScreen(maxX, minY);
+    const southTop = this.gridToScreen(maxX, maxY);
+    const westTop = this.gridToScreen(minX, maxY);
+    const hw = this.tileWidth / 2;
+    const hh = this.tileHeight / 2;
+    return {
+      north: { x: northTop.x, y: northTop.y },
+      east: { x: eastTop.x + hw, y: eastTop.y + hh },
+      south: tileBottomFromTop(southTop),
+      west: { x: westTop.x - hw, y: westTop.y + hh },
+      center: this.getFarmSoilPatchCenterScreen(),
+    };
+  }
+
   /** Screen AABB of the farm soil rectangle (diamond bottoms included). */
   getFarmSoilScreenBounds(): {
     minX: number;
@@ -148,11 +231,23 @@ export class GridSystem {
     ];
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     this.accumulateIsoBounds(corners, box);
+    const patchCenter = this.getFarmSoilPatchCenterScreen();
     return {
       ...box,
-      centerX: (box.minX + box.maxX) / 2,
-      centerY: (box.minY + box.maxY) / 2,
+      centerX: patchCenter.x,
+      centerY: patchCenter.y,
     };
+  }
+
+  /** Iso diamond center of the full farm soil rectangle (FARM_SOIL_BOUNDS). */
+  getFarmSoilPatchCenterScreen(): { x: number; y: number } {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    return this.gridToTileCenter((minX + maxX) / 2, (minY + maxY) / 2);
+  }
+
+  /** Camera scroll anchor: iso center of the full farm soil patch (FARM_SOIL_BOUNDS). */
+  getFarmSoilCameraAnchor(): { x: number; y: number } {
+    return this.getFarmSoilPatchCenterScreen();
   }
 
   getCell(gx: number, gy: number): TileCell | null {
@@ -235,7 +330,21 @@ export class GridSystem {
       objects: 6,
     };
     const depth = isoDepth(gx, gy, layerOffset[layer]);
-    return layer === 'ground' ? depth : depth + this.worldDepthBase();
+    if (layer === 'ground') {
+      const isFootprint = this.isFarmIslandFootprintCell(gx, gy);
+      const base = getFarmLandGroundDepth(gx, gy, depth, isFootprint);
+
+      // Deterministic z-order:
+      // For ground tiles on the topmost north edge row(s) of the farm footprint,
+      // force their depth to be strictly above farm_island by a safety margin.
+      if (isFootprint && isFarmNorthEdgeCell(gx, gy, FARM_ISLAND_RING_MARGIN)) {
+        const islandDepth = computeFarmIslandWorldDepth();
+        return Math.max(base, islandDepth + ISLAND_GROUND_MIN_SEP);
+      }
+
+      return base;
+    }
+    return depth + this.worldDepthBase();
   }
 
   /** Lowest depth for the world-object band (above every ground tile on this map). */
@@ -279,26 +388,27 @@ export class GridSystem {
 
     // Trees
     const treeSpots: [number, number, string][] = [
-      [2, 3, 'tree_01'],
-      [3, 5, 'tree_02'],
-      [14, 4, 'tree_01'],
-      [15, 7, 'tree_02'],
+      [1, 9, 'tree_01'],
+      [1, 10, 'tree_02'],
       [16, 12, 'tree_01'],
       [2, 14, 'tree_02'],
     ];
     for (const [tx, ty, key] of treeSpots) {
+      if (this.isFarmIslandFootprintCell(tx, ty)) continue;
+      if (isFarmNorthEdgeCell(tx, ty)) continue;
       this.setCell(tx, ty, { walkable: false });
       this.setObject(tx, ty, key);
     }
 
     // Rocks and bushes
     const decor: [number, number, string][] = [
-      [13, 3, 'rock_01'],
       [5, 15, 'rock_01'],
       [12, 15, 'bush_01'],
-      [17, 9, 'bush_01'],
+      [17, 11, 'bush_01'],
     ];
     for (const [dx, dy, key] of decor) {
+      if (this.isFarmIslandFootprintCell(dx, dy)) continue;
+      if (isFarmNorthEdgeCell(dx, dy)) continue;
       this.setCell(dx, dy, { walkable: false });
       this.setObject(dx, dy, key);
     }
@@ -334,6 +444,27 @@ export class GridSystem {
       return false;
     }
     return this.getCell(gx, gy)?.type === 'soil';
+  }
+
+  /**
+   * Soil rectangle plus outer ring (path/water neighbors) where island art must sit under tiles.
+   */
+  isFarmIslandFootprintCell(gx: number, gy: number, ringMargin = 1): boolean {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    return (
+      gx >= minX - ringMargin &&
+      gx <= maxX + ringMargin &&
+      gy >= minY - ringMargin &&
+      gy <= maxY + ringMargin
+    );
+  }
+
+  /**
+   * Farm land (soil, path ring, water) always draws ground tiles above island.png.
+   * Island art is only visible in the moat/margin where no ground sprites exist.
+   */
+  hidesGroundForFarmIsland(_gx: number, _gy: number): boolean {
+    return false;
   }
 
   /**
@@ -616,10 +747,9 @@ export class GridSystem {
         return cell.groundVariant ?? 'grass';
       }
       if (options?.farmPlotGround) return 'farm_plot';
-      return soilMoistureTextureKey(
-        this.getSoilWaterLevel(gx, gy),
-        options?.dug === true
-      );
+      const moisture =
+        options?.soilWaterLevel ?? this.getSoilWaterLevel(gx, gy);
+      return soilMoistureTextureKey(moisture, options?.dug === true);
     }
     if (cell.type === 'grass') {
       return cell.groundVariant ?? 'grass';

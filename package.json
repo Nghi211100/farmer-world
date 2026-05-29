@@ -10,9 +10,17 @@
     "test:e2e": "playwright test",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync android",
+    "cap:live-url": "node scripts/set-capacitor-live-url.mjs",
+    "cap:clear-live-url": "node scripts/clear-capacitor-live-url.mjs",
+    "cap:sync:live": "npm run cap:live-url && npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:run": "npm run cap:sync && npx cap run android",
-    "build:apk": "npm run cap:sync && cd android && gradlew.bat assembleDebug"
+    "build:apk": "npm run cap:sync && cd android && gradlew.bat assembleDebug",
+    "build:apk:live": "npm run cap:live-url && npx cap sync android && cd android && gradlew.bat :app:assembleDebug",
+    "build:apk:live:install": "npm run build:apk:live && npm run install:apk:live",
+    "install:apk:live": "node scripts/adb-install-debug.mjs",
+    "build:apk:standalone": "npm run cap:clear-live-url && npm run build && npx cap sync android && cd android && gradlew.bat :app:assembleDebug",
+    "icons:android": "npx @capacitor/assets generate --android"
   },
   "dependencies": {
     "@capacitor/android": "^7.2.0",
@@ -20,6 +28,7 @@
     "phaser": "^3.87.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^7.2.0",
     "@playwright/test": "^1.52.0",
     "typescript": "^5.7.3",

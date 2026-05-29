@@ -61,18 +61,20 @@ export class LandSystem {
     return true;
   }
 
-  /** Purchase land: prefer unlocking locked soil, else expand grass at tap. */
+  /** Purchase land: unlock/expand at tap, else unlock next eligible soil. */
   purchaseAt(
     grid: GridSystem,
     gx: number,
     gy: number
-  ): { ok: boolean; kind: 'unlock' | 'expand' | 'none' } {
+  ): { ok: boolean; kind: 'unlock' | 'expand' | 'none'; x?: number; y?: number } {
     if (this.canUnlockSoilAt(grid, gx, gy) && grid.unlockSoilTile(gx, gy)) {
-      return { ok: true, kind: 'unlock' };
+      return { ok: true, kind: 'unlock', x: gx, y: gy };
+    }
+    if (this.canExpandAt(grid, gx, gy) && this.expandTile(grid, gx, gy)) {
+      return { ok: true, kind: 'expand', x: gx, y: gy };
     }
     const auto = this.unlockNextSoilTile(grid);
-    if (auto) return { ok: true, kind: 'unlock' };
-    if (this.expandTile(grid, gx, gy)) return { ok: true, kind: 'expand' };
+    if (auto) return { ok: true, kind: 'unlock', x: auto.x, y: auto.y };
     return { ok: false, kind: 'none' };
   }
 }

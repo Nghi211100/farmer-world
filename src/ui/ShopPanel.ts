@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { UI_TEXT_BACKGROUND_TEXTURE_KEY } from '../config/assets';
 import { isShopGridDebug } from '../config/gameConfig';
 import { HUD_MODAL_DEPTH } from './BottomMenu';
 import {
@@ -14,6 +15,37 @@ import type { EconomySystem } from '../systems/EconomySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { HUDResources } from './TopHUD';
 import { computeShopModalPanelSize } from './modalPanelSize';
+import {
+  CATEGORY_TAB_ZONE_GAP_Y_PX,
+  CATEGORY_TAB_ZONE_PAD_X_PX,
+  SHOP_ART_H as SHOP_LAYOUT_ART_H,
+  SHOP_ART_W as SHOP_LAYOUT_ART_W,
+  SHOP_CATEGORY_TAB_COUNT,
+  SHOP_GRID_COLS as SHOP_LAYOUT_GRID_COLS,
+  SHOP_ITEM_GRID_OFFSET_Y_PX,
+  SHOP_ITEM_GRID_PAD_TOP_FRAC,
+  resolveShopProductGridViewportInset,
+  SHOP_LAYOUT_CONTENT_ROW_HEIGHT_FRAC,
+  SHOP_LAYOUT_CONTENT_ROW_TOP_FRAC,
+  SHOP_LAYOUT_DETAIL_COL_SPAN,
+  SHOP_LAYOUT_DETAIL_COL_START,
+  SHOP_LAYOUT_GRID_COL_SPAN,
+  SHOP_LAYOUT_GRID_COL_START,
+  SHOP_LAYOUT_HEADER_ROW_HEIGHT_FRAC,
+  SHOP_LAYOUT_HEADER_ROW_TOP_FRAC,
+  SHOP_LAYOUT_TABS_COL_SPAN,
+  SHOP_LAYOUT_TABS_COL_START,
+  SHOP_MODAL_LAYOUT_COLS,
+  categoryTabListHeightsFromModalAvailable,
+  categoryTabListModalAvailableHeightPx,
+  computeCategoryTabDimensionsFromZone,
+  mapShopArtRectToPanelLocal,
+  resolveShopContentRowRect,
+  resolveShopLayoutTier,
+  resolveShopDetailContentColRect,
+  resolveShopModalColRect,
+  resolveShopModalRowRect,
+} from './shopModalLayout';
 import {
   getModalTypographyScale,
   scaledFontSize,
@@ -139,29 +171,31 @@ export function applyImageArtRegionStretch(
 
 const SHOP_OVERLAY_ALPHA = 0.001;
 const COIN_TEXTURE_KEY = 'coin';
-const ENERGY_TEXTURE_KEY = 'energy';
-const GEM_TEXTURE_KEY = 'gem';
 const SHOP_BG_KEY = 'ui_shop_modal';
 const CARD_TEXTURE_KEY = 'ui_shop_item';
-const SHOP_CATEGORY_TAB_TEXTURE_KEYS: Record<ShopCategoryId, string> = {
-  seeds: 'ui_shop_tab_seeds',
-  tools: 'ui_shop_tab_tools',
-  farming: 'ui_shop_tab_farming',
-  locked: 'ui_shop_tab_locked',
-  gear: 'ui_shop_tab_gear',
-  storage: 'ui_shop_tab_storage',
+const SHOP_CATEGORY_TAB_TEXTURES: Record<
+  ShopCategoryId,
+  { inactive: string; active: string }
+> = {
+  all: { inactive: 'shop_tab_all', active: 'shop_tab_all_active' },
+  seeds: { inactive: 'shop_tab_seeds', active: 'shop_tab_seeds_active' },
+  animals: { inactive: 'shop_tab_animals', active: 'shop_tab_animals_active' },
+  decorations: {
+    inactive: 'shop_tab_decorations',
+    active: 'shop_tab_decorations_active',
+  },
+  foods: { inactive: 'shop_tab_foods', active: 'shop_tab_foods_active' },
+  resources: { inactive: 'shop_tab_resources', active: 'shop_tab_resources_active' },
 };
 const UI_CHECK_TEXTURE_KEY = 'ui_check';
-/** Active tab check: square, 25% of min(tab W, tab H) per side (was 50% W × 50% H). */
-const CATEGORY_TAB_CHECK_SIZE_FRAC = 0.25;
-/** Screen px shift for active-tab check (bottom-right anchor). */
-const CATEGORY_TAB_CHECK_OFFSET_X_PX = -4;
 
 const SHOP_LOCKED_HINT = 'Sắp ra mắt';
 
-const GRID_COLS = 4;
-const GRID_ROWS = 3;
-const GRID_PAGE_SIZE = GRID_COLS * GRID_ROWS;
+const GRID_COLS = SHOP_LAYOUT_GRID_COLS;
+/** E2e expects 6px row gutter between product card rows. */
+const GRID_ROW_GAP_PX = 6;
+/** Product card display scale inside cell (matches e2e `SHOP_ITEM_CARD_SCALE`). */
+const SHOP_ITEM_CARD_SCALE = 0.95;
 /** Min pointer travel before grid scroll drag starts (avoids eating taps on scrollHit). */
 const SCROLL_DRAG_THRESHOLD_PX = 6;
 
@@ -189,52 +223,6 @@ const CLOSE_BTN_OFFSET_Y_PX = 40;
 const CLOSE_BTN_CENTER_X_FRAC = (1405 + CLOSE_BTN_OFFSET_X_PX) / SHOP_ART_W;
 const CLOSE_BTN_CENTER_Y_FRAC = (120 + CLOSE_BTN_OFFSET_Y_PX) / SHOP_ART_H;
 const CLOSE_BTN_RADIUS_ART_PX = 56;
-
-/** Screen px shift applied to currency row (coin / energy / gem). */
-export const CURRENCY_BAR_OFFSET_Y = 8;
-/** Gap between adjacent currency slot boxes (art px). */
-export const CURRENCY_SLOT_GAP_PX = 0;
-/** Gap between icon and value text inside each currency slot. */
-export const CURRENCY_ICON_TEXT_GAP_PX = 4;
-
-const CURRENCY_BAR_X0_PX = 518;
-const CURRENCY_BAR_X1_PX = 1018;
-const CURRENCY_BAR_Y0_PX = 158;
-const CURRENCY_BAR_Y1_PX = 212;
-const CURRENCY_SLOT_COUNT = 3;
-
-function buildCurrencySlotArtPx(): { x0: number; x1: number; y0: number; y1: number }[] {
-  const totalW = CURRENCY_BAR_X1_PX - CURRENCY_BAR_X0_PX;
-  const gapTotal = CURRENCY_SLOT_GAP_PX * (CURRENCY_SLOT_COUNT - 1);
-  const boxesW = totalW - gapTotal;
-  const baseW = Math.floor(boxesW / CURRENCY_SLOT_COUNT);
-  const remainder = boxesW - baseW * CURRENCY_SLOT_COUNT;
-  const slots: { x0: number; x1: number; y0: number; y1: number }[] = [];
-  let x = CURRENCY_BAR_X0_PX;
-  for (let i = 0; i < CURRENCY_SLOT_COUNT; i++) {
-    const w = baseW + (i >= CURRENCY_SLOT_COUNT - remainder ? 1 : 0);
-    slots.push({
-      x0: x,
-      x1: x + w,
-      y0: CURRENCY_BAR_Y0_PX + CURRENCY_BAR_OFFSET_Y,
-      y1: CURRENCY_BAR_Y1_PX + CURRENCY_BAR_OFFSET_Y,
-    });
-    x += w + (i < CURRENCY_SLOT_COUNT - 1 ? CURRENCY_SLOT_GAP_PX : 0);
-  }
-  return slots;
-}
-
-/** Top currency capsule art px on `ui/shop-modal.png` (1536×1024). */
-export const CURRENCY_SLOT_ART_PX = buildCurrencySlotArtPx();
-
-/** Top currency capsule — three slots (coin, energy, gem). */
-const CURRENCY_SLOTS: { x0: number; x1: number; y0: number; y1: number }[] =
-  CURRENCY_SLOT_ART_PX.map(({ x0, x1, y0, y1 }) => ({
-    x0: x0 / SHOP_ART_W,
-    x1: x1 / SHOP_ART_W,
-    y0: y0 / SHOP_ART_H,
-    y1: y1 / SHOP_ART_H,
-  }));
 
 /** Left vertical category tabs (6) — hit/glow on baked wooden buttons (`ui/shop-modal.png` art px). */
 const CATEGORY_TAB_CENTER_X_ART_PX = 92;
@@ -266,7 +254,6 @@ const CATEGORY_TAB_CENTERS_Y_FRAC = CATEGORY_TAB_CENTER_Y_PX.map((y) => y / SHOP
 /** Content band column fractions (tabs / grid / detail). */
 const TABS_WIDTH_FRAC = 0.125;
 const GRID_WIDTH_FRAC = 0.625;
-const DETAIL_WIDTH_FRAC = 0.25;
 
 /**
  * Main content band (below header, above pagination): tabs 12.5%, grid 62.5%, detail 25%.
@@ -277,89 +264,90 @@ const CONTENT_RIGHT_PX = 1350;
 const CONTENT_WIDTH_PX = CONTENT_RIGHT_PX - CONTENT_LEFT_PX;
 const TABS_WIDTH_PX = Math.round(CONTENT_WIDTH_PX * TABS_WIDTH_FRAC);
 const GRID_WIDTH_PX = Math.round(CONTENT_WIDTH_PX * GRID_WIDTH_FRAC);
-const DETAIL_WIDTH_PX = Math.round(CONTENT_WIDTH_PX * DETAIL_WIDTH_FRAC);
 const GRID_LEFT_PX = CONTENT_LEFT_PX + TABS_WIDTH_PX;
 const DETAIL_LEFT_PX = GRID_LEFT_PX + GRID_WIDTH_PX;
 
-/** Content band column edges (12.5% / 62.5% / 25% of main panel width). */
-const CONTENT_LEFT_FRAC = CONTENT_LEFT_PX / SHOP_ART_W;
-const CONTENT_TABS_RIGHT_FRAC = (CONTENT_LEFT_PX + TABS_WIDTH_PX) / SHOP_ART_W;
-
-/** Product grid inset on cream panel (4×3 item cards) — tightened top/bottom vs baked margins. */
-const GRID_LEFT_FRAC = GRID_LEFT_PX / SHOP_ART_W;
+/** Product grid inset on cream panel — legacy art px guides for debug overlay. */
 const GRID_TOP_FRAC = 235 / SHOP_ART_H;
-const GRID_ART_WIDTH_FRAC = GRID_WIDTH_PX / SHOP_ART_W;
 const GRID_HEIGHT_FRAC = 520 / SHOP_ART_H;
 
 /** Inset for product cards inside the grid scroll viewport. */
 const GRID_CONTENT_PAD_LEFT_PX = 20;
 const GRID_CONTENT_PAD_RIGHT_PX = 15;
-const GRID_CONTENT_PAD_TOP_PX = 10;
 
+/** Product grid card scale vs prior art (width +5.06%, height −13.38% cumulative). */
+const GRID_CARD_W_SCALE = 1.02 * 1.03;
+const GRID_CARD_H_SCALE = 0.97 * 0.95 * 0.94 * 1.07 * 1.01 * 1.02 * 1.10 * 0.98 * 0.97 * 1.02 * 1.005;
 /** Product card fit box vs cell — lower width = narrower hit zone and more gutter. */
-const GRID_CARD_W_FRAC = 0.88;
-/** Full cell height for hit/highlight boxes; card art fills cell when GRID_ROW_GAP_PX is 0. */
-const GRID_CARD_H_FRAC = 1;
+const GRID_CARD_W_FRAC = 0.88 * GRID_CARD_W_SCALE;
+/** Card / hit height vs cell pitch. */
+const GRID_CARD_H_FRAC = GRID_CARD_H_SCALE;
 const GRID_HIT_W_FRAC = GRID_CARD_W_FRAC;
 const GRID_HIT_H_FRAC = GRID_CARD_H_FRAC;
 /** `ui_shop_item` frame drawn larger than fit box; width clamped, height capped for row gap. */
 const GRID_CARD_BG_SCALE = 1.12;
-const GRID_CARD_BG_MAX_W_FRAC = 0.96;
-/** Vertical gap between adjacent row card edges (0 = rows touch). */
-const GRID_ROW_GAP_PX = 0;
+const GRID_CARD_BG_MAX_W_FRAC = 0.96 * GRID_CARD_W_SCALE;
 /** Legacy overlap removed — row spacing uses GRID_ROW_GAP_PX only. */
 const GRID_ROW_OVERLAP_PX = 0;
-/** Native size of `ui/shop-item.png` — orange footer check slot (art px). */
-const SHOP_ITEM_ART_W = 166;
-const SHOP_ITEM_ART_H = 157;
-const SHOP_ITEM_CHECK_X0_PX = 100;
-const SHOP_ITEM_CHECK_X1_PX = 147;
-const SHOP_ITEM_CHECK_Y0_PX = 114;
-const SHOP_ITEM_CHECK_Y1_PX = 137;
-/** Selected grid check: square, 80% of min(footer W, footer H) per side. */
-const GRID_CARD_CHECK_SIZE_FRAC = 0.8;
+/** Selected grid check: inset from top of card (fraction of card height). */
+const GRID_CARD_CHECK_TOP_FRAC = 0.15;
+/** Selected grid check: inset from right of card (fraction of card width). */
+const GRID_CARD_CHECK_RIGHT_FRAC = 0.20;
+/** Selected grid check: square, 30% of prior (0.8 × 0.30) of footer band size per side. */
+const GRID_CARD_CHECK_SIZE_FRAC = 0.8 * 0.3;
+/** Grid card coin + price row: width as fraction of card width, centered horizontally. */
+const GRID_CARD_FOOTER_W_FRAC = 0.8;
+/** Grid card coin + price row: band height for coin sizing (fraction of card height). */
+const GRID_CARD_FOOTER_H_FRAC = 0.3;
+/** Grid card coin + price row: center Y inset from card bottom (fraction of card height). */
+const GRID_CARD_FOOTER_BOTTOM_FRAC = 0.225;
+/** Grid card footer coin display scale (90% of base coin size; +50% vs 0.6). */
+const GRID_CARD_FOOTER_COIN_SCALE = 0.9;
+/** Grid card footer price amount font scale (+72% vs base 13px; +20% vs 1.43). */
+const GRID_CARD_FOOTER_PRICE_FONT_SCALE = 1.43 * 1.2;
+/** Grid card footer coin + amount. */
+const GRID_CARD_PRICE_FONT_SIZE_PX = 13;
+const GRID_CARD_PRICE_COIN_AMOUNT_GAP_FRAC = 0.035;
 /** Item icon scales from hit box, not boosted bg art (detail panel uses DETAIL_ICON_SIZE_FRAC). */
-const GRID_ICON_SIZE_FRAC = 0.46;
-
-/** Right detail card — aligned with grid content band. */
-const DETAIL_LEFT_FRAC = DETAIL_LEFT_PX / SHOP_ART_W;
-const DETAIL_TOP_FRAC = GRID_TOP_FRAC;
-const DETAIL_ART_WIDTH_FRAC = DETAIL_WIDTH_PX / SHOP_ART_W;
-const DETAIL_HEIGHT_FRAC = GRID_HEIGHT_FRAC;
+const GRID_ICON_SIZE_W_FRAC = 0.46 * 1.03 * GRID_CARD_W_SCALE;
+const GRID_ICON_SIZE_H_FRAC = 0.46 * 0.99 * GRID_CARD_H_SCALE;
 
 const DETAIL_TITLE_Y_FRAC = 0.095;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on title center. */
+const DETAIL_TITLE_Y_OFFSET_FRAC = 0.03;
 const DETAIL_ICON_Y_FRAC = 0.305;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on icon center. */
+const DETAIL_ICON_Y_OFFSET_FRAC = -0.07;
 /** Fits item art inside cream preview slot without overlapping stats / CTA. */
-const DETAIL_ICON_SIZE_FRAC = 0.17;
+const DETAIL_ICON_SIZE_FRAC = 0.17 * 1.1 * 1.5 * 1.5;
 const DETAIL_STAT_Y0_FRAC = 0.54;
-const DETAIL_STAT_ROW_STEP_FRAC = 0.055;
+const DETAIL_STAT_ROW_STEP_FRAC = 0.055 * 0.97 * 0.95 * 0.96;
+/** Width of stat line pill bg as fraction of detail band width. */
+const DETAIL_STAT_BG_WIDTH_FRAC = 0.9;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on stats block. */
+const DETAIL_STATS_Y_OFFSET_FRAC = -0.16;
 /** Detail info band — left coin pill + price below (baked `ui/shop-modal.png` art px). */
 const DETAIL_COIN_BOX_X0_PX = 1092;
 const DETAIL_COIN_BOX_X1_PX = 1162;
 const DETAIL_COIN_BOX_Y0_PX = 592;
-const DETAIL_COIN_BOX_Y1_PX = 628;
 const DETAIL_PRICE_AMOUNT_Y0_PX = 652;
 const DETAIL_PRICE_AMOUNT_Y1_PX = 674;
-/** Price row band below baked coin slot — `ui/box.png` + coin + amount. */
-const DETAIL_PRICE_BOX_Y0_PX = DETAIL_PRICE_AMOUNT_Y0_PX;
-const DETAIL_PRICE_BOX_Y1_PX = DETAIL_PRICE_AMOUNT_Y1_PX;
-/** Art px: shift price box below baked band — scaled via `artSpanH` at layout time. */
+/** Art px: shift price box below baked band — scaled via panel layout at layout time. */
 const DETAIL_PRICE_BOX_OFFSET_Y_ART_PX = 30;
-/** Art px: shift price box right of baked coin center — scaled via `artSpanW`. */
-const DETAIL_PRICE_BOX_OFFSET_X_ART_PX = 89;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on top of art-mapped price box. */
+const DETAIL_PRICE_Y_OFFSET_FRAC = 0.07;
 /** Extra height beyond baked price amount band (`ui_box` displayH). */
 const DETAIL_PRICE_BOX_EXTRA_H_PX = 35;
-/** Fixed display width for `ui_box` behind coin + amount. */
-const DETAIL_PRICE_BOX_DISPLAY_W_PX = 257;
+/** Scale {@link detailPriceBoxRect} height (display + hit). */
+const DETAIL_PRICE_BOX_HEIGHT_SCALE = 1.155 * 1.05 * 1.1;
 /** Inner row: gap between coin icon and amount (fraction of display width). */
 const DETAIL_PRICE_COIN_AMOUNT_GAP_FRAC = 0.035;
-/** Coin icon cap inside taller price box. */
-const DETAIL_PRICE_COIN_MAX_SIZE_PX = 24;
-/** Unit price amount text inside `ui_box` (coin + number row). */
-const DETAIL_PRICE_AMOUNT_FONT_SIZE_PX = 16;
+/** Coin icon cap inside taller price box (+50% vs prior 24×1.1). */
+const DETAIL_PRICE_COIN_MAX_SIZE_PX = 24 * 1.1 * 1.5;
+/** Unit price amount text inside `ui_box` (coin + number row; +20% vs prior 16×1.1). */
+const DETAIL_PRICE_AMOUNT_FONT_SIZE_PX = 16 * 1.1 * 1.2;
 const DETAIL_TITLE_FONT_BASE_PX = 16;
-const DETAIL_STAT_FONT_BASE_PX = 12;
-const CURRENCY_VALUE_FONT_BASE_PX = 15;
+const DETAIL_STAT_FONT_BASE_PX = 12 * 1.2;
 const PAGE_LABEL_FONT_BASE_PX = 13;
 const TOAST_FONT_BASE_PX = 13;
 const SHOP_DEBUG_LABEL_FONT_BASE_PX = 8;
@@ -379,13 +367,18 @@ const DETAIL_BUY_Y0_PX = 650;
 const DETAIL_BUY_Y1_PX = 724;
 /** Art px: shift BUY CTA hit zone below baked art — scaled via `artSpanH`. */
 export const DETAIL_BUY_OFFSET_Y_ART_PX = 70;
-
-/** Art px: shift buy-qty row left of baked art — scaled via `artSpanW`. */
-const DETAIL_BUY_QTY_OFFSET_X_ART_PX = -5;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on top of art-mapped BUY hit. */
+const DETAIL_BUY_Y_OFFSET_FRAC = 0.15;
+/** Scale BUY CTA height in layout, display, and hit zones. */
+const DETAIL_BUY_HEIGHT_SCALE = 1.02;
 
 /** Baked buy-qty row on `ui/shop-modal.png` (1536×1024 art px) — golden − / pill / + above price. */
 const DETAIL_BUY_QTY_ROW_Y0_PX = 611;
 const DETAIL_BUY_QTY_ROW_Y1_PX = 643;
+/** Additive Y nudge (fraction of {@link detailBandRect} height) on top of art-mapped qty row. */
+const DETAIL_QTY_Y_OFFSET_FRAC = 0.03;
+/** Scale qty row height in layout, display, and hit zones. */
+const DETAIL_BUY_QTY_ROW_HEIGHT_SCALE = 1.071 * 1.05 * 1.1;
 const DETAIL_BUY_QTY_MINUS_X0_PX = 1092;
 const DETAIL_BUY_QTY_MINUS_X1_PX = 1138;
 const DETAIL_BUY_QTY_FIELD_X0_PX = 1140;
@@ -398,23 +391,7 @@ const DETAIL_BUY_QTY_FONT_HEIGHT_FRAC = 0.55;
 const DETAIL_BUY_QTY_BTN_EXTRA_W_PX = 11;
 /** Extra height on − / + hit rects only (`buyQtyBtnHitRectFromArt`); does not resize the bg sprite. */
 const DETAIL_BUY_QTY_BTN_EXTRA_H_PX = 5;
-const DETAIL_BUY_QTY_ROW_ART_W_PX = DETAIL_BUY_QTY_PLUS_X1_PX - DETAIL_BUY_QTY_MINUS_X0_PX;
-const DETAIL_BUY_QTY_BTN_ART_W_PX = Math.min(
-  DETAIL_BUY_QTY_MINUS_X1_PX - DETAIL_BUY_QTY_MINUS_X0_PX,
-  DETAIL_BUY_QTY_PLUS_X1_PX - DETAIL_BUY_QTY_PLUS_X0_PX
-);
-/**
- * Extra display width for `ui_plus_devide` (`detailBuyQtyBg.setDisplaySize` via `buyQtyDisplayRowRect`).
- * Derived from `BTN_EXTRA_W` so baked −/+ art spans the expanded hit width, not just the layout band.
- */
-const DETAIL_BUY_QTY_BG_EXTRA_W_PX =
-  Math.ceil(
-    DETAIL_BUY_QTY_BTN_EXTRA_W_PX * (DETAIL_BUY_QTY_ROW_ART_W_PX / DETAIL_BUY_QTY_BTN_ART_W_PX)
-  ) + 1;
-/**
- * Extra display height for `ui_plus_devide` (`detailBuyQtyBg.setDisplaySize` via `buyQtyDisplayRowRect`).
- * Btn hit expansion plus inset padding for −/+ glyphs inside the PNG.
- */
+/** Extra display height for `ui_plus_devide` (`buyQtyDisplayRowRect`). */
 const DETAIL_BUY_QTY_BG_EXTRA_H_PX = DETAIL_BUY_QTY_BTN_EXTRA_H_PX + 31;
 /** Extra width on qty pill hit / input / display only (`buyQtyFieldHitRectFromArt`); does not resize bg or −/+ hits. */
 const DETAIL_BUY_QTY_FIELD_EXTRA_W_PX = 10;
@@ -445,28 +422,29 @@ const SHOP_CATALOG = [
 ] as const;
 
 export type ShopCategoryId =
+  | 'all'
   | 'seeds'
-  | 'tools'
-  | 'farming'
-  | 'locked'
-  | 'gear'
-  | 'storage';
+  | 'animals'
+  | 'decorations'
+  | 'foods'
+  | 'resources';
 
 const SHOP_CATEGORIES: { id: ShopCategoryId; locked: boolean }[] = [
+  { id: 'all', locked: false },
   { id: 'seeds', locked: false },
-  { id: 'tools', locked: true },
-  { id: 'farming', locked: false },
-  { id: 'locked', locked: true },
-  { id: 'gear', locked: true },
-  { id: 'storage', locked: false },
+  { id: 'animals', locked: true },
+  { id: 'decorations', locked: false },
+  { id: 'foods', locked: false },
+  { id: 'resources', locked: false },
 ];
 
 function catalogIdsForCategory(cat: ShopCategoryId): string[] {
   return SHOP_CATALOG.filter(({ id }) => {
     if (!isShopBuyable(id)) return false;
+    if (cat === 'all') return true;
     if (cat === 'seeds') return isSeedItem(id);
-    if (cat === 'farming') return isFoodItem(id);
-    if (cat === 'storage') return id === ITEM_IDS.FLOUR;
+    if (cat === 'foods') return isFoodItem(id);
+    if (cat === 'resources') return id === ITEM_IDS.FLOUR;
     return false;
   }).map(({ id }) => id);
 }
@@ -475,7 +453,6 @@ interface CategoryTabUi {
   id: ShopCategoryId;
   locked: boolean;
   bg: Phaser.GameObjects.Image;
-  check: Phaser.GameObjects.Image;
   hit: Phaser.GameObjects.Rectangle;
   glow: Phaser.GameObjects.Rectangle;
   label?: Phaser.GameObjects.Text;
@@ -542,16 +519,9 @@ export class ShopPanel {
 
   private economy?: EconomySystem;
   private inventory?: InventorySystem;
-  private hud: HUDResources = { coins: 0, gems: 0, energy: 0 };
-
-  private coinValueText!: Phaser.GameObjects.Text;
-  private energyValueText!: Phaser.GameObjects.Text;
-  private gemValueText!: Phaser.GameObjects.Text;
-  private currencyBoxBackgrounds: Phaser.GameObjects.Image[] = [];
-  private currencyIcons: Phaser.GameObjects.Image[] = [];
 
   private categoryTabs: CategoryTabUi[] = [];
-  private activeCategory: ShopCategoryId = 'seeds';
+  private activeCategory: ShopCategoryId = 'all';
 
   private filteredIds: string[] = [];
   private currentPage = 0;
@@ -571,6 +541,14 @@ export class ShopPanel {
   private cardDisplayW = 0;
   private cardDisplayH = 0;
   private cardTex = '';
+  private gridRows = 2;
+  private tabListLeft = 0;
+  private tabListTop = 0;
+  private tabListViewportW = 0;
+  private tabListViewportH = 0;
+  private tabListContentH = 0;
+  private tabListModalAvailableH = 0;
+  private tabItemScale = 1;
 
   private scrollViewport!: Phaser.GameObjects.Container;
   private scrollContent!: Phaser.GameObjects.Container;
@@ -597,6 +575,7 @@ export class ShopPanel {
   ) => void;
   private detailTitle!: Phaser.GameObjects.Text;
   private detailIcon!: Phaser.GameObjects.Image;
+  private detailStatBgs: Phaser.GameObjects.Image[] = [];
   private detailStatLines: Phaser.GameObjects.Text[] = [];
   private detailPriceBox!: Phaser.GameObjects.Image;
   private detailPriceCoin!: Phaser.GameObjects.Image;
@@ -626,6 +605,10 @@ export class ShopPanel {
   private typographyScale = 1;
 
   private onBuy?: (result: ShopBuyResult) => void;
+
+  private get gridPageSize(): number {
+    return GRID_COLS * this.gridRows;
+  }
 
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
@@ -675,7 +658,6 @@ export class ShopPanel {
       this.panelH
     );
 
-    this.buildCurrencyBar(scene);
     this.buildCategoryTabs(scene);
     this.buildProductGrid(scene);
     this.buildDetailPanel(scene);
@@ -716,17 +698,13 @@ export class ShopPanel {
     this.container = scene.add.container(0, 0, [
       ...this.dimOverlayRects,
       panelBg,
-      ...this.currencyBoxBackgrounds,
-      ...this.currencyIcons,
-      this.coinValueText,
-      this.energyValueText,
-      this.gemValueText,
-      ...this.categoryTabs.flatMap((t) => [t.bg, t.check, t.glow, ...(t.label ? [t.label] : []), t.hit]),
+      ...this.categoryTabs.flatMap((t) => [t.bg, t.glow, ...(t.label ? [t.label] : []), t.hit]),
       this.scrollHit,
       this.scrollViewport,
       this.scrollMaskGraphics!,
       this.detailTitle,
       this.detailIcon,
+      ...this.detailStatBgs,
       ...this.detailStatLines,
       this.detailPriceBox,
       this.detailPriceCoin,
@@ -749,9 +727,9 @@ export class ShopPanel {
     this.container.setScrollFactor(0);
     this.container.setVisible(false);
 
-    this.filteredIds = catalogIdsForCategory('seeds');
+    this.filteredIds = catalogIdsForCategory('all');
     this.selectedId = this.filteredIds[0] ?? null;
-    this.syncCategoryGlow();
+    this.syncCategoryTabTextures();
     this.layoutShopPanel();
     this.syncDebugGrid();
   }
@@ -835,7 +813,6 @@ export class ShopPanel {
       computeShopModalPanelSize
     );
     this.layoutDimOverlays();
-    this.layoutCurrencyBar();
     this.layoutCategoryTabs();
     this.layoutProductGrid();
     this.layoutDetailPanel();
@@ -858,9 +835,6 @@ export class ShopPanel {
     );
     const statPx = this.scaleFont(DETAIL_STAT_FONT_BASE_PX);
     this.detailStatLines.forEach((line) => applyWarehouseTitleLikeSizing(line, 'dark', statPx));
-    for (const text of [this.coinValueText, this.energyValueText, this.gemValueText]) {
-      applyWarehouseTitleLikeSizing(text, 'light', this.scaleFont(CURRENCY_VALUE_FONT_BASE_PX));
-    }
     applyWarehouseTitleLikeSizing(this.pageLabel, 'light', this.scaleFont(PAGE_LABEL_FONT_BASE_PX));
     applyWarehouseTitleLikeSizing(this.toastText, 'light', this.scaleFont(TOAST_FONT_BASE_PX));
     for (const tab of this.categoryTabs) {
@@ -870,52 +844,36 @@ export class ShopPanel {
     }
   }
 
-  private layoutCurrencyBar(): void {
-    CURRENCY_SLOTS.forEach((slot, i) => {
-      const r = this.currencySlotRect(slot);
-      const box = this.currencyBoxBackgrounds[i];
-      const icon = this.currencyIcons[i];
-      const text = [this.coinValueText, this.energyValueText, this.gemValueText][i];
-      if (box) {
-        box.setPosition(r.centerX, r.centerY).setDisplaySize(r.width, r.height);
-      }
-      if (icon && text) {
-        this.layoutCurrencySlot(i, r, text);
-      }
-    });
-  }
-
   private layoutProductGrid(): void {
-    const grid = this.rectFromFrac(
-      GRID_LEFT_FRAC,
-      GRID_LEFT_FRAC + GRID_ART_WIDTH_FRAC,
-      GRID_TOP_FRAC,
-      GRID_TOP_FRAC + GRID_HEIGHT_FRAC
+    const tier = this.layoutTier();
+    this.gridRows = tier.gridRows;
+    const gridBand = this.modalZoneRect(
+      SHOP_LAYOUT_GRID_COL_START,
+      SHOP_LAYOUT_GRID_COL_SPAN
     );
-    this.gridLeft = grid.left;
-    this.gridTop = grid.top;
-    this.gridViewportW = grid.width;
-    this.gridViewportH = grid.height;
-    this.gridContentPadLeft = this.artSpanW(GRID_CONTENT_PAD_LEFT_PX);
-    this.gridContentPadRight = this.artSpanW(GRID_CONTENT_PAD_RIGHT_PX);
-    this.gridContentPadTop = this.artSpanH(GRID_CONTENT_PAD_TOP_PX);
+    const gridViewportInset = resolveShopProductGridViewportInset(gridBand.height);
+    const gridOffsetY = this.artSpanOnPanelH(SHOP_ITEM_GRID_OFFSET_Y_PX);
+    this.gridLeft = gridBand.left;
+    this.gridTop = gridBand.top + gridViewportInset.viewportTopOffsetPx + gridOffsetY;
+    this.gridViewportW = gridBand.width;
+    this.gridViewportH = gridViewportInset.viewportHeightPx;
+    this.gridContentPadLeft = this.artSpanOnPanelW(GRID_CONTENT_PAD_LEFT_PX);
+    this.gridContentPadRight = this.artSpanOnPanelW(GRID_CONTENT_PAD_RIGHT_PX);
+    this.gridContentPadTop = gridBand.height * SHOP_ITEM_GRID_PAD_TOP_FRAC;
     this.gridContentW =
       this.gridViewportW - this.gridContentPadLeft - this.gridContentPadRight;
-    this.pitchCellH = this.gridViewportH / GRID_ROWS;
+    this.pitchCellH = this.gridViewportH / this.gridRows;
     this.cellW = this.gridContentW / GRID_COLS;
     this.cellH = this.pitchCellH;
 
-    const cardMaxH = this.cellH - GRID_ROW_GAP_PX;
+    const cardMaxH = Math.max(8, this.cellH - GRID_ROW_GAP_PX);
     const cardFrame = this.scene.textures.get(this.cardTex).get();
-    const cardFitScale = cardMaxH / cardFrame.height;
+    const cardFitScale = (cardMaxH / cardFrame.height) * SHOP_ITEM_CARD_SCALE;
     const cardFitW = cardFrame.width * cardFitScale;
     const cardFitH = cardMaxH;
-    const boostedW = cardFitW * GRID_CARD_BG_SCALE;
-    const boostedH = cardFitH * GRID_CARD_BG_SCALE;
     const bgCapW = this.cellW * GRID_CARD_BG_MAX_W_FRAC;
-    const bgCapH = cardMaxH;
-    this.cardDisplayW = Math.min(boostedW, bgCapW);
-    this.cardDisplayH = Math.min(boostedH, bgCapH);
+    this.cardDisplayW = Math.min(cardFitW * GRID_CARD_W_SCALE, bgCapW);
+    this.cardDisplayH = cardFitH * GRID_CARD_H_SCALE;
 
     this.scrollViewport.setPosition(this.gridLeft, this.gridTop);
     this.itemsBgContainer.setPosition(this.gridContentPadLeft, this.gridContentPadTop);
@@ -934,20 +892,36 @@ export class ShopPanel {
 
   private layoutDetailPanel(): void {
     const detail = this.detailBandRect();
-    this.detailTitle.setPosition(detail.centerX, detail.top + detail.height * DETAIL_TITLE_Y_FRAC);
-    this.detailTitle.setWordWrapWidth(detail.width * 0.9);
+    const padX = detail.width * 0.08;
+    const titleYFrac = DETAIL_TITLE_Y_FRAC + DETAIL_TITLE_Y_OFFSET_FRAC;
+    this.detailTitle.setPosition(detail.centerX, detail.top + detail.height * titleYFrac);
+    this.detailTitle.setWordWrapWidth(detail.width - padX * 2);
 
+    const iconYFrac = DETAIL_ICON_Y_FRAC + DETAIL_ICON_Y_OFFSET_FRAC;
     const iconSize = Math.min(detail.width, detail.height) * DETAIL_ICON_SIZE_FRAC;
     this.detailIcon
-      .setPosition(detail.centerX, detail.top + detail.height * DETAIL_ICON_Y_FRAC)
+      .setPosition(detail.centerX, detail.top + detail.height * iconYFrac)
       .setDisplaySize(iconSize, iconSize);
 
+    const statY0Frac = DETAIL_STAT_Y0_FRAC + DETAIL_STATS_Y_OFFSET_FRAC;
+    const { width: statBgWidth, height: statBgHeight } = this.detailStatBgDisplaySize(
+      detail.width
+    );
+    this.syncDetailStatBgTextures();
+    this.detailStatBgs.forEach((bg, row) => {
+      bg.setPosition(
+        detail.centerX,
+        detail.top + detail.height * (statY0Frac + row * DETAIL_STAT_ROW_STEP_FRAC)
+      );
+      bg.setDisplaySize(statBgWidth, statBgHeight);
+      bg.setAlpha(1);
+    });
     this.detailStatLines.forEach((line, row) => {
       line.setPosition(
-        detail.left + detail.width * 0.1,
-        detail.top + detail.height * (DETAIL_STAT_Y0_FRAC + row * DETAIL_STAT_ROW_STEP_FRAC)
+        detail.centerX,
+        detail.top + detail.height * (statY0Frac + row * DETAIL_STAT_ROW_STEP_FRAC)
       );
-      line.setWordWrapWidth(detail.width * 0.9);
+      line.setWordWrapWidth(detail.width - padX * 2);
     });
 
     const priceBox = this.detailPriceBoxRect();
@@ -987,11 +961,17 @@ export class ShopPanel {
   }
 
   private layoutCloseButton(): void {
-    const closeY = this.fracY(CLOSE_BTN_CENTER_Y_FRAC);
-    const closeX = this.fracX(CLOSE_BTN_CENTER_X_FRAC);
-    const closeRadius = this.spanW(CLOSE_BTN_RADIUS_ART_PX / SHOP_ART_W);
+    const closeCol = resolveShopModalColRect(11, 1, this.panelW);
+    const headerRow = resolveShopModalRowRect(
+      SHOP_LAYOUT_HEADER_ROW_TOP_FRAC,
+      SHOP_LAYOUT_HEADER_ROW_HEIGHT_FRAC,
+      this.panelH
+    );
+    const closeX = this.panelLeft + closeCol.leftPanelPx + closeCol.widthPanelPx / 2;
+    const closeY = this.panelTop + headerRow.topPanelPx + headerRow.heightPanelPx / 2;
+    const closeRadius = Math.min(closeCol.widthPanelPx, headerRow.heightPanelPx) * 0.42;
     this.closeHit.setPosition(closeX, closeY);
-    this.closeHit.setRadius(closeRadius);
+    this.closeHit.setRadius(Math.max(closeRadius, 12));
   }
 
   /**
@@ -1006,24 +986,28 @@ export class ShopPanel {
     const g = scene.add.graphics();
     const labels: Phaser.GameObjects.Text[] = [];
 
-    const bandY0 = GRID_TOP_FRAC;
-    const bandY1 = GRID_TOP_FRAC + GRID_HEIGHT_FRAC;
-
     g.lineStyle(2, DEBUG_LAYOUT_GRID_COLOR, DEBUG_LAYOUT_GRID_ALPHA);
     g.strokeRect(this.panelLeft, this.panelTop, this.panelW, this.panelH);
 
-    const tabsBand = this.rectFromFrac(CONTENT_LEFT_FRAC, CONTENT_TABS_RIGHT_FRAC, bandY0, bandY1);
-    const gridBand = this.rectFromFrac(
-      GRID_LEFT_FRAC,
-      GRID_LEFT_FRAC + GRID_ART_WIDTH_FRAC,
-      bandY0,
-      bandY1
+    const headerRow = resolveShopModalRowRect(
+      SHOP_LAYOUT_HEADER_ROW_TOP_FRAC,
+      SHOP_LAYOUT_HEADER_ROW_HEIGHT_FRAC,
+      this.panelH
     );
-    const detailBand = this.rectFromFrac(
-      DETAIL_LEFT_FRAC,
-      DETAIL_LEFT_FRAC + DETAIL_ART_WIDTH_FRAC,
-      bandY0,
-      bandY1
+    const closeCol = resolveShopModalColRect(11, 1, this.panelW);
+    g.lineStyle(1, DEBUG_DETAIL_COLOR, DEBUG_LAYOUT_GRID_ALPHA * 0.55);
+    g.strokeRect(
+      this.panelLeft + closeCol.leftPanelPx,
+      this.panelTop + headerRow.topPanelPx,
+      closeCol.widthPanelPx,
+      headerRow.heightPanelPx
+    );
+
+    const tabsBand = this.modalZoneRect(SHOP_LAYOUT_TABS_COL_START, SHOP_LAYOUT_TABS_COL_SPAN);
+    const gridBand = this.modalZoneRect(SHOP_LAYOUT_GRID_COL_START, SHOP_LAYOUT_GRID_COL_SPAN);
+    const detailBand = this.modalZoneRect(
+      SHOP_LAYOUT_DETAIL_COL_START,
+      SHOP_LAYOUT_DETAIL_COL_SPAN
     );
 
     g.lineStyle(2, DEBUG_LAYOUT_GRID_COLOR, DEBUG_LAYOUT_GRID_ALPHA);
@@ -1044,23 +1028,23 @@ export class ShopPanel {
           .setScrollFactor(0)
           .setAlpha(0.9)
       );
-    bandLabel(tabsBand, 'tabs 12.5%');
-    bandLabel(gridBand, 'grid 62.5%');
-    bandLabel(detailBand, 'detail 25%');
+    bandLabel(tabsBand, 'cols 1–2');
+    bandLabel(gridBand, 'cols 3–9');
+    bandLabel(detailBand, 'cols 10–11');
 
     const cellW = gridBand.width / GRID_COLS;
-    const cellH = gridBand.height / GRID_ROWS;
+    const cellH = gridBand.height / this.gridRows;
     g.lineStyle(1, DEBUG_LAYOUT_GRID_COLOR, DEBUG_LAYOUT_GRID_ALPHA * 0.55);
     for (let c = 0; c <= GRID_COLS; c++) {
       const x = gridBand.left + c * cellW;
       g.strokeLineShape(new Phaser.Geom.Line(x, gridBand.top, x, gridBand.top + gridBand.height));
     }
-    for (let r = 0; r <= GRID_ROWS; r++) {
+    for (let r = 0; r <= this.gridRows; r++) {
       const y = gridBand.top + r * cellH;
       g.strokeLineShape(new Phaser.Geom.Line(gridBand.left, y, gridBand.left + gridBand.width, y));
     }
 
-    for (let row = 0; row < GRID_ROWS; row++) {
+    for (let row = 0; row < this.gridRows; row++) {
       for (let col = 0; col < GRID_COLS; col++) {
         const idx = row * GRID_COLS + col;
         labels.push(
@@ -1084,13 +1068,16 @@ export class ShopPanel {
     }
 
     const detail = detailBand;
+    const titleYFrac = DETAIL_TITLE_Y_FRAC + DETAIL_TITLE_Y_OFFSET_FRAC;
+    const iconYFrac = DETAIL_ICON_Y_FRAC + DETAIL_ICON_Y_OFFSET_FRAC;
+    const statY0Frac = DETAIL_STAT_Y0_FRAC + DETAIL_STATS_Y_OFFSET_FRAC;
     const detailRegions: { label: string; y0: number; y1: number }[] = [
-      { label: 'title', y0: 0, y1: DETAIL_TITLE_Y_FRAC * 2 },
-      { label: 'icon', y0: DETAIL_ICON_Y_FRAC - DETAIL_ICON_SIZE_FRAC, y1: DETAIL_ICON_Y_FRAC + DETAIL_ICON_SIZE_FRAC },
+      { label: 'title', y0: 0, y1: titleYFrac * 2 },
+      { label: 'icon', y0: iconYFrac - DETAIL_ICON_SIZE_FRAC, y1: iconYFrac + DETAIL_ICON_SIZE_FRAC },
       {
         label: 'stats',
-        y0: DETAIL_STAT_Y0_FRAC - DETAIL_STAT_ROW_STEP_FRAC * 0.5,
-        y1: DETAIL_STAT_Y0_FRAC + DETAIL_STAT_ROW_STEP_FRAC * 2.5,
+        y0: statY0Frac - DETAIL_STAT_ROW_STEP_FRAC * 0.5,
+        y1: statY0Frac + DETAIL_STAT_ROW_STEP_FRAC * 2.5,
       },
       { label: 'info', y0: DETAIL_INFO_Y_FRAC, y1: DETAIL_INFO_Y_FRAC + DETAIL_INFO_H_FRAC },
       { label: 'cta', y0: DETAIL_CTA_Y_FRAC - 0.07, y1: DETAIL_CTA_Y_FRAC + 0.08 },
@@ -1300,6 +1287,85 @@ export class ShopPanel {
     return this.panelLeft + this.panelW;
   }
 
+  private layoutTier() {
+    return resolveShopLayoutTier(this.viewportW, this.viewportH);
+  }
+
+  /** Panel-local column band in a modal row → screen-space rect. */
+  private modalZoneRect(
+    colStart: number,
+    colSpan: number,
+    rowTopFrac = SHOP_LAYOUT_CONTENT_ROW_TOP_FRAC,
+    rowHeightFrac = SHOP_LAYOUT_CONTENT_ROW_HEIGHT_FRAC
+  ): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const col = resolveShopModalColRect(colStart, colSpan, this.panelW);
+    const row = resolveShopModalRowRect(rowTopFrac, rowHeightFrac, this.panelH);
+    const left = this.panelLeft + col.leftPanelPx;
+    const top = this.panelTop + row.topPanelPx;
+    const width = col.widthPanelPx;
+    const height = row.heightPanelPx;
+    return {
+      left,
+      top,
+      width,
+      height,
+      centerX: left + width / 2,
+      centerY: top + height / 2,
+    };
+  }
+
+  /** Map baked shop-modal art px to screen using panel 11-col / 15–85 row layout. */
+  private mapArtRectToScreen(
+    artX0: number,
+    artY0: number,
+    artX1: number,
+    artY1: number
+  ): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const mapped = mapShopArtRectToPanelLocal(
+      artX0,
+      artY0,
+      artX1,
+      artY1,
+      this.panelW,
+      this.panelH
+    );
+    return {
+      left: this.panelLeft + mapped.left,
+      top: this.panelTop + mapped.top,
+      width: mapped.width,
+      height: mapped.height,
+      centerX: this.panelLeft + mapped.centerX,
+      centerY: this.panelTop + mapped.centerY,
+    };
+  }
+
+  private artSpanOnPanelW(artPx: number): number {
+    const contentArt = resolveShopModalColRect(1, SHOP_MODAL_LAYOUT_COLS, SHOP_LAYOUT_ART_W);
+    const contentPanel = resolveShopModalColRect(1, SHOP_MODAL_LAYOUT_COLS, this.panelW);
+    return artPx * (contentPanel.widthPanelPx / contentArt.widthPx);
+  }
+
+  private artSpanOnPanelH(artPx: number): number {
+    const bandH = categoryTabListModalAvailableHeightPx(this.panelH);
+    const bandArtH =
+      resolveShopContentRowRect(SHOP_LAYOUT_ART_H).heightPanelPx || SHOP_LAYOUT_ART_H;
+    return bandH * (artPx / bandArtH);
+  }
+
   private syncDebugGrid(): void {
     this.syncCategoryTabLabels();
     if (!isShopGridDebug()) {
@@ -1372,11 +1438,6 @@ export class ShopPanel {
     return Math.abs(this.fracY(fracH) - this.fracY(0));
   }
 
-  /** Screen span for a horizontal distance in shop art pixels (object-cover aware). */
-  private artSpanW(artPx: number): number {
-    return this.spanW(artPx / SHOP_ART_W);
-  }
-
   /** Screen span for a vertical distance in shop art pixels (object-cover aware). */
   private artSpanH(artPx: number): number {
     return this.spanH(artPx / SHOP_ART_H);
@@ -1397,12 +1458,24 @@ export class ShopPanel {
     centerX: number;
     centerY: number;
   } {
-    return this.rectFromFrac(
-      DETAIL_LEFT_FRAC,
-      DETAIL_LEFT_FRAC + DETAIL_ART_WIDTH_FRAC,
-      DETAIL_TOP_FRAC,
-      DETAIL_TOP_FRAC + DETAIL_HEIGHT_FRAC
+    const col = resolveShopDetailContentColRect(this.panelW);
+    const row = resolveShopModalRowRect(
+      SHOP_LAYOUT_CONTENT_ROW_TOP_FRAC,
+      SHOP_LAYOUT_CONTENT_ROW_HEIGHT_FRAC,
+      this.panelH
     );
+    const left = this.panelLeft + col.leftPanelPx;
+    const top = this.panelTop + row.topPanelPx;
+    const width = col.widthPanelPx;
+    const height = row.heightPanelPx;
+    return {
+      left,
+      top,
+      width,
+      height,
+      centerX: left + width / 2,
+      centerY: top + height / 2,
+    };
   }
 
   private detailPriceBoxRect(): {
@@ -1411,103 +1484,54 @@ export class ShopPanel {
     width: number;
     height: number;
   } {
-    const coinBox = this.rectFromFrac(
-      DETAIL_COIN_BOX_X0_PX / SHOP_ART_W,
-      DETAIL_COIN_BOX_X1_PX / SHOP_ART_W,
-      DETAIL_COIN_BOX_Y0_PX / SHOP_ART_H,
-      DETAIL_COIN_BOX_Y1_PX / SHOP_ART_H
-    );
-    const priceBoxBand = this.rectFromFrac(
-      DETAIL_COIN_BOX_X0_PX / SHOP_ART_W,
-      DETAIL_COIN_BOX_X1_PX / SHOP_ART_W,
-      DETAIL_PRICE_BOX_Y0_PX / SHOP_ART_H,
-      DETAIL_PRICE_BOX_Y1_PX / SHOP_ART_H
+    const detail = this.detailBandRect();
+    const priceBoxBand = this.mapArtRectToScreen(
+      DETAIL_COIN_BOX_X0_PX,
+      DETAIL_PRICE_AMOUNT_Y0_PX,
+      DETAIL_COIN_BOX_X1_PX,
+      DETAIL_PRICE_AMOUNT_Y1_PX
     );
     return {
-      centerX: coinBox.centerX + this.artSpanW(DETAIL_PRICE_BOX_OFFSET_X_ART_PX),
-      centerY: priceBoxBand.centerY + this.artSpanH(DETAIL_PRICE_BOX_OFFSET_Y_ART_PX),
-      width: this.artSpanW(DETAIL_PRICE_BOX_DISPLAY_W_PX),
-      height: priceBoxBand.height + this.artSpanH(DETAIL_PRICE_BOX_EXTRA_H_PX),
+      centerX: detail.centerX,
+      centerY:
+        priceBoxBand.centerY +
+        this.artSpanOnPanelH(DETAIL_PRICE_BOX_OFFSET_Y_ART_PX) +
+        detail.height * DETAIL_PRICE_Y_OFFSET_FRAC,
+      width: detail.width,
+      height:
+        (priceBoxBand.height + this.artSpanOnPanelH(DETAIL_PRICE_BOX_EXTRA_H_PX)) *
+        DETAIL_PRICE_BOX_HEIGHT_SCALE,
     };
-  }
-
-  private rectFromFrac(
-    x0: number,
-    x1: number,
-    y0: number,
-    y1: number
-  ): { left: number; top: number; width: number; height: number; centerX: number; centerY: number } {
-    const left = this.fracX(x0);
-    const top = this.fracY(y0);
-    const width = this.fracX(x1) - left;
-    const height = this.fracY(y1) - top;
-    return { left, top, width, height, centerX: left + width / 2, centerY: top + height / 2 };
   }
 
   private texOrFallback(key: string, fallback: string): string {
     return this.scene.textures.exists(key) ? key : fallback;
   }
 
-  private currencySlotRect(
-    slot: { x0: number; x1: number; y0: number; y1: number }
-  ): { left: number; top: number; width: number; height: number; centerX: number; centerY: number } {
-    return this.rectFromFrac(slot.x0, slot.x1, slot.y0, slot.y1);
+  /** Display size for `ui/text-background.png` — preserve texture aspect (not row-step squash). */
+  private detailStatBgDisplaySize(detailBandWidth: number): { width: number; height: number } {
+    const width = detailBandWidth * DETAIL_STAT_BG_WIDTH_FRAC;
+    const tex = this.scene.textures.get(UI_TEXT_BACKGROUND_TEXTURE_KEY);
+    const frame = tex?.get();
+    const srcW = frame?.width > 0 ? frame.width : 194;
+    const srcH = frame?.height > 0 ? frame.height : 21;
+    return { width, height: width * (srcH / srcW) };
   }
 
-  /** Center icon + value as a group inside a currency slot (icon then 4px gap then text). */
-  private layoutCurrencySlot(
-    slotIndex: number,
-    slotRect: { centerX: number; centerY: number; height: number },
-    valueText: Phaser.GameObjects.Text
-  ): void {
-    const icon = this.currencyIcons[slotIndex];
-    if (!icon) return;
-    const iconSize = Math.min(slotRect.height * 0.72, 28);
-    icon.setDisplaySize(iconSize, iconSize);
-    const textWidth = valueText.width;
-    const groupW = iconSize + CURRENCY_ICON_TEXT_GAP_PX + textWidth;
-    const groupLeft = slotRect.centerX - groupW / 2;
-    icon.setPosition(groupLeft + iconSize * 0.5, slotRect.centerY);
-    valueText.setPosition(groupLeft + iconSize + CURRENCY_ICON_TEXT_GAP_PX, slotRect.centerY);
+  /** Ensure stat rows use the text-background texture (not shop-modal fallback from ctor). */
+  private syncDetailStatBgTextures(): void {
+    if (!this.scene.textures.exists(UI_TEXT_BACKGROUND_TEXTURE_KEY)) return;
+    for (const bg of this.detailStatBgs) {
+      if (bg.texture.key !== UI_TEXT_BACKGROUND_TEXTURE_KEY) {
+        bg.setTexture(UI_TEXT_BACKGROUND_TEXTURE_KEY);
+      }
+    }
   }
 
-  private buildCurrencyBar(scene: Phaser.Scene): void {
-    const coinTex = this.texOrFallback(COIN_TEXTURE_KEY, 'seed');
-    const energyTex = this.texOrFallback(ENERGY_TEXTURE_KEY, coinTex);
-    const gemTex = this.texOrFallback(GEM_TEXTURE_KEY, coinTex);
-    const textures = [coinTex, energyTex, gemTex];
-    const boxTex = this.texOrFallback(UI_BOX_TEXTURE_KEY, SHOP_BG_KEY);
-
-    const valueTexts: Phaser.GameObjects.Text[] = [];
-    CURRENCY_SLOTS.forEach((slot, i) => {
-      const r = this.currencySlotRect(slot);
-
-      const box = scene.add
-        .image(r.centerX, r.centerY, boxTex)
-        .setOrigin(0.5, 0.5)
-        .setScrollFactor(0)
-        .setDisplaySize(r.width, r.height);
-      this.currencyBoxBackgrounds.push(box);
-
-      const iconSize = Math.min(r.height * 0.72, 28);
-      const icon = scene.add
-        .image(r.centerX, r.centerY, textures[i])
-        .setScrollFactor(0)
-        .setDisplaySize(iconSize, iconSize)
-        .setOrigin(0.5, 0.5);
-      this.currencyIcons.push(icon);
-
-      const value = scene.add
-        .text(r.centerX, r.centerY, '0', {
-          ...warehouseTitleLikeTextStyle('light', { fontSize: '15px' }),
-        })
-        .setOrigin(0, 0.5)
-        .setScrollFactor(0);
-      valueTexts.push(value);
-      this.layoutCurrencySlot(i, r, value);
-    });
-
-    [this.coinValueText, this.energyValueText, this.gemValueText] = valueTexts;
+  private bringDetailStatTextAboveBackgrounds(): void {
+    for (const line of this.detailStatLines) {
+      this.container.bringToTop(line);
+    }
   }
 
   private buildCategoryTabs(scene: Phaser.Scene): void {
@@ -1516,21 +1540,16 @@ export class ShopPanel {
       const cx = this.fracX(CATEGORY_TAB_CENTER_X_FRAC);
       const w = this.spanW(CATEGORY_TAB_HIT_W_FRAC);
       const h = this.spanH(CATEGORY_TAB_HIT_H_FRAC);
-      const tabTextureKey = this.texOrFallback(SHOP_CATEGORY_TAB_TEXTURE_KEYS[cat.id], SHOP_BG_KEY);
+      const tabTextureKey = this.texOrFallback(
+        SHOP_CATEGORY_TAB_TEXTURES[cat.id].inactive,
+        SHOP_BG_KEY
+      );
 
       const bg = scene.add
         .image(cx, cy, tabTextureKey)
         .setScrollFactor(0)
         .setDisplaySize(w, h)
         .setOrigin(0.5, 0.5);
-
-      const checkTex = this.texOrFallback(UI_CHECK_TEXTURE_KEY, SHOP_BG_KEY);
-      const check = scene.add
-        .image(cx + w / 2 + CATEGORY_TAB_CHECK_OFFSET_X_PX, cy + h / 2, checkTex)
-        .setScrollFactor(0)
-        .setOrigin(1, 1)
-        .setDisplaySize(Math.min(w, h) * CATEGORY_TAB_CHECK_SIZE_FRAC, Math.min(w, h) * CATEGORY_TAB_CHECK_SIZE_FRAC)
-        .setVisible(false);
 
       const glow = scene.add
         .rectangle(cx, cy, w, h, 0xffd700, 0.35)
@@ -1556,7 +1575,7 @@ export class ShopPanel {
 
       hit.on('pointerdown', () => this.selectCategory(cat.id));
 
-      this.categoryTabs.push({ id: cat.id, locked: cat.locked, bg, check, hit, glow, label });
+      this.categoryTabs.push({ id: cat.id, locked: cat.locked, bg, hit, glow, label });
     });
     this.layoutCategoryTabs();
   }
@@ -1570,21 +1589,38 @@ export class ShopPanel {
   }
 
   private layoutCategoryTabs(): void {
+    const tier = this.layoutTier();
+    const tabsZone = this.modalZoneRect(SHOP_LAYOUT_TABS_COL_START, SHOP_LAYOUT_TABS_COL_SPAN);
+    const padX = this.artSpanOnPanelW(CATEGORY_TAB_ZONE_PAD_X_PX);
+    const gapY = this.artSpanOnPanelH(CATEGORY_TAB_ZONE_GAP_Y_PX);
+    this.tabListLeft = tabsZone.left;
+    this.tabListTop = tabsZone.top;
+    this.tabListViewportW = tabsZone.width;
+    this.tabListModalAvailableH = tabsZone.height;
+    const { contentH, viewportH } = categoryTabListHeightsFromModalAvailable(
+      tabsZone.height,
+      tier.categoryTabListMinHeightPx
+    );
+    this.tabListContentH = contentH;
+    this.tabListViewportH = viewportH;
+    const { tabW, tabH, scaledStep } = computeCategoryTabDimensionsFromZone(
+      tabsZone.width,
+      contentH,
+      SHOP_CATEGORY_TAB_COUNT,
+      padX,
+      gapY
+    );
+    this.tabItemScale = 1;
+    const cx = tabsZone.left + tabsZone.width / 2;
+
     this.categoryTabs.forEach((tab, i) => {
-      const cy = this.fracY(CATEGORY_TAB_CENTERS_Y_FRAC[i] ?? CATEGORY_TAB_CENTERS_Y_FRAC[0]);
-      const cx = this.fracX(CATEGORY_TAB_CENTER_X_FRAC);
-      const w = this.spanW(CATEGORY_TAB_HIT_W_FRAC);
-      const h = this.spanH(CATEGORY_TAB_HIT_H_FRAC);
-      const checkSide = Math.min(w, h) * CATEGORY_TAB_CHECK_SIZE_FRAC;
-      tab.bg.setPosition(cx, cy).setDisplaySize(w, h);
-      tab.check
-        .setPosition(cx + w / 2 + this.artSpanW(CATEGORY_TAB_CHECK_OFFSET_X_PX), cy + h / 2)
-        .setDisplaySize(checkSide, checkSide);
-      tab.glow.setPosition(cx, cy).setSize(w, h);
-      tab.hit.setPosition(cx, cy).setSize(Math.max(w, 8), Math.max(h, 8));
+      const cy = tabsZone.top + tabH / 2 + i * scaledStep;
+      tab.bg.setPosition(cx, cy).setDisplaySize(tabW, tabH);
+      tab.glow.setPosition(cx, cy).setSize(tabW, tabH);
+      tab.hit.setPosition(cx, cy).setSize(Math.max(tabW, 8), Math.max(tabH, 8));
       tab.label?.setPosition(cx, cy);
     });
-    this.syncCategoryTabCheck();
+    this.syncCategoryTabTextures();
   }
 
   private buildProductGrid(scene: Phaser.Scene): void {
@@ -1636,23 +1672,67 @@ export class ShopPanel {
     return this.gridContentPadTop + row * this.pitchCellH + this.cellH / 2;
   }
 
-  /** Orange footer badge on `ui_shop_item`, mapped from card art px to scroll content space. */
-  private gridCardCheckRect(
+  /** Coin + price row band on grid card (80% width, centered, 24% from bottom). */
+  private gridCardFooterRect(
     centerX: number,
     centerY: number
   ): { centerX: number; centerY: number; width: number; height: number } {
-    const scaleX = this.cardDisplayW / SHOP_ITEM_ART_W;
-    const scaleY = this.cardDisplayH / SHOP_ITEM_ART_H;
-    const width = (SHOP_ITEM_CHECK_X1_PX - SHOP_ITEM_CHECK_X0_PX) * scaleX;
-    const height = (SHOP_ITEM_CHECK_Y1_PX - SHOP_ITEM_CHECK_Y0_PX) * scaleY;
-    const artCx = (SHOP_ITEM_CHECK_X0_PX + SHOP_ITEM_CHECK_X1_PX) / 2;
-    const artCy = (SHOP_ITEM_CHECK_Y0_PX + SHOP_ITEM_CHECK_Y1_PX) / 2;
     return {
-      centerX: centerX - this.cardDisplayW / 2 + artCx * scaleX,
-      centerY: centerY - this.cardDisplayH / 2 + artCy * scaleY,
-      width,
-      height,
+      centerX,
+      centerY:
+        centerY + this.cardDisplayH / 2 - this.cardDisplayH * GRID_CARD_FOOTER_BOTTOM_FRAC,
+      width: this.cardDisplayW * GRID_CARD_FOOTER_W_FRAC,
+      height: this.cardDisplayH * GRID_CARD_FOOTER_H_FRAC,
     };
+  }
+
+  /** Selected-item check at 15% from top and 17% from right of card. */
+  private gridCardTopCheckLayout(
+    centerX: number,
+    centerY: number
+  ): { centerX: number; centerY: number; size: number } {
+    const footer = this.gridCardFooterRect(centerX, centerY);
+    const size = Math.min(footer.width, footer.height) * GRID_CARD_CHECK_SIZE_FRAC;
+    return {
+      centerX:
+        centerX + this.cardDisplayW / 2 - this.cardDisplayW * GRID_CARD_CHECK_RIGHT_FRAC,
+      centerY: centerY - this.cardDisplayH / 2 + this.cardDisplayH * GRID_CARD_CHECK_TOP_FRAC,
+      size,
+    };
+  }
+
+  private addGridCardPriceRow(centerX: number, centerY: number, unitPrice: number): void {
+    const footer = this.gridCardFooterRect(centerX, centerY);
+    const coinTex = this.texOrFallback(COIN_TEXTURE_KEY, 'seed');
+    const coinSize =
+      Math.min(footer.height * 0.75, footer.width * 0.38) * GRID_CARD_FOOTER_COIN_SCALE;
+    const priceFontPx = Math.round(
+      GRID_CARD_PRICE_FONT_SIZE_PX * GRID_CARD_FOOTER_PRICE_FONT_SCALE
+    );
+    const amount = this.scene.add
+      .text(0, 0, String(unitPrice), {
+        ...warehouseTitleLikeTextStyle('dark', {
+          fontSize: `${priceFontPx}px`,
+        }),
+        align: 'left',
+      })
+      .setOrigin(0, 0.5);
+    applyWarehouseTitleLikeSizing(
+      amount,
+      'dark',
+      Math.max(8, this.scaleFont(priceFontPx))
+    );
+    const gap = footer.width * GRID_CARD_PRICE_COIN_AMOUNT_GAP_FRAC;
+    const groupW = coinSize + gap + amount.width;
+    const groupLeft = footer.centerX - groupW / 2;
+    const coin = this.scene.add
+      .image(groupLeft + coinSize * 0.5, footer.centerY, coinTex)
+      .setDisplaySize(coinSize, coinSize)
+      .setOrigin(0.5, 0.5);
+    amount.setPosition(groupLeft + coinSize + gap, footer.centerY);
+    coin.disableInteractive();
+    amount.disableInteractive();
+    this.listContainer.add([coin, amount]);
   }
 
   private rebuildItemsBackground(totalRows: number): void {
@@ -1670,7 +1750,7 @@ export class ShopPanel {
   }
 
   private getScrollContentHeight(slotCount: number): number {
-    const rows = Math.max(GRID_ROWS, Math.ceil(slotCount / GRID_COLS) || GRID_ROWS);
+    const rows = Math.max(this.gridRows, Math.ceil(slotCount / GRID_COLS) || this.gridRows);
     return this.gridContentPadTop + rows * this.pitchCellH;
   }
 
@@ -1694,7 +1774,7 @@ export class ShopPanel {
   }
 
   private syncPageFromScroll(): void {
-    const pageHeight = GRID_ROWS * this.pitchCellH;
+    const pageHeight = this.gridRows * this.pitchCellH;
     const maxPage = this.pageCount() - 1;
     if (pageHeight <= 0 || maxPage <= 0) {
       this.currentPage = 0;
@@ -1709,7 +1789,7 @@ export class ShopPanel {
   }
 
   private syncScrollFromPage(): void {
-    const pageHeight = GRID_ROWS * this.pitchCellH;
+    const pageHeight = this.gridRows * this.pitchCellH;
     const maxPage = this.pageCount() - 1;
     const target =
       this.currentPage >= maxPage
@@ -1746,12 +1826,22 @@ export class ShopPanel {
       .setOrigin(0.5, 0.5)
       .setScrollFactor(0);
 
+    this.detailStatBgs = [0, 1, 2].map(() =>
+      this.scene.add
+        .image(0, 0, UI_TEXT_BACKGROUND_TEXTURE_KEY)
+        .setOrigin(0.5, 0.5)
+        .setScrollFactor(0)
+        .setAlpha(1)
+        .setVisible(false)
+    );
+
     this.detailStatLines = [0, 1, 2].map(() =>
       this.scene.add
         .text(0, 0, '', {
           ...warehouseTitleLikeTextStyle('dark', { fontSize: '12px' }),
+          align: 'center',
         })
-        .setOrigin(0, 0.5)
+        .setOrigin(0.5, 0.5)
         .setScrollFactor(0)
     );
 
@@ -1759,7 +1849,8 @@ export class ShopPanel {
     this.detailPriceBox = this.scene.add
       .image(0, 0, boxTex)
       .setOrigin(0.5, 0.5)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setVisible(false);
 
     const coinTex = this.texOrFallback(COIN_TEXTURE_KEY, 'seed');
     this.detailPriceCoin = this.scene.add
@@ -1781,8 +1872,8 @@ export class ShopPanel {
     this.detailBuyQtyBg = this.scene.add
       .image(0, 0, qtyRowTex)
       .setOrigin(0.5, 0.5)
-      .setScrollFactor(0);
-    this.layoutDetailBuyQtyRow();
+      .setScrollFactor(0)
+      .setVisible(false);
 
     const qtyField = this.buyQtyFieldHitRectFromArt(
       DETAIL_BUY_QTY_FIELD_X0_PX,
@@ -1868,21 +1959,18 @@ export class ShopPanel {
     } else if (!this.selectedId || !this.filteredIds.includes(this.selectedId)) {
       this.selectedId = this.filteredIds[0];
     }
-    this.syncCategoryGlow();
+    this.syncCategoryTabTextures();
     this.refreshAll();
   }
 
-  private syncCategoryGlow(): void {
+  /** Swap inactive/active store tab art for the selected category. */
+  private syncCategoryTabTextures(): void {
     for (const tab of this.categoryTabs) {
       tab.glow.setVisible(false);
-    }
-    this.syncCategoryTabCheck();
-  }
-
-  /** Show check mark on the active category tab only (above bg, below hit). */
-  private syncCategoryTabCheck(): void {
-    for (const tab of this.categoryTabs) {
-      tab.check.setVisible(tab.id === this.activeCategory);
+      const pair = SHOP_CATEGORY_TAB_TEXTURES[tab.id];
+      const active = tab.id === this.activeCategory;
+      const key = this.texOrFallback(active ? pair.active : pair.inactive, SHOP_BG_KEY);
+      tab.bg.setTexture(key);
     }
   }
 
@@ -1906,7 +1994,7 @@ export class ShopPanel {
   }
 
   private pageCount(): number {
-    return Math.max(1, Math.ceil(this.effectiveFilteredIds().length / GRID_PAGE_SIZE));
+    return Math.max(1, Math.ceil(this.effectiveFilteredIds().length / this.gridPageSize));
   }
 
   private setPage(page: number): void {
@@ -1917,29 +2005,22 @@ export class ShopPanel {
     this.refreshPagination();
   }
 
-  private updateCurrencyBar(): void {
-    const valueTexts = [this.coinValueText, this.energyValueText, this.gemValueText];
-    const values = [this.hud.coins, this.hud.energy, this.hud.gems];
-    valueTexts.forEach((text, i) => {
-      text.setText(String(values[i]));
-      const r = this.currencySlotRect(CURRENCY_SLOTS[i]!);
-      this.layoutCurrencySlot(i, r, text);
-    });
-  }
-
   private refreshGrid(): void {
     this.listContainer.removeAll(true);
     this.gridCellHits = [];
 
     const ids = this.effectiveFilteredIds();
     this.lastRenderedSlotCount = ids.length;
-    const totalRows = Math.max(GRID_ROWS, Math.ceil(ids.length / GRID_COLS) || GRID_ROWS);
+    const totalRows = Math.max(this.gridRows, Math.ceil(ids.length / GRID_COLS) || this.gridRows);
     this.rebuildItemsBackground(totalRows);
     this.setScrollOffset(this.scrollOffset);
 
-    if (!this.economy) return;
+    const economy = this.economy;
+    if (!economy) return;
 
-    const iconSize = Math.min(this.cellW * GRID_HIT_W_FRAC, this.cellH * GRID_HIT_H_FRAC) * GRID_ICON_SIZE_FRAC;
+    const iconHit = Math.min(this.cellW * GRID_HIT_W_FRAC, this.cellH * GRID_HIT_H_FRAC);
+    const iconW = iconHit * GRID_ICON_SIZE_W_FRAC;
+    const iconH = iconHit * GRID_ICON_SIZE_H_FRAC;
 
     ids.forEach((itemId, i) => {
       const col = i % GRID_COLS;
@@ -1951,16 +2032,17 @@ export class ShopPanel {
       const tex = this.texOrFallback(iconKey, 'seed');
       const icon = this.scene.add
         .image(centerX, centerY - this.cellH * 0.12, tex)
-        .setDisplaySize(iconSize, iconSize);
+        .setDisplaySize(iconW, iconH);
+
+      const unit = economy.getShopPrice(itemId);
+      this.addGridCardPriceRow(centerX, centerY, unit);
 
       if (itemId === this.selectedId) {
-        const checkRect = this.gridCardCheckRect(centerX, centerY);
-        const checkSide =
-          Math.min(checkRect.width, checkRect.height) * GRID_CARD_CHECK_SIZE_FRAC;
+        const checkLayout = this.gridCardTopCheckLayout(centerX, centerY);
         const checkTex = this.texOrFallback(UI_CHECK_TEXTURE_KEY, SHOP_BG_KEY);
         const check = this.scene.add
-          .image(checkRect.centerX, checkRect.centerY, checkTex)
-          .setDisplaySize(checkSide, checkSide)
+          .image(checkLayout.centerX, checkLayout.centerY, checkTex)
+          .setDisplaySize(checkLayout.size, checkLayout.size)
           .setOrigin(0.5, 0.5);
         check.disableInteractive();
         this.listContainer.add(check);
@@ -1993,6 +2075,7 @@ export class ShopPanel {
     if (!this.selectedId || !this.economy || !this.inventory) {
       this.detailTitle.setText('');
       this.detailIcon.setVisible(false);
+      this.detailStatBgs.forEach((bg) => bg.setVisible(false));
       this.detailStatLines.forEach((t) => t.setText(''));
       this.detailPriceBox.setVisible(false);
       this.detailPriceCoin.setVisible(false);
@@ -2013,6 +2096,8 @@ export class ShopPanel {
     this.detailIcon.setVisible(true);
 
     const energy = FOOD_ENERGY_RECOVERY[itemId];
+    this.syncDetailStatBgTextures();
+    this.detailStatBgs.forEach((bg) => bg.setVisible(true).setAlpha(1));
     this.detailStatLines[0].setText(`Giá: ${unit} xu`);
     this.detailStatLines[1].setText(
       energy !== undefined ? `Hồi năng lượng: +${energy}` : 'Hạt giống / nguyên liệu'
@@ -2021,10 +2106,10 @@ export class ShopPanel {
       this.economy.canAfford(unit) ? 'Đủ xu để mua' : `Thiếu ${unit - this.economy.getCoins()} xu`
     );
 
-    this.detailPriceBox.setVisible(true);
     this.detailPriceCoin.setVisible(true);
     this.detailPriceAmount.setText(String(unit));
     this.layoutDetailPanel();
+    this.bringDetailStatTextAboveBackgrounds();
     this.refreshBuyQuantity();
   }
 
@@ -2284,17 +2369,12 @@ export class ShopPanel {
     this.scene.children.bringToTop(this.container);
   }
 
-  /** Full − / pill / + row (`ui_plus_devide` spans shop-modal art px). */
+  /** Qty row layout anchor only — `ui_plus_devide` bg is hidden; hits/text use art rects. */
   private layoutDetailBuyQtyRow(): void {
-    if (!this.detailBuyQtyBg) return;
-    const row = this.buyQtyDisplayRowRect();
-    const tex = this.texOrFallback(UI_PLUS_DEVIDE_TEXTURE_KEY, SHOP_BG_KEY);
-    this.detailBuyQtyBg.setTexture(tex);
-    this.detailBuyQtyBg.setPosition(row.centerX, row.centerY);
-    this.detailBuyQtyBg.setDisplaySize(row.width, row.height);
+    // Background sprite intentionally not shown.
   }
 
-  /** Baked − / pill / + band on `ui/shop-modal.png` (1536×1024 art px) — hit/text mapping. */
+  /** − / pill / + row: full {@link detailBandRect} width; vertical position from baked art. */
   private buyQtyLayoutRowRect(): {
     left: number;
     top: number;
@@ -2303,20 +2383,27 @@ export class ShopPanel {
     centerX: number;
     centerY: number;
   } {
-    const rect = this.rectFromFrac(
-      DETAIL_BUY_QTY_MINUS_X0_PX / SHOP_ART_W,
-      DETAIL_BUY_QTY_PLUS_X1_PX / SHOP_ART_W,
-      DETAIL_BUY_QTY_ROW_Y0_PX / SHOP_ART_H,
-      DETAIL_BUY_QTY_ROW_Y1_PX / SHOP_ART_H
+    const detail = this.detailBandRect();
+    const artRow = this.mapArtRectToScreen(
+      DETAIL_BUY_QTY_MINUS_X0_PX,
+      DETAIL_BUY_QTY_ROW_Y0_PX,
+      DETAIL_BUY_QTY_PLUS_X1_PX,
+      DETAIL_BUY_QTY_ROW_Y1_PX
     );
+    const offsetY = detail.height * DETAIL_QTY_Y_OFFSET_FRAC;
+    const height = artRow.height * DETAIL_BUY_QTY_ROW_HEIGHT_SCALE;
+    const centerY = artRow.centerY + offsetY;
     return {
-      ...rect,
-      left: rect.left + this.artSpanW(DETAIL_BUY_QTY_OFFSET_X_ART_PX),
-      centerX: rect.centerX + this.artSpanW(DETAIL_BUY_QTY_OFFSET_X_ART_PX),
+      left: detail.left,
+      top: centerY - height / 2,
+      width: detail.width,
+      height,
+      centerX: detail.centerX,
+      centerY,
     };
   }
 
-  /** Display size for `ui_plus_devide` (layout band + BG_EXTRA, center-anchored). */
+  /** Display size for `ui_plus_devide` (full detail band width; extra height from art). */
   private buyQtyDisplayRowRect(): {
     left: number;
     top: number;
@@ -2326,12 +2413,11 @@ export class ShopPanel {
     centerY: number;
   } {
     const base = this.buyQtyLayoutRowRect();
-    const width = base.width + this.artSpanW(DETAIL_BUY_QTY_BG_EXTRA_W_PX);
-    const height = base.height + this.artSpanH(DETAIL_BUY_QTY_BG_EXTRA_H_PX);
+    const height = base.height + this.artSpanOnPanelH(DETAIL_BUY_QTY_BG_EXTRA_H_PX);
     return {
-      left: base.centerX - width / 2,
+      left: base.left,
       top: base.centerY - height / 2,
-      width,
+      width: base.width,
       height,
       centerX: base.centerX,
       centerY: base.centerY,
@@ -2392,8 +2478,8 @@ export class ShopPanel {
     centerY: number;
   } {
     const base = this.buyQtySubRectFromArt(x0Px, x1Px, y0Px, y1Px);
-    const width = base.width + this.artSpanW(DETAIL_BUY_QTY_BTN_EXTRA_W_PX);
-    const height = base.height + this.artSpanH(DETAIL_BUY_QTY_BTN_EXTRA_H_PX);
+    const width = base.width + this.artSpanOnPanelW(DETAIL_BUY_QTY_BTN_EXTRA_W_PX);
+    const height = base.height + this.artSpanOnPanelH(DETAIL_BUY_QTY_BTN_EXTRA_H_PX);
     return {
       left: base.centerX - width / 2,
       top: base.centerY - height / 2,
@@ -2419,8 +2505,8 @@ export class ShopPanel {
     centerY: number;
   } {
     const base = this.buyQtySubRectFromArt(x0Px, x1Px, y0Px, y1Px);
-    const width = base.width + this.artSpanW(DETAIL_BUY_QTY_FIELD_EXTRA_W_PX);
-    const height = base.height + this.artSpanH(DETAIL_BUY_QTY_FIELD_EXTRA_H_PX);
+    const width = base.width + this.artSpanOnPanelW(DETAIL_BUY_QTY_FIELD_EXTRA_W_PX);
+    const height = base.height + this.artSpanOnPanelH(DETAIL_BUY_QTY_FIELD_EXTRA_H_PX);
     return {
       left: base.centerX - width / 2,
       top: base.centerY - height / 2,
@@ -2465,16 +2551,26 @@ export class ShopPanel {
     centerX: number;
     centerY: number;
   } {
-    const rect = this.rectFromFrac(
-      DETAIL_BUY_X0_PX / SHOP_ART_W,
-      DETAIL_BUY_X1_PX / SHOP_ART_W,
-      DETAIL_BUY_Y0_PX / SHOP_ART_H,
-      DETAIL_BUY_Y1_PX / SHOP_ART_H
+    const detail = this.detailBandRect();
+    const rect = this.mapArtRectToScreen(
+      DETAIL_BUY_X0_PX,
+      DETAIL_BUY_Y0_PX,
+      DETAIL_BUY_X1_PX,
+      DETAIL_BUY_Y1_PX
     );
+    const offsetY =
+      this.artSpanOnPanelH(DETAIL_BUY_OFFSET_Y_ART_PX) + detail.height * DETAIL_BUY_Y_OFFSET_FRAC;
+    const contentRow = resolveShopContentRowRect(this.panelH);
+    const maxBottom = this.panelTop + contentRow.topPanelPx + contentRow.heightPanelPx;
+    const height = rect.height * DETAIL_BUY_HEIGHT_SCALE;
+    const top = Math.min(rect.top + offsetY, maxBottom - height);
     return {
-      ...rect,
-      top: rect.top + this.artSpanH(DETAIL_BUY_OFFSET_Y_ART_PX),
-      centerY: rect.centerY + this.artSpanH(DETAIL_BUY_OFFSET_Y_ART_PX),
+      left: detail.left,
+      top,
+      width: detail.width,
+      height,
+      centerX: detail.centerX,
+      centerY: top + height / 2,
     };
   }
 
@@ -2673,7 +2769,6 @@ export class ShopPanel {
       return;
     }
     this.detailBuyQtyText?.setVisible(true);
-    this.detailBuyQtyBg?.setVisible(true);
     this.setBuyQtyControlsEnabled(true);
     this.setBuyQuantity(this.buyQuantity);
   }
@@ -2691,7 +2786,7 @@ export class ShopPanel {
     const priceBoxCenterY = this.detailPriceBox.y;
     const priceBoxW = this.detailPriceBox.displayWidth;
     const priceBoxH = this.detailPriceBox.displayHeight;
-    const coinIconSize = Math.min(priceBoxH * 0.75, this.artSpanH(DETAIL_PRICE_COIN_MAX_SIZE_PX));
+    const coinIconSize = Math.min(priceBoxH * 0.75, this.artSpanOnPanelH(DETAIL_PRICE_COIN_MAX_SIZE_PX));
     this.detailPriceCoin.setDisplaySize(coinIconSize, coinIconSize);
     applyWarehouseTitleLikeSizing(
       this.detailPriceAmount,
@@ -2720,7 +2815,6 @@ export class ShopPanel {
 
   private refreshAll(): void {
     this.layoutShopPanel();
-    this.updateCurrencyBar();
     this.refreshGrid();
     this.refreshDetail();
     this.refreshPagination();
@@ -2731,19 +2825,12 @@ export class ShopPanel {
     this.onBuy = cb;
   }
 
-  show(economy: EconomySystem, inventory: InventorySystem, hud?: HUDResources): void {
+  show(economy: EconomySystem, inventory: InventorySystem, _hud?: HUDResources): void {
     this.economy = economy;
     this.inventory = inventory;
-    if (hud) this.hud = { ...hud };
-    else this.hud = { coins: economy.getCoins(), gems: 0, energy: 0 };
 
     this.toastText.setVisible(false);
-    if (this.filteredIds.length === 0) {
-      this.selectCategory('seeds');
-    } else {
-      this.syncCategoryGlow();
-      this.refreshAll();
-    }
+    this.selectCategory('all');
 
     this.syncDebugGrid();
     this.bringDebugGridToTop();
@@ -2781,7 +2868,6 @@ export class ShopPanel {
     }
     this.economy.spend(total);
     this.inventory.add(itemId, qty);
-    this.hud.coins = this.economy.getCoins();
     const result: ShopBuyResult = {
       success: true,
       message: `Đã mua ${qty} với ${total} xu`,
@@ -2824,6 +2910,8 @@ export class ShopPanel {
   /** Dev/e2e: panel fit + grid metrics in screen space. */
   getShopLayoutMetrics(): ShopLayoutMetrics {
     const grid = this.getGridLayoutMetrics();
+    const contentCol = resolveShopModalColRect(1, SHOP_MODAL_LAYOUT_COLS, this.panelW);
+    const contentRow = resolveShopContentRowRect(this.panelH);
     return {
       viewportW: this.viewportW,
       viewportH: this.viewportH,
@@ -2833,47 +2921,86 @@ export class ShopPanel {
       panelAspect: this.panelW / this.panelH,
       panelRight: this.panelLeft + this.panelW,
       panelBottom: this.panelTop + this.panelH,
+      bgTargetLeft: this.panelLeft,
+      bgTargetTop: this.panelTop,
+      bgTargetW: this.panelW,
+      bgTargetH: this.panelH,
+      contentListsLeft: this.panelLeft + contentCol.leftPanelPx,
+      contentListsTop: this.panelTop + contentRow.topPanelPx,
+      contentListsW: contentCol.widthPanelPx,
+      contentListsH: contentRow.heightPanelPx,
       ...grid,
     };
   }
 
   /** Dev/e2e: grid + panel metrics in screen space. */
   getGridLayoutMetrics(): ShopGridLayoutMetrics {
-    const grid = this.rectFromFrac(
-      GRID_LEFT_FRAC,
-      GRID_LEFT_FRAC + GRID_ART_WIDTH_FRAC,
-      GRID_TOP_FRAC,
-      GRID_TOP_FRAC + GRID_HEIGHT_FRAC
-    );
+    const gridBand = this.modalZoneRect(SHOP_LAYOUT_GRID_COL_START, SHOP_LAYOUT_GRID_COL_SPAN);
+    const gridViewportInset = resolveShopProductGridViewportInset(gridBand.height);
+    const gridOffsetY = this.artSpanOnPanelH(SHOP_ITEM_GRID_OFFSET_Y_PX);
+    const grid = {
+      left: gridBand.left,
+      top: gridBand.top + gridViewportInset.viewportTopOffsetPx + gridOffsetY,
+      width: gridBand.width,
+      height: gridViewportInset.viewportHeightPx,
+    };
     const contentW = grid.width - this.gridContentPadLeft - this.gridContentPadRight;
+    const rowPitch = (grid.height - this.gridContentPadTop) / this.gridRows;
+    const row2SlotTop =
+      grid.top + this.gridContentPadTop + (this.gridRows - 1) * rowPitch;
+    const row2SlotBottom = row2SlotTop + this.cellH;
+    const row2IconTop = row2SlotTop + this.cellH * 0.38;
+    const row2IconBottom = row2IconTop + this.cellH * GRID_ICON_SIZE_H_FRAC;
+    const viewportBottomPx = grid.top + grid.height;
     return {
       panelW: this.panelW,
       panelH: this.panelH,
       panelLeft: this.panelLeft,
       panelTop: this.panelTop,
-      gridLeft: grid.left,
-      gridTop: grid.top,
-      gridW: grid.width,
+      gridLeft: this.gridLeft,
+      gridTop: this.gridTop,
+      gridW: this.gridViewportW,
       gridContentW: contentW,
       gridContentPadLeft: this.gridContentPadLeft,
       gridContentPadRight: this.gridContentPadRight,
       gridContentPadTop: this.gridContentPadTop,
-      gridH: grid.height,
+      gridH: this.gridViewportH,
+      tabListModalAvailableH: this.tabListModalAvailableH,
+      tabListViewportH: this.tabListViewportH,
+      tabListViewportW: this.tabListViewportW,
+      tabListTop: this.tabListTop,
+      tabListLeft: this.tabListLeft,
+      tabItemScale: this.tabItemScale,
+      tabListContentH: this.tabListContentH,
+      tabScrollOffset: 0,
+      tabMaxScrollOffset: 0,
       cols: GRID_COLS,
-      rows: GRID_ROWS,
-      cellW: contentW / GRID_COLS,
-      cellH: grid.height / GRID_ROWS,
+      rows: this.gridRows,
+      cellW: this.cellW,
+      cellH: rowPitch,
       cardWFrac: GRID_CARD_W_FRAC,
       cardHFrac: GRID_CARD_H_FRAC,
       cardBgScale: GRID_CARD_BG_SCALE,
+      cardScale: SHOP_ITEM_CARD_SCALE,
+      gridWidthScale: 1,
       gapPxH: (contentW / GRID_COLS) * (1 - GRID_CARD_W_FRAC),
       rowGapPx: GRID_ROW_GAP_PX,
       rowOverlapPx: GRID_ROW_OVERLAP_PX,
       gapPxV: Math.max(0, this.pitchCellH - this.cardDisplayH - GRID_ROW_OVERLAP_PX),
+      row2BottomPx: row2SlotBottom,
+      row2SlotTopPx: row2SlotTop,
+      row2SlotBottomPx: row2SlotBottom,
+      row2IconTopPx: row2IconTop,
+      row2IconBottomPx: row2IconBottom,
+      viewportBottomPx,
+      row2FitsViewport: row2SlotBottom <= viewportBottomPx + 1,
+      row2IconFitsViewport: row2IconBottom <= viewportBottomPx + 1,
       closeHit: {
         centerX: this.closeHit.x,
         centerY: this.closeHit.y,
         radius: this.closeHit.radius,
+        width: this.closeHit.radius * 2,
+        height: this.closeHit.radius * 2,
       },
       categoryTabs: this.categoryTabs.map((tab, index) => ({
         index,
@@ -2883,6 +3010,7 @@ export class ShopPanel {
         hitH: tab.hit.height,
         glowW: tab.glow.width,
         glowH: tab.glow.height,
+        textureKey: tab.bg.texture?.key ?? '',
       })),
       debugGrid: isShopGridDebug(),
       debugGridContainerIndex: this.debugGridContainer
@@ -2891,7 +3019,7 @@ export class ShopPanel {
       debugGridDepth: this.debugGridContainer?.depth ?? 0,
       scrollOffset: this.scrollOffset,
       maxScrollOffset: this.getMaxScrollOffset(),
-      viewportRows: GRID_ROWS,
+      viewportRows: this.gridRows,
     };
   }
 
@@ -2916,7 +3044,7 @@ export class ShopPanel {
   getVisibleGridCount(): number {
     const ids = this.effectiveFilteredIds();
     const start = this.firstVisibleRow() * GRID_COLS;
-    return Math.min(GRID_PAGE_SIZE, Math.max(0, ids.length - start));
+    return Math.min(this.gridPageSize, Math.max(0, ids.length - start));
   }
 
   /** Dev/e2e: viewport slot snapshot (0–11). */
@@ -2927,7 +3055,7 @@ export class ShopPanel {
   } {
     const itemId = this.itemIdAtSlot(slotIndex);
     return {
-      hasCardBg: slotIndex >= 0 && slotIndex < GRID_PAGE_SIZE,
+      hasCardBg: slotIndex >= 0 && slotIndex < this.gridPageSize,
       hasIcon: Boolean(itemId),
       itemId,
     };
@@ -2939,6 +3067,16 @@ export class ShopPanel {
   }
 
   /** Dev/e2e: detail panel + pagination snapshot. */
+  /** Dev/e2e: texture keys for detail stat row backgrounds. */
+  getDetailStatBgSnapshot(): { visible: boolean; texture: string; width: number; height: number }[] {
+    return this.detailStatBgs.map((bg) => ({
+      visible: bg.visible,
+      texture: bg.texture.key,
+      width: bg.displayWidth,
+      height: bg.displayHeight,
+    }));
+  }
+
   getDetailSnapshot(): {
     title: string;
     priceLine: string;
@@ -2964,7 +3102,7 @@ export class ShopPanel {
     };
   }
 
-  /** Dev/e2e: fire pointerdown on category tab by index (0 = seeds). */
+  /** Dev/e2e: fire pointerdown on category tab by index (0 = all). */
   simulateCategoryTabClick(index: number): void {
     const tab = this.categoryTabs[index];
     if (!tab) return;
@@ -3150,60 +3288,9 @@ export class ShopPanel {
     };
   }
 
-  /** Dev/e2e: top currency bar (coin / energy / gem) layout + HUD values. */
-  getCurrencyBarSnapshot(): {
-    slots: {
-      index: number;
-      centerX: number;
-      centerY: number;
-      left: number;
-      right: number;
-      width: number;
-      height: number;
-      value: string;
-      hasBox: boolean;
-      boxTexture: string;
-      iconX: number;
-      iconSize: number;
-      textX: number;
-      iconTextGap: number;
-      groupCenterX: number;
-    }[];
-  } {
-    const valueTexts = [this.coinValueText, this.energyValueText, this.gemValueText];
-    const values = valueTexts.map((t) => t.text);
-    return {
-      slots: CURRENCY_SLOTS.map((slot, i) => {
-        const r = this.currencySlotRect(slot);
-        const box = this.currencyBoxBackgrounds[i];
-        const icon = this.currencyIcons[i];
-        const text = valueTexts[i];
-        const iconSize = icon?.displayWidth ?? 0;
-        const iconRight = icon ? icon.x + iconSize * 0.5 : 0;
-        const textX = text?.x ?? 0;
-        const iconTextGap = icon ? textX - iconRight : 0;
-        const groupCenterX = icon
-          ? icon.x - iconSize * 0.5 + (iconSize + CURRENCY_ICON_TEXT_GAP_PX + (text?.width ?? 0)) / 2
-          : r.centerX;
-        return {
-          index: i,
-          centerX: box?.x ?? r.centerX,
-          centerY: box?.y ?? r.centerY,
-          left: r.left,
-          right: r.left + r.width,
-          width: r.width,
-          height: r.height,
-          value: values[i] ?? '',
-          hasBox: Boolean(box),
-          boxTexture: box?.texture?.key ?? '',
-          iconX: icon?.x ?? 0,
-          iconSize,
-          textX,
-          iconTextGap,
-          groupCenterX,
-        };
-      }),
-    };
+  /** Dev/e2e: top currency bar removed — always null when shop is open. */
+  getCurrencyBarSnapshot(): null {
+    return null;
   }
 }
 
@@ -3216,6 +3303,14 @@ export interface ShopLayoutMetrics extends ShopGridLayoutMetrics {
   panelAspect: number;
   panelRight: number;
   panelBottom: number;
+  bgTargetLeft: number;
+  bgTargetTop: number;
+  bgTargetW: number;
+  bgTargetH: number;
+  contentListsLeft: number;
+  contentListsTop: number;
+  contentListsW: number;
+  contentListsH: number;
 }
 
 export interface ShopGridLayoutMetrics {
@@ -3232,6 +3327,15 @@ export interface ShopGridLayoutMetrics {
   gridContentPadRight: number;
   gridContentPadTop: number;
   gridH: number;
+  tabListModalAvailableH: number;
+  tabListViewportH: number;
+  tabListViewportW: number;
+  tabListTop: number;
+  tabListLeft: number;
+  tabItemScale: number;
+  tabListContentH: number;
+  tabScrollOffset: number;
+  tabMaxScrollOffset: number;
   cols: number;
   rows: number;
   cellW: number;
@@ -3240,6 +3344,8 @@ export interface ShopGridLayoutMetrics {
   cardHFrac: number;
   /** Boost applied to shop-item bg after fit-box sizing. */
   cardBgScale: number;
+  cardScale: number;
+  gridWidthScale: number;
   /** Approx horizontal gutter between adjacent cards (cell pitch − card width). */
   gapPxH: number;
   /** Target row gap constant (edge-to-edge between card frames). */
@@ -3247,7 +3353,21 @@ export interface ShopGridLayoutMetrics {
   rowOverlapPx: number;
   /** Measured vertical gutter between adjacent card rows. */
   gapPxV: number;
-  closeHit: { centerX: number; centerY: number; radius: number };
+  row2BottomPx: number;
+  row2SlotTopPx: number;
+  row2SlotBottomPx: number;
+  row2IconTopPx: number;
+  row2IconBottomPx: number;
+  viewportBottomPx: number;
+  row2FitsViewport: boolean;
+  row2IconFitsViewport: boolean;
+  closeHit: {
+    centerX: number;
+    centerY: number;
+    radius: number;
+    width: number;
+    height: number;
+  };
   categoryTabs: {
     index: number;
     centerX: number;
@@ -3256,6 +3376,7 @@ export interface ShopGridLayoutMetrics {
     hitH: number;
     glowW: number;
     glowH: number;
+    textureKey: string;
   }[];
   debugGrid: boolean;
   /** Container list index after `bringDebugGridToTop()` (below interactive hits). */

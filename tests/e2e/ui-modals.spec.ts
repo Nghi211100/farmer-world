@@ -33,6 +33,10 @@ async function waitForGame(page: import('@playwright/test').Page): Promise<Farme
   return api;
 }
 
+/** Left-bar bag: ~3% from left/bottom (see HUD_BAG_LEFT_VW_FRAC / HUD_BAG_BOTTOM_VH_FRAC). */
+const HUD_BAG_LEFT_X_FRAC = 0.06;
+const HUD_BAG_BOTTOM_Y_FRAC = 0.97;
+
 async function clickHudButton(
   page: import('@playwright/test').Page,
   slot: 'bag' | 'shop'
@@ -40,9 +44,10 @@ async function clickHudButton(
   const canvas = page.locator('#game-container canvas');
   const box = await canvas.boundingBox();
   if (!box) throw new Error('canvas not found');
-  const xRatio = slot === 'bag' ? 0.1 : 0.9;
-  const y = box.y + box.height - 36;
+  const xRatio = slot === 'bag' ? HUD_BAG_LEFT_X_FRAC : 0.9;
+  const yRatio = slot === 'bag' ? HUD_BAG_BOTTOM_Y_FRAC : 0.97;
   const x = box.x + box.width * xRatio;
+  const y = box.y + box.height * yRatio;
   await page.mouse.click(x, y);
 }
 

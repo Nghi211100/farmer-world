@@ -9,6 +9,26 @@ export const GRID_SIZE = 20;
 export const INITIAL_UNLOCKED_FARM_TILES = 10;
 /** Starting economy for a brand-new save (no existing localStorage save). */
 export const DEFAULT_COINS = 500;
+export const LAND_UNLOCK_COST = 2000;
+
+export function canAffordLandUnlock(coins: number, cost: number): boolean {
+  return coins >= cost;
+}
+
+/** Vietnamese copy for land expansion (right-bar shovel). */
+export const LAND_EXPAND_STRINGS = {
+  selectHint: 'Chọn ô đất muốn mở',
+  confirmMessage: (cost: number) =>
+    `Bạn muốn bỏ ra số tiền ${cost} để mở ô đất này không?`,
+  confirmBalance: (coins: number) => `Số dư: ${coins}`,
+  confirmYes: 'Có',
+  confirmNo: 'Không',
+  insufficientCoins: (cost: number) => `Cần ${cost} xu để mở ô đất`,
+  invalidTile: 'Chọn ô đất đã khóa hoặc cỏ cạnh nông trại',
+  successUnlock: (spent: number) => `Đã mở ô đất (-${spent} 🪙)`,
+  successExpand: (spent: number) => `Đã mở rộng đất (-${spent} 🪙)`,
+} as const;
+
 export const DEFAULT_GEMS = 10;
 export const DEFAULT_ENERGY = 100;
 
@@ -107,6 +127,9 @@ export interface CropTileData {
   growthElapsedSec: number;
   lastTickAt: number;
   dug?: boolean;
+  lastFarmActivityAt?: number;
+  soilIdleDry?: boolean;
+  soilIdleDrySince?: number;
 }
 
 export enum PlayerFarmAction {
@@ -131,9 +154,18 @@ export const FARMING = {
   /** Growth speed multiplier while crop moisture is below {@link FARMING.waterThreshold} (0–1). */
   growthRateWithoutWater: 0.5,
   digDurationMs: 600,
+  /** Unplanted/dug soil becomes neglect-dry after this idle period. */
+  soilIdleDryMs: 120_000,
   /** One watering action refills crop (and empty soil) to maxWater. */
   waterRestoreAmount: 100,
 };
+
+/** Copy for neglect-dry soil (idle without farming). */
+export const SOIL_IDLE_STRINGS = {
+  plotDry: 'Ô đất đã khô — hãy tưới nước hoặc xới lại',
+  cannotPlant: 'Ô đất khô — tưới nước hoặc xới lại trước khi gieo',
+  cannotHarvest: 'Ô đất khô — tưới nước hoặc xới lại trước khi thu hoạch',
+} as const;
 
 export function isDebugMode(): boolean {
   if (typeof window === 'undefined') return false;
@@ -265,10 +297,10 @@ export const ENERGY = {
   /** Per farm action (dig, water, plant, harvest). */
   actionCost: 1,
   /** Passive drain while moving or performing a farm animation. */
-  activeDrainIntervalMs: 30_000,
+  activeDrainIntervalMs: 38_000,
   activeDrainAmount: 1,
   /** Regen while idle (online) or offline (applied on load from energyUpdatedAt). */
-  recoveryIntervalMs: 60_000,
+  recoveryIntervalMs: 50_000,
   recoveryAmount: 1,
 };
 
@@ -278,8 +310,8 @@ export const ECONOMY = {
   food: FOOD_BUY_PRICES,
   sell: RESOURCE_SELL_PRICES,
   land: {
-    baseCost: 25,
-    costMultiplier: 1.15,
+    baseCost: 2000,
+    costMultiplier: 1.22,
   },
   buildingUpgrade: {
     house: [0, 75, 200],

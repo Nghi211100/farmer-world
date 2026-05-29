@@ -17,7 +17,33 @@ export const ISO_CROP_ORIGIN = { x: 0.5, y: 1 } as const;
 export const PLAYER_DISPLAY_SCALE = 1 / 1.5;
 
 /** Enlarge water ground sprites so adjacent iso diamonds overlap (hides seam lines). */
-export const WATER_GROUND_DISPLAY_SCALE = 1.15;
+export const WATER_GROUND_DISPLAY_SCALE = 1.27;
+
+/**
+ * Default overlap for grass, path, and farm soil ground tiles (hides dark diamond gaps).
+ * Applied to the full farm map ground layer; water uses {@link WATER_GROUND_DISPLAY_SCALE}.
+ */
+export const GROUND_TILE_SEAM_SCALE = 1.15;
+
+/** @deprecated Use {@link GROUND_TILE_SEAM_SCALE}; kept for farm-island / water max(). */
+export const FARM_SOIL_GROUND_DISPLAY_SCALE = GROUND_TILE_SEAM_SCALE;
+
+/** Extra scale on north path ring + first soil row so tiles cover island cliff art at the apex. */
+export const FARM_NORTH_EDGE_GROUND_SCALE = 1.42;
+
+/**
+ * `water_2_borders_top` only — width footprint (horizontal diamond span).
+ * Larger than WATER_GROUND_DISPLAY_SCALE.
+ */
+export const WATER_TOP_BORDER_SIZE_SCALE = 1.29;
+
+/**
+ * `water_2_borders_top` only — vertical diamond squeeze (méo).
+ * Applied to tile height independently of SIZE_SCALE.
+ */
+export const WATER_TOP_BORDER_MEO_SCALE = 1.3;
+export const WATER_BOTTOM_BORDER_SIZE_SCALE = WATER_TOP_BORDER_SIZE_SCALE;
+export const WATER_BOTTOM_BORDER_MEO_SCALE = WATER_TOP_BORDER_MEO_SCALE;
 
 /** Target on-screen sizes (tiles/crops use exact diamond footprint; others may aspect-fit) */
 export const DISPLAY_SIZE = {
@@ -59,6 +85,49 @@ export function applyIsoTileSprite(
   sprite.setDisplaySize(TILE_WIDTH * displayScale, TILE_HEIGHT * displayScale);
 }
 
+/**
+ * `water_2_borders_top` at diamond top: width uses SIZE_SCALE, height uses MEO_SCALE
+ * (méo = vertical squeeze; size = overall width footprint).
+ */
+export function applyIsoTopBorderWaterSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  sprite.setDisplaySize(
+    TILE_WIDTH * WATER_TOP_BORDER_SIZE_SCALE,
+    TILE_HEIGHT * WATER_TOP_BORDER_MEO_SCALE
+  );
+}
+
+/** `water_2_borders_bottom` mirrors top-border size/méo footprint. */
+export function applyIsoBottomBorderWaterSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  sprite.setDisplaySize(
+    TILE_WIDTH * WATER_BOTTOM_BORDER_SIZE_SCALE,
+    TILE_HEIGHT * WATER_BOTTOM_BORDER_MEO_SCALE
+  );
+}
+
+/** Ground tile at diamond top vertex; fit within 64×32 without non-uniform stretch (optional scale). */
+export function applyIsoTileSpriteAspectFit(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  fitSpriteDisplay(sprite, TILE_WIDTH * displayScale, TILE_HEIGHT * displayScale);
+}
+
 /** Center of diamond from its top vertex (cartToIso / gridToScreen point) */
 export function tileCenterFromTop(top: { x: number; y: number }): { x: number; y: number } {
   return { x: top.x, y: top.y + TILE_HEIGHT / 2 };
@@ -94,6 +163,19 @@ function traceIsoDiamondPath(graphics: Phaser.GameObjects.Graphics, topX: number
   graphics.lineTo(topX, topY + TILE_HEIGHT);
   graphics.lineTo(topX - hw, topY + hh);
   graphics.closePath();
+}
+
+/** Filled 2:1 isometric ground diamond (top vertex anchor). */
+export function fillIsoTileDiamond(
+  graphics: Phaser.GameObjects.Graphics,
+  topX: number,
+  topY: number,
+  color = 0xffffff,
+  alpha = 1
+): void {
+  graphics.fillStyle(color, alpha);
+  traceIsoDiamondPath(graphics, topX, topY);
+  graphics.fillPath();
 }
 
 /** Draw a 2:1 diamond outline for debug verification (all tiles) */

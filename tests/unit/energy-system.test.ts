@@ -32,4 +32,10 @@ describe('EnergySystem', () => {
     energy.applyActiveDrain(t0 + ENERGY.activeDrainIntervalMs * 3);
     expect(energy.getEnergy()).toBe(0);
   });
+
+  it('uses rebalanced passive drain and recovery intervals', () => {
+    expect(ENERGY.activeDrainIntervalMs).toBe(38_000);
+    expect(ENERGY.recoveryIntervalMs).toBe(50_000);
+    expect(ENERGY.actionCost).toBe(1);
+  });
 });

@@ -6,6 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <meta name="screen-orientation" content="landscape" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Farmer World</title>
@@ -26,6 +27,22 @@
       }
       #game-container canvas {
         display: block;
+        /* Pixel-art: avoid browser smoothing when canvas CSS size ≠ backing store */
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      /* Supplement for mobile browsers; native APK uses manifest + MainActivity. */
+      @media (orientation: portrait) {
+        html {
+          transform: rotate(90deg);
+          transform-origin: left top;
+          width: 100vh;
+          height: 100vw;
+          overflow: hidden;
+          position: absolute;
+          top: 100%;
+          left: 0;
+        }
       }
     </style>
   </head>

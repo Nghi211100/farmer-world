@@ -32,9 +32,9 @@ export const TOOL_MODAL_FRAME_COMPACT_HEIGHT_PX = 342;
 export const TOOL_MODAL_PANEL_WIDTH_FRAC = 0.4;
 
 /**
- * Uniform scale on the popup container (anchor-centered).
- * Logical layout (panelW/H, slots) stays at 1×; art renders at this factor so the
- * wooden frame matches the intended on-screen size (compact crop reads ~2× wide).
+ * Uniform on-screen scale for the popup (anchor-centered).
+ * Logical layout (panelW/H, slots) stays at 1×; FarmScene applies
+ * Applied on the popup container only (scrollFactor 0).
  */
 export const TOOL_MODAL_VISUAL_SCALE = 0.75;
 

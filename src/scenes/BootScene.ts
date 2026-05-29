@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import { UI_LOADING_TEXTURE_KEY } from '../config/assets';
+import { getAssetUrl } from '../utils/assetUrls';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -6,7 +8,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.image('loading', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    const url = getAssetUrl('ui/loading.png');
+    if (url) {
+      this.load.image(UI_LOADING_TEXTURE_KEY, url);
+    }
   }
 
   create(): void {

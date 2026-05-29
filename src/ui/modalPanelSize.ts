@@ -53,6 +53,22 @@ export function computeModalPanelSize(
  * Shop: largest contain-fit panel (up to 100%×100% caps). Preserves 1536×1024 aspect so
  * layout fractions stay inside the visible region; `applyImageObjectCover` only trims texture margins.
  */
+/** Warehouse modal — contain-fit within default panel caps (logical viewport when zoomed). */
+export function computeWarehouseModalPanelSize(
+  viewportW: number,
+  viewportH: number,
+  artW: number,
+  artH: number,
+  scaleZoom = 1
+): { panelW: number; panelH: number } {
+  const { width, height } = logicalViewportFromGame(viewportW, viewportH, scaleZoom);
+  return computeModalPanelSize(width, height, artW, artH, {
+    widthFrac: PANEL_WIDTH_FRAC,
+    heightFrac: PANEL_HEIGHT_FRAC,
+    fit: 'contain',
+  });
+}
+
 export function computeShopModalPanelSize(
   viewportW: number,
   viewportH: number,
@@ -64,4 +80,57 @@ export function computeShopModalPanelSize(
     heightFrac: SHOP_PANEL_HEIGHT_FRAC,
     fit: 'contain',
   });
+}
+/** Shop modal texture aspect (`ui/shop-modal.png`). */
+export const SHOP_MODAL_ASPECT_W = 1399;
+export const SHOP_MODAL_ASPECT_H = 782;
+
+export interface ShopModalBounds {
+  panelW: number;
+  panelH: number;
+  cx: number;
+  cy: number;
+  panelLeft: number;
+  panelTop: number;
+}
+
+/** Centered contain-fit shop panel in viewport coordinates. */
+export function shopModalBounds(viewportW: number, viewportH: number): ShopModalBounds {
+  const { panelW, panelH } = computeShopModalPanelSize(
+    viewportW,
+    viewportH,
+    SHOP_MODAL_ASPECT_W,
+    SHOP_MODAL_ASPECT_H
+  );
+  const cx = viewportW / 2;
+  const cy = viewportH / 2;
+  return {
+    panelW,
+    panelH,
+    cx,
+    cy,
+    panelLeft: cx - panelW / 2,
+    panelTop: cy - panelH / 2,
+  };
+}
+
+/** Undo Phaser/canvas zoom for breakpoint checks. */
+export function logicalViewportFromGame(
+  viewportW: number,
+  viewportH: number,
+  scaleZoom = 1
+): { width: number; height: number } {
+  const z = scaleZoom > 0 ? scaleZoom : 1;
+  return { width: viewportW / z, height: viewportH / z };
+}
+
+/** Phone-class device in landscape (short edge < 600px). */
+export function isModalMobileLandscape(
+  viewportW: number,
+  viewportH: number,
+  scaleZoom = 1
+): boolean {
+  const { width, height } = logicalViewportFromGame(viewportW, viewportH, scaleZoom);
+  const vmin = Math.min(width, height);
+  return width > height && vmin < 600;
 }

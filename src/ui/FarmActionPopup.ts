@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { GridSystem } from '../systems/GridSystem';
-import { placePopupAboveTile } from '../utils/popupPosition';
+import { farmMainCameraZoom, placePopupAboveTile } from '../utils/popupPosition';
 import { applyImageArtRegionStretch } from './ShopPanel';
 import {
   TOOL_MODAL_ART_H,
@@ -47,6 +47,7 @@ export interface FarmActionPopupVisualMetrics {
   bgBoundsH: number;
   containerScaleX: number;
   containerScaleY: number;
+  cameraZoom: number;
   viewportW: number;
   viewportH: number;
   textureW: number;
@@ -121,6 +122,7 @@ export class FarmActionPopup {
       bgBoundsH: bounds?.height ?? 0,
       containerScaleX: this.container.scaleX,
       containerScaleY: this.container.scaleY,
+      cameraZoom: farmMainCameraZoom(this.scene),
       viewportW: this.scene.scale.width,
       viewportH: this.scene.scale.height,
       textureW: bg?.frame.width ?? 0,
@@ -149,6 +151,7 @@ export class FarmActionPopup {
     const { cx, cy: anchorCy } = placePopupAboveTile(this.scene, this.grid, gx, gy, {
       panelW,
       panelH,
+      containerVisualScale: TOOL_MODAL_VISUAL_SCALE,
       aboveOffsetPx: 12,
       anchorTop: true,
     });

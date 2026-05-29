@@ -1,4 +1,8 @@
-import { computeModalPanelSize } from './modalPanelSize';
+import {
+  computeModalPanelSize,
+  isModalMobileLandscape,
+  logicalViewportFromGame,
+} from './modalPanelSize';
 
 /** Laptop baseline for modal typography (matches common dev viewport). */
 export const UI_FONT_REFERENCE_VIEWPORT_W = 1920;
@@ -28,6 +32,19 @@ export function getUiFontScale(viewportW: number, viewportH: number): number {
   if (tier === 'phone') return UI_FONT_SCALE_PHONE;
   if (tier === 'tablet') return UI_FONT_SCALE_TABLET;
   return UI_FONT_SCALE_LAPTOP;
+}
+
+/** Modal typography tier — phone landscape uses tablet scale (matches HUD). */
+export function getModalUiFontScale(
+  viewportW: number,
+  viewportH: number,
+  scaleZoom = 1
+): number {
+  if (isModalMobileLandscape(viewportW, viewportH, scaleZoom)) {
+    return UI_FONT_SCALE_TABLET;
+  }
+  const { width, height } = logicalViewportFromGame(viewportW, viewportH, scaleZoom);
+  return getUiFontScale(width, height);
 }
 
 /** Round base design px for Phaser Text / DOM overlays. */
@@ -75,9 +92,10 @@ export function getModalTypographyScale(
   artH: number,
   modalSizeFn: typeof computeModalPanelSize = computeModalPanelSize,
   referenceViewportW: number = UI_FONT_REFERENCE_VIEWPORT_W,
-  referenceViewportH: number = UI_FONT_REFERENCE_VIEWPORT_H
+  referenceViewportH: number = UI_FONT_REFERENCE_VIEWPORT_H,
+  scaleZoom = 1
 ): number {
-  const viewportScale = getUiFontScale(viewportW, viewportH);
+  const viewportScale = getModalUiFontScale(viewportW, viewportH, scaleZoom);
   const refSpan = referenceModalArtSpanH(
     artW,
     artH,

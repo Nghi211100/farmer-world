@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { BottomMenu, type MenuAction } from '../ui/BottomMenu';
+import { LeftMenu } from '../ui/LeftMenu';
+import { RightMenu } from '../ui/RightMenu';
 import { BuildPanel } from '../ui/BuildPanel';
 import { InventoryPanel } from '../ui/InventoryPanel';
 import { PlantPanel } from '../ui/PlantPanel';
@@ -22,7 +24,9 @@ interface GameRefs {
 
 export class UIScene extends Phaser.Scene {
   topHUD!: TopHUD;
+  leftMenu!: LeftMenu;
   bottomMenu!: BottomMenu;
+  rightMenu!: RightMenu;
   inventoryPanel!: InventoryPanel;
   buildPanel!: BuildPanel;
   shopPanel!: ShopPanel;
@@ -40,7 +44,9 @@ export class UIScene extends Phaser.Scene {
 
     this.topHUD = new TopHUD(this, width, height);
     this.scale.on('resize', this.handleResize, this);
+    this.leftMenu = new LeftMenu(this, width, height);
     this.bottomMenu = new BottomMenu(this, width, height);
+    this.rightMenu = new RightMenu(this, width, height);
     this.inventoryPanel = new InventoryPanel(this, width, height);
     this.buildPanel = new BuildPanel(this, width, height);
     this.shopPanel = new ShopPanel(this, width, height);
@@ -48,7 +54,9 @@ export class UIScene extends Phaser.Scene {
     this.plantPanel = new PlantPanel(this, width, height);
     this.upgradePanel = new UpgradePanel(this, width, height);
 
-    this.bottomMenu.setOnAction((action: MenuAction) => this.handleMenu(action));
+    const onMenu = (action: MenuAction) => this.handleMenu(action);
+    this.leftMenu.setOnAction(onMenu);
+    this.rightMenu.setOnAction(onMenu);
     this.events.on('test-menu', (action: MenuAction) => this.handleMenu(action));
 
     this.buildPanel.setOnSelect((item) => {
@@ -101,9 +109,14 @@ export class UIScene extends Phaser.Scene {
     farm.events.on('register-game', (refs: GameRefs) => {
       this.bindGameRefs(refs);
     });
-    farm.events.on('mode-hint', (hint: string) => {
-      this.bottomMenu.setModeHint(hint);
-    });
+    farm.events.on(
+      'mode-hint',
+      (hint: string | { text: string; prominent?: boolean }) => {
+        const text = typeof hint === 'string' ? hint : hint.text;
+        const prominent = typeof hint === 'string' ? false : Boolean(hint.prominent);
+        this.bottomMenu.setModeHint(text, prominent);
+      }
+    );
     farm.events.on('open-shop', () => {
       if (this.gameRefs) {
         this.shopPanel.show(
@@ -139,7 +152,9 @@ export class UIScene extends Phaser.Scene {
 
   private handleResize(gameSize: Phaser.Structs.Size): void {
     this.topHUD.resize(gameSize.width, gameSize.height);
+    this.leftMenu.resize(gameSize.width, gameSize.height);
     this.bottomMenu.resize(gameSize.width, gameSize.height);
+    this.rightMenu.resize(gameSize.width, gameSize.height);
     this.inventoryPanel.resize(gameSize.width, gameSize.height);
     this.shopPanel.resize(gameSize.width, gameSize.height);
   }

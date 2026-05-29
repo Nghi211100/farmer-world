@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 import type { GridSystem } from '../systems/GridSystem';
+import { TOOL_MODAL_VISUAL_SCALE } from '../ui/toolModalLayout';
 import { TILE_HEIGHT } from './iso';
+
+/** Farm main camera zoom (exposed for e2e visual metrics). */
+export function farmMainCameraZoom(scene: Phaser.Scene): number {
+  const z = scene.cameras.main.zoom;
+  return z > 0 ? z : 1;
+}
 
 /**
  * World position → coordinates for scrollFactor(0) HUD objects.
@@ -28,7 +35,9 @@ export interface PopupPlacement {
 export interface TilePopupPlaceOptions {
   panelW: number;
   panelH: number;
-  /** Gap above tile anchor in screen pixels (scaled for zoom). Default 12. */
+  /** On-screen scale applied to the panel container (default {@link TOOL_MODAL_VISUAL_SCALE}). */
+  containerVisualScale?: number;
+  /** Gap above tile anchor in canvas pixels. Default 12. */
   aboveOffsetPx?: number;
   /** Use top of isometric diamond instead of tile center. */
   anchorTop?: boolean;
@@ -40,8 +49,8 @@ const HUD_TOP = 56;
 const HUD_BOTTOM = 72;
 
 /**
- * Position a popup centered on a farm tile, above the tile in screen space.
- * Uses FarmScene main camera scroll/zoom via scrollFactor-0 placement rules.
+ * Position a popup centered on a farm tile, above the tile.
+ * Returned `cx`/`cy` are scrollFactor-0 local coords (world − camera scroll).
  */
 export function placePopupAboveTile(
   scene: Phaser.Scene,
@@ -53,20 +62,22 @@ export function placePopupAboveTile(
   const cam = scene.cameras.main;
   const { width, height } = scene.scale;
   const { panelW, panelH } = opts;
+  const visualScale = opts.containerVisualScale ?? TOOL_MODAL_VISUAL_SCALE;
+  const onScreenW = panelW * visualScale;
+  const onScreenH = panelH * visualScale;
   const topInset = opts.topInset ?? HUD_TOP;
   const bottomInset = opts.bottomInset ?? HUD_BOTTOM;
   const gapPx = opts.aboveOffsetPx ?? 12;
-  const gap = cam.zoom > 0 ? gapPx / cam.zoom : gapPx;
 
   const top = grid.gridToScreen(gx, gy);
   const anchorY = opts.anchorTop ? top.y : top.y + TILE_HEIGHT / 2;
-  const screen = worldToUiScreen(cam, top.x, anchorY);
+  const { x: tileX, y: tileY } = worldToUiScreen(cam, top.x, anchorY);
 
-  const cx = Phaser.Math.Clamp(screen.x, panelW / 2 + 8, width - panelW / 2 - 8);
+  const cx = Phaser.Math.Clamp(tileX, onScreenW / 2 + 8, width - onScreenW / 2 - 8);
   const cy = Phaser.Math.Clamp(
-    screen.y - gap - panelH / 2,
-    topInset + panelH / 2,
-    height - bottomInset - panelH / 2
+    tileY - gapPx - onScreenH / 2,
+    topInset + onScreenH / 2,
+    height - bottomInset - onScreenH / 2
   );
 
   return { cx, cy };

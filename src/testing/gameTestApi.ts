@@ -26,25 +26,7 @@ export interface FarmerWorldTestApi {
   isShopPageLabelVisible: () => boolean | null;
   getShopGridLayout: () => ShopGridLayoutMetrics | null;
   getShopLayoutMetrics: () => ShopLayoutMetrics | null;
-  getShopCurrencyBar: () => {
-    slots: {
-      index: number;
-      centerX: number;
-      centerY: number;
-      left: number;
-      right: number;
-      width: number;
-      height: number;
-      value: string;
-      hasBox: boolean;
-      boxTexture: string;
-      iconX: number;
-      iconSize: number;
-      textX: number;
-      iconTextGap: number;
-      groupCenterX: number;
-    }[];
-  } | null;
+  getShopCurrencyBar: () => null;
   getShopDetailPriceBox: () => {
     centerX: number;
     centerY: number;
@@ -72,6 +54,12 @@ export interface FarmerWorldTestApi {
     pageCount: number;
     currentPage: number;
   } | null;
+  getShopDetailStatBgs: () => {
+    visible: boolean;
+    texture: string;
+    width: number;
+    height: number;
+  }[] | null;
   getShopBuyQuantity: () => number | null;
   clickShopMinus: () => void;
   clickShopPlus: () => void;
@@ -208,6 +196,58 @@ export interface FarmerWorldTestApi {
   getCropSelectPopupVisual: () => CropSelectPopupVisualMetrics | null;
   closeCropSelectPopup: () => void;
   isToolBarVisible: () => boolean;
+  refocusFarmCamera: () => {
+    viewW: number;
+    viewH: number;
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    patchScreenX: number;
+    patchScreenY: number;
+    targetCenterX: number;
+    targetCenterY: number;
+    errorX: number;
+    errorY: number;
+  } | null;
+  getFarmCameraCenterMetrics: () => {
+    viewW: number;
+    viewH: number;
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    patchScreenX: number;
+    patchScreenY: number;
+    targetCenterX: number;
+    targetCenterY: number;
+    errorX: number;
+    errorY: number;
+  } | null;
+  getFarmViewportDebugMetrics: () => {
+    scaleW: number;
+    scaleH: number;
+    displayScaleW: number;
+    displayScaleH: number;
+    gameConfigW: number;
+    gameConfigH: number;
+    camW: number;
+    camH: number;
+    camX: number;
+    camY: number;
+    camZoom: number;
+    gridOriginX: number;
+    gridOriginY: number;
+    mapBounds: {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+      centerX: number;
+      centerY: number;
+    };
+    bg: { x: number; y: number; displayW: number; displayH: number } | null;
+  } | null;
+  /** Dev: force neglect-dry on a tilled plot (gx, gy) for soil moisture visuals. */
+  forceSoilIdleDryAt: (gx: number, gy: number) => boolean;
 }
 
 declare global {
@@ -326,6 +366,11 @@ export function installGameTestApi(game: Phaser.Game): void {
       const ui = getUiScene(game);
       if (!ui?.shopPanel.isVisible()) return null;
       return ui.shopPanel.getDetailSnapshot();
+    },
+    getShopDetailStatBgs: () => {
+      const ui = getUiScene(game);
+      if (!ui?.shopPanel.isVisible()) return null;
+      return ui.shopPanel.getDetailStatBgSnapshot();
     },
     getShopBuyQuantity: () => {
       const ui = getUiScene(game);
@@ -522,5 +567,12 @@ export function installGameTestApi(game: Phaser.Game): void {
     getCropSelectPopupVisual: () => getFarmScene(game)?.getCropSelectPopupVisualForTest() ?? null,
     closeCropSelectPopup: () => getFarmScene(game)?.closeCropSelectPopupForTest(),
     isToolBarVisible: () => getFarmScene(game)?.isToolBarVisibleForTest() ?? false,
+    refocusFarmCamera: () => getFarmScene(game)?.refocusFarmCameraForTest() ?? null,
+    getFarmCameraCenterMetrics: () =>
+      getFarmScene(game)?.getFarmCameraCenterMetricsForTest() ?? null,
+    getFarmViewportDebugMetrics: () =>
+      getFarmScene(game)?.getFarmViewportDebugMetricsForTest() ?? null,
+    forceSoilIdleDryAt: (gx: number, gy: number) =>
+      getFarmScene(game)?.forceSoilIdleDryForTest(gx, gy) ?? false,
   };
 }

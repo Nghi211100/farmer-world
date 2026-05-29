@@ -1,3 +1,9 @@
+/** Stable texture key for splash screen (see ui/loading.png). */
+export const UI_LOADING_TEXTURE_KEY = 'ui_loading';
+
+/** Stable texture key for shop detail stat line backgrounds (see ui/text-background.png). */
+export const UI_TEXT_BACKGROUND_TEXTURE_KEY = 'ui_text_background';
+
 /** Asset manifest: key -> relative path under src/assets */
 export interface AssetEntry {
   key: string;
@@ -177,11 +183,25 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'farmer_walk_back_1', path: 'characters/farmer_walk_back_1.png', placeholderColor: 0x2980b9, width: 32, height: 48 },
   { key: 'farmer_walk_back_2', path: 'characters/farmer_walk_back_2.png', placeholderColor: 0x2980b9, width: 32, height: 48 },
   {
+    key: UI_LOADING_TEXTURE_KEY,
+    path: 'ui/loading.png',
+    placeholderColor: 0x87ceeb,
+    width: 1672,
+    height: 941,
+  },
+  {
     key: 'ui_background',
     path: 'ui/background.png',
     placeholderColor: 0x2d4a2a,
     width: 1492,
     height: 1054,
+  },
+  {
+    key: 'farm_island',
+    path: 'ui/island.png',
+    placeholderColor: 0x8b6914,
+    width: 1254,
+    height: 1254,
   },
   { key: 'coin', path: 'ui/coin.png', placeholderColor: 0xf1c40f, width: 24, height: 24 },
   { key: 'energy', path: 'ui/energy.png', placeholderColor: 0xf1c40f, width: 24, height: 24 },
@@ -197,9 +217,16 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'build', path: 'ui/build.png', placeholderColor: 0xecf0f1, width: 32, height: 32 },
   { key: 'shop', path: 'ui/shop.png', placeholderColor: 0xecf0f1, width: 32, height: 32 },
   { key: 'ui_warehouse', path: 'ui/warehouse.png', placeholderColor: 0x5d4037, width: 1536, height: 1024 },
-  { key: 'ui_shop_modal', path: 'ui/shop-modal.png', placeholderColor: 0x5d4037, width: 1536, height: 1024 },
+  { key: 'ui_shop_modal', path: 'ui/shop-modal.png', placeholderColor: 0x5d4037, width: 1399, height: 782 },
   { key: 'ui_tool_modal', path: 'ui/tool-modal.png', placeholderColor: 0x5d4037, width: 1370, height: 686 },
   { key: 'ui_wood_bar', path: 'ui/wood-bar.png', placeholderColor: 0x8d6e63, width: 302, height: 50 },
+  {
+    key: UI_TEXT_BACKGROUND_TEXTURE_KEY,
+    path: 'ui/text-background.png',
+    placeholderColor: 0xc4a574,
+    width: 194,
+    height: 21,
+  },
   { key: 'ui_box', path: 'ui/box.png', placeholderColor: 0xc4a574, width: 311, height: 148 },
   { key: 'ui_coin_box', path: 'ui/coin-box.png', placeholderColor: 0xc4a574, width: 168, height: 56 },
   { key: 'ui_diamond_box', path: 'ui/diamond-box.png', placeholderColor: 0xb8a0d4, width: 168, height: 56 },
@@ -239,6 +266,30 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'ui_shop_tab_locked', path: 'ui/locked-tab.png', placeholderColor: 0x8d6e63, width: 165, height: 89 },
   { key: 'ui_shop_tab_gear', path: 'ui/gear-tab.png', placeholderColor: 0x8d6e63, width: 165, height: 89 },
   { key: 'ui_shop_tab_storage', path: 'ui/storage-tab.png', placeholderColor: 0x8d6e63, width: 165, height: 89 },
+  { key: 'shop_tab_all', path: 'stores/all.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  { key: 'shop_tab_all_active', path: 'stores/all_active.png', placeholderColor: 0xd4a574, width: 268, height: 138 },
+  { key: 'shop_tab_seeds', path: 'stores/seeds.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  { key: 'shop_tab_seeds_active', path: 'stores/seeds_active.png', placeholderColor: 0xd4a574, width: 260, height: 136 },
+  { key: 'shop_tab_animals', path: 'stores/animals.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  { key: 'shop_tab_animals_active', path: 'stores/animals_active.png', placeholderColor: 0xd4a574, width: 260, height: 136 },
+  { key: 'shop_tab_decorations', path: 'stores/decorations.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  {
+    key: 'shop_tab_decorations_active',
+    path: 'stores/decorations_active.png',
+    placeholderColor: 0xd4a574,
+    width: 260,
+    height: 136,
+  },
+  { key: 'shop_tab_foods', path: 'stores/foods.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  { key: 'shop_tab_foods_active', path: 'stores/foods_active.png', placeholderColor: 0xd4a574, width: 260, height: 136 },
+  { key: 'shop_tab_resources', path: 'stores/resources.png', placeholderColor: 0x8d6e63, width: 260, height: 136 },
+  {
+    key: 'shop_tab_resources_active',
+    path: 'stores/resources_active.png',
+    placeholderColor: 0xd4a574,
+    width: 260,
+    height: 136,
+  },
   { key: 'ui_check', path: 'ui/check.png', placeholderColor: 0x27ae60, width: 48, height: 48 },
   {
     key: 'ui_tab_materials_active',

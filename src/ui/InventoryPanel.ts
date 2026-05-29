@@ -18,7 +18,7 @@ import type { EconomySystem } from '../systems/EconomySystem';
 import type { EnergySystem } from '../systems/EnergySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { InventorySlot } from '../systems/InventorySystem';
-import { computeModalPanelSize } from './modalPanelSize';
+import { computeWarehouseModalPanelSize } from './modalPanelSize';
 import { applyImageObjectCover, artPxToScreen, type ObjectCoverCrop } from './ShopPanel';
 import {
   getModalTypographyScale,
@@ -33,6 +33,12 @@ type SortMode = 'name' | 'quantity';
 /** Native size of `ui/warehouse.png` — layout fractions are tuned to this art. */
 const WAREHOUSE_ART_W = 1536;
 const WAREHOUSE_ART_H = 1024;
+/** Screen-pixel nudge for art-aligned inner UI vs warehouse bg (negative = left/up). */
+const WAREHOUSE_INNER_OFFSET_X_PX = -10;
+const WAREHOUSE_INNER_OFFSET_Y_PX = -10;
+/** Additional fraction-of-panel nudge (applied via fracX/fracY; panelBg/dimOverlay unchanged). */
+const WAREHOUSE_INNER_OFFSET_X_FRAC = -0.025;
+const WAREHOUSE_INNER_OFFSET_Y_FRAC = -0.01;
 /** Visible item slots in warehouse grid (10×3 viewport). */
 const GRID_COLS = 10;
 const GRID_ROWS_VISIBLE = 3;
@@ -55,6 +61,8 @@ const CELL_SLOT_HEIGHT_EXTRA_ART_PX = 2;
 const GRID_TOP_OFFSET_ART_PX = 66;
 
 /** Per-cell overlays vs `ui/warehouse-item.png` (110×110) slot art. */
+const WAREHOUSE_ITEM_ART_W = 110;
+const WAREHOUSE_ITEM_ART_H = 110;
 /** Top band: item icon; bottom band: display name (`slot.label` / ITEM_LABELS). */
 const SLOT_ICON_BAND_FRAC = 0.74;
 const SLOT_NAME_BAND_FRAC = 0.26;
@@ -68,15 +76,21 @@ const SLOT_ICON_MIN_EDGE_FRAC = 0.84;
 const SLOT_ICON_OFFSET_Y_ART_PX = 7;
 const SLOT_NAME_FONT_BASE_PX = 10;
 const DEBUG_LABEL_FONT_BASE_PX = 8;
-/** Qty badge on icon/name divider (~SLOT_ICON_BAND_FRAC). */
-const SLOT_QTY_RIGHT_FRAC = 0.92;
-const SLOT_QTY_Y_FRAC = 0.68;
-/** Art-pixel nudge from frac anchor (left/up = negative, scaled at layout). */
-const SLOT_QTY_OFFSET_X_ART_PX = -5;
-const SLOT_QTY_OFFSET_Y_ART_PX = -1;
+/** Tan qty pill interior on `ui/warehouse-item.png` (measured art px). */
+const SLOT_QTY_BADGE_X0_PX = 85;
+const SLOT_QTY_BADGE_X1_PX = 106;
+const SLOT_QTY_BADGE_Y0_PX = 70;
+const SLOT_QTY_BADGE_Y1_PX = 81;
 /** Default qty badge size (1–2 digits); shrinks for hundreds. */
 const SLOT_QTY_FONT_BASE_PX = 10;
 const SLOT_QTY_FONT_3DIGIT_BASE_PX = 8;
+
+function slotQtyBadgeCenterFrac(): { x: number; y: number } {
+  return {
+    x: (SLOT_QTY_BADGE_X0_PX + SLOT_QTY_BADGE_X1_PX) / 2 / WAREHOUSE_ITEM_ART_W,
+    y: (SLOT_QTY_BADGE_Y0_PX + SLOT_QTY_BADGE_Y1_PX) / 2 / WAREHOUSE_ITEM_ART_H,
+  };
+}
 
 function slotQtyFontSizePx(count: number, scale: number): number {
   const base = count >= 100 ? SLOT_QTY_FONT_3DIGIT_BASE_PX : SLOT_QTY_FONT_BASE_PX;
@@ -1157,12 +1171,18 @@ export class InventoryPanel {
     }
   }
 
+  private layoutScaleZoom(): number {
+    return this.sceneRef.scale.zoom;
+  }
+
   private updatePanelGeometry(): void {
-    ({ panelW: this.panelW, panelH: this.panelH } = computeModalPanelSize(
+    const zoom = this.layoutScaleZoom();
+    ({ panelW: this.panelW, panelH: this.panelH } = computeWarehouseModalPanelSize(
       this.viewportW,
       this.viewportH,
       WAREHOUSE_ART_W,
-      WAREHOUSE_ART_H
+      WAREHOUSE_ART_H,
+      zoom
     ));
     this.cx = this.viewportW / 2;
     this.cy = this.viewportH / 2;
@@ -1181,13 +1201,19 @@ export class InventoryPanel {
 
   /** Re-layout grid, footer thirds, sell controls, upgrade panel, header, and close. */
   private layoutWarehousePanel(): void {
+    const zoom = this.layoutScaleZoom();
+    const warehouseModalSize = (w: number, h: number, aw: number, ah: number) =>
+      computeWarehouseModalPanelSize(w, h, aw, ah, zoom);
     this.typographyScale = getModalTypographyScale(
       this.viewportW,
       this.viewportH,
       (artPx) => this.artSpanH(artPx),
       WAREHOUSE_ART_W,
       WAREHOUSE_ART_H,
-      computeModalPanelSize
+      warehouseModalSize,
+      undefined,
+      undefined,
+      zoom
     );
     this.layoutWarehouseGrid();
     this.layoutWarehouseHeader();
@@ -1353,12 +1379,20 @@ export class InventoryPanel {
 
   /** Art fraction (0–1 of 1536×1024) → screen X through object-cover crop. */
   private fracX(f: number): number {
-    return this.artToScreen(f * WAREHOUSE_ART_W, 0).x;
+    return (
+      this.artToScreen(f * WAREHOUSE_ART_W, 0).x +
+      WAREHOUSE_INNER_OFFSET_X_PX +
+      WAREHOUSE_INNER_OFFSET_X_FRAC * this.panelW
+    );
   }
 
   /** Art fraction (0–1 of 1536×1024) → screen Y through object-cover crop. */
   private fracY(f: number): number {
-    return this.artToScreen(0, f * WAREHOUSE_ART_H).y;
+    return (
+      this.artToScreen(0, f * WAREHOUSE_ART_H).y +
+      WAREHOUSE_INNER_OFFSET_Y_PX +
+      WAREHOUSE_INNER_OFFSET_Y_FRAC * this.panelH
+    );
   }
 
   private spanW(fracW: number): number {
@@ -1901,7 +1935,10 @@ export class InventoryPanel {
         x,
         y,
         `${count}`,
-        warehouseTitleLikeTextStyle('small', { fontSize: `${fontSizePx}px` })
+        warehouseTitleLikeTextStyle('small', {
+          fontSize: `${fontSizePx}px`,
+          align: 'center',
+        })
       )
       .setOrigin(0.5, 0.5);
   }
@@ -2798,9 +2835,10 @@ export class InventoryPanel {
         this.listContainer.add(ring);
       }
 
+      const qtyBadge = slotQtyBadgeCenterFrac();
       const qty = this.createSlotQtyText(
-        cellLeft + this.cellW * SLOT_QTY_RIGHT_FRAC + this.artSpanW(SLOT_QTY_OFFSET_X_ART_PX),
-        cellTop + this.cellH * SLOT_QTY_Y_FRAC + this.artSpanH(SLOT_QTY_OFFSET_Y_ART_PX),
+        cellLeft + this.cellW * qtyBadge.x,
+        cellTop + this.cellH * qtyBadge.y,
         slot.count
       );
 

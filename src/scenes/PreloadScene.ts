@@ -1,28 +1,53 @@
 import Phaser from 'phaser';
-import { ASSET_MANIFEST } from '../config/assets';
+import { applyViewportCoverBackground } from '../backgroundLayout';
+import { ASSET_MANIFEST, UI_LOADING_TEXTURE_KEY } from '../config/assets';
+import { getAssetPathToUrlMap } from '../utils/assetUrls';
 import { createPlaceholderTexture } from '../utils/placeholders';
+
+/** Baked progress bar band on ui/loading.png (1672×941 art px). */
+const LOADING_BAR_CENTER_Y_FRAC = 0.88;
+const LOADING_BAR_WIDTH_FRAC = 0.52;
+const LOADING_BAR_HEIGHT_ART = 14;
 
 export class PreloadScene extends Phaser.Scene {
   private loadedKeys = new Set<string>();
+  private splash?: Phaser.GameObjects.Image;
+  private progressFill?: Phaser.GameObjects.Rectangle;
 
   constructor() {
     super({ key: 'PreloadScene' });
   }
 
   preload(): void {
-    const barW = Math.min(280, this.scale.width * 0.7);
-    this.add.rectangle(this.scale.width / 2, this.scale.height / 2, barW, 12, 0x333333);
-    const fill = this.add.rectangle(this.scale.width / 2 - barW / 2, this.scale.height / 2, 0, 10, 0x5cb85c).setOrigin(0, 0.5);
-    this.add
-      .text(this.scale.width / 2, this.scale.height / 2 - 28, 'Loading Your Farm...', {
-        fontSize: '18px',
-        color: '#fff',
-        fontFamily: 'Arial',
-      })
-      .setOrigin(0.5);
+    const viewW = this.scale.width;
+    const viewH = this.scale.height;
+
+    if (this.textures.exists(UI_LOADING_TEXTURE_KEY)) {
+      this.splash = this.add
+        .image(viewW / 2, viewH / 2, UI_LOADING_TEXTURE_KEY)
+        .setOrigin(0.5, 0.5)
+        .setDepth(-10);
+      applyViewportCoverBackground(this.splash, viewW, viewH);
+    }
+
+    const barW = Math.min(Math.round(viewW * LOADING_BAR_WIDTH_FRAC), 520);
+    const barH = Math.max(8, Math.round((LOADING_BAR_HEIGHT_ART / 941) * viewH));
+    const barY = viewH * LOADING_BAR_CENTER_Y_FRAC;
+    const track = this.add
+      .rectangle(viewW / 2, barY, barW, barH, 0x000000, 0.35)
+      .setOrigin(0.5, 0.5)
+      .setDepth(10);
+    this.progressFill = this.add
+      .rectangle(viewW / 2 - barW / 2, barY, 0, barH - 2, 0x7dce7d)
+      .setOrigin(0, 0.5)
+      .setDepth(11);
+    track.setAlpha(this.splash ? 0 : 1);
+    if (this.splash) {
+      this.progressFill.setAlpha(0.85);
+    }
 
     this.load.on('progress', (v: number) => {
-      fill.width = barW * v;
+      if (this.progressFill) this.progressFill.width = Math.max(0, barW * v - 2);
     });
 
     this.load.on('filecomplete', (key: string) => {
@@ -44,18 +69,7 @@ export class PreloadScene extends Phaser.Scene {
       }
     });
 
-    const pngModules = import.meta.glob('../assets/**/*.png', {
-      eager: true,
-      query: '?url',
-      import: 'default',
-    }) as Record<string, string>;
-
-    const pathToUrl = new Map<string, string>();
-    for (const [fullPath, url] of Object.entries(pngModules)) {
-      const match = fullPath.match(/assets\/(.+\.png)$/);
-      if (match) pathToUrl.set(match[1].replace(/\\/g, '/'), url);
-    }
-
+    const pathToUrl = getAssetPathToUrlMap();
     for (const entry of ASSET_MANIFEST) {
       const url = pathToUrl.get(entry.path);
       if (url) {
@@ -70,6 +84,9 @@ export class PreloadScene extends Phaser.Scene {
         createPlaceholderTexture(this, entry);
       }
     }
+
+    this.splash?.destroy();
+    this.progressFill?.destroy();
 
     this.scene.start('FarmScene');
     this.scene.launch('UIScene');

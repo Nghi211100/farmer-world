@@ -1,4 +1,11 @@
 import Phaser from 'phaser';
+import { applyViewportCoverBackground } from '../backgroundLayout';
+import {
+  computeFarmIslandWorldDepth,
+  FARM_ISLAND_SCALE_BOOST,
+  isFarmNorthEdgeCell,
+  layoutFarmIslandImage,
+} from '../farmIslandLayout';
 import { getCropDef } from '../config/CropConfig';
 import {
   DEFAULT_COINS,
@@ -8,10 +15,14 @@ import {
   isDebugMode,
   isFarmGridDebug,
   isPersistentToolBarEnabled,
+  LAND_EXPAND_STRINGS,
   PlayerFarmAction,
+  SOIL_IDLE_STRINGS,
 } from '../config/gameConfig';
 import { CropSelectPopup } from '../ui/CropSelectPopup';
 import { FarmActionPopup, type FarmPopupAction } from '../ui/FarmActionPopup';
+import { ExpandLandDimOverlay } from '../ui/ExpandLandDimOverlay';
+import { LandUnlockConfirm } from '../ui/LandUnlockConfirm';
 import { BuildingSprite, renderBuildings } from '../entities/Building';
 import { cropKey, CropSprite, syncCropSprites } from '../entities/Crop';
 import { renderMapDecorations } from '../entities/Decoration';
@@ -23,39 +34,53 @@ import { GridSystem } from '../systems/GridSystem';
 import { playDigDust, playPlantEffect, playWaterDrop } from '../systems/ActionEffects';
 import { playHarvestEffects } from '../systems/HarvestEffects';
 import {
+  applyIsoBottomBorderWaterSprite,
   applyIsoTileSprite,
-  WATER_GROUND_DISPLAY_SCALE,
+  applyIsoTopBorderWaterSprite,
   DISPLAY_SIZE,
   drawIsoTileClickPick,
   drawIsoTileDebug,
+  FARM_NORTH_EDGE_GROUND_SCALE,
+  GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
   tileCenterFromTop,
-  TILE_HEIGHT,
-  TILE_WIDTH,
 } from '../utils/iso';
+import {
+  getWaterCornerDisplayOffset,
+  getWaterGroundDisplayScale,
+  getWaterTextureDisplayOffset,
+  WATER_BOTTOM_BORDER_TEXTURE_KEY,
+  WATER_TOP_BORDER_TEXTURE_KEY,
+  type WaterNeighborProbe,
+} from '../utils/waterAutotile';
 import { EnergySystem } from '../systems/EnergySystem';
 import { InventorySystem } from '../systems/InventorySystem';
 import { LandSystem } from '../systems/LandSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import type { BuildItemDef } from '../systems/BuildSystem';
 import type { BuildingData } from '../config/gameConfig';
-import { bottomHudBandHeight, bottomHudBandTop, topHudBandHeight } from '../ui/hudLayout';
+import {
+  bottomHudBandHeight,
+  bottomHudBandTop,
+  expandSelectHintToastFontSize,
+  rightHudBandWidth,
+  topHudBandHeight,
+} from '../ui/hudLayout';
 import { ToolBar } from '../ui/ToolBar';
+import { exceedsDragThreshold } from '../utils/pointerGesture';
 
 type FarmMode = 'normal' | 'build' | 'expand' | 'plant';
 
 /** Farm camera zoom limits (wheel dy×0.001, pinch dist×0.005). */
-const MIN_CAMERA_ZOOM = 1.3;
-const MAX_CAMERA_ZOOM = 1.7;
-/** Screen inset for farm soil bottom-right anchor (góc phải dưới). */
-const FARM_ANCHOR_MARGIN_X = 16;
-const FARM_ANCHOR_MARGIN_Y = 16;
+const MIN_CAMERA_ZOOM = 1.1;
+const MAX_CAMERA_ZOOM = 3.0;
 /** Padding inside playable HUD band when fitting the farm diamond. */
-const FARM_FIT_PAD_X = 20;
-const FARM_FIT_PAD_Y = 20;
-/** World padding around map AABB for background (matches camera bounds pad). */
-const BG_WORLD_PAD = 80;
-
+const FARM_FIT_PAD_X = 10;
+const FARM_FIT_PAD_Y = 10;
+/** Zoom past strict fit so FARM_SOIL_BOUNDS fills the viewport (less outer water at edges). */
+const FARM_INITIAL_ZOOM_BOOST = 1.12;
+/** Nudge camera to keep north path/soil apex inside the playable band. */
+const FARM_CAMERA_NORTH_BIAS_PX = 28;
 export class FarmScene extends Phaser.Scene {
   grid!: GridSystem;
   farming!: FarmingSystem;
@@ -77,6 +102,8 @@ export class FarmScene extends Phaser.Scene {
   private farmActionPopup!: FarmActionPopup;
   private farmPopupsReady = false;
   private cropSelectPopup!: CropSelectPopup;
+  private landUnlockConfirm!: LandUnlockConfirm;
+  private pendingExpandTile?: { x: number; y: number };
   private toolBar?: ToolBar;
 
   private tileSprites: Phaser.GameObjects.Image[] = [];
@@ -88,12 +115,18 @@ export class FarmScene extends Phaser.Scene {
   private cropSprites = new Map<string, CropSprite>();
   private buildingSprites = new Map<string, BuildingSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
-  private expandHighlight?: Phaser.GameObjects.Rectangle;
+  private expandDimOverlay?: ExpandLandDimOverlay;
   private decorations: ReturnType<typeof renderMapDecorations> = [];
   private backgroundImage?: Phaser.GameObjects.Image;
+  private farmIslandImage?: Phaser.GameObjects.Image;
   private resizeLayoutTimer?: ReturnType<typeof setTimeout>;
 
   private isDragging = false;
+  private pointerGestureActive = false;
+  private pointerGestureDragged = false;
+  private pointerGestureCancelled = false;
+  private pointerGestureStartX = 0;
+  private pointerGestureStartY = 0;
   private lastPinchDist = 0;
   private saveTimer = 0;
   private readonly onPageHide = () => this.flushSave();
@@ -119,18 +152,18 @@ export class FarmScene extends Phaser.Scene {
       this.scale.width,
       this.scale.height,
       this.topHudBand(),
-      this.bottomHudBand(),
-      FARM_ANCHOR_MARGIN_X,
-      FARM_ANCHOR_MARGIN_Y
+      this.bottomHudBand()
     );
     this.setupBackground();
     this.layoutBackground();
+    this.setupFarmIsland();
+    this.layoutFarmIsland();
     this.renderMap();
     this.setupPlayer();
     this.setupCamera();
     this.layoutBackground();
-    this.setupInput();
     this.setupFarmPopups();
+    this.setupInput();
     if (isPersistentToolBarEnabled()) {
       this.setupToolBar();
     }
@@ -269,46 +302,63 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
-  /** World-attached background (pans/zooms with farm tiles). */
+  /** Logical viewport for layout (scale manager; matches HUD). */
+  private getLayoutViewportSize(): { width: number; height: number } {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    return { width: w > 0 ? w : 1, height: h > 0 ? h : 1 };
+  }
+
+  /** Keep main camera in sync with scale after hi-DPI resize (avoids stale cam.width). */
+  private syncMainCameraViewport(): void {
+    const { width, height } = this.getLayoutViewportSize();
+    this.cameras.main.setSize(width, height);
+  }
+
+  /** Screen-fixed background (cover-fills viewport; iso map diamond leaves corners otherwise). */
   private setupBackground(): void {
     this.backgroundImage = this.add
       .image(0, 0, 'ui_background')
-      .setOrigin(0.5)
-      .setScrollFactor(1)
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
       .setDepth(-10000);
   }
 
-  /**
-   * Size/position background in world space.
-   * Baseline at MIN_CAMERA_ZOOM: cover viewport + full camera-bounds AABB (no gaps when zoomed out).
-   * displaySize stays fixed in world units; camera zoom scales it on screen like ground tiles.
-   */
+  /** Cover-fit background to the full logical viewport (resize + orientation). */
   private layoutBackground(): void {
     const bg = this.backgroundImage;
     if (!bg) return;
 
-    const viewW = this.scale.width;
-    const viewH = this.scale.height;
-    if (viewW <= 0 || viewH <= 0) return;
+    this.syncMainCameraViewport();
+    const cam = this.cameras.main;
+    const viewW = cam.width > 0 ? cam.width : this.getLayoutViewportSize().width;
+    const viewH = cam.height > 0 ? cam.height : this.getLayoutViewportSize().height;
+    applyViewportCoverBackground(bg, viewW, viewH);
+    bg.setPosition(viewW / 2, viewH / 2);
+  }
 
-    const mapBounds = this.grid.getMapScreenBounds();
-    const worldW = mapBounds.maxX - mapBounds.minX + BG_WORLD_PAD * 2;
-    const worldH = mapBounds.maxY - mapBounds.minY + BG_WORLD_PAD * 2;
-    const viewWorldW = viewW / MIN_CAMERA_ZOOM;
-    const viewWorldH = viewH / MIN_CAMERA_ZOOM;
-    const reqW = Math.max(viewWorldW, worldW);
-    const reqH = Math.max(viewWorldH, worldH);
+  /**
+   * World-space island art under the 8×8 farm soil patch (scrolls with camera).
+   * Uniform cover-fit to soil screen AABB — see farmIslandLayout.ts.
+   */
+  private setupFarmIsland(): void {
+    this.farmIslandImage = this.add
+      .image(0, 0, 'farm_island')
+      .setDepth(computeFarmIslandWorldDepth());
+  }
 
-    const texW = bg.frame.realWidth || bg.frame.width;
-    const texH = bg.frame.realHeight || bg.frame.height;
-    if (texW <= 0 || texH <= 0) {
-      bg.setDisplaySize(reqW, reqH);
-    } else {
-      const coverScale = Math.max(reqW / texW, reqH / texH);
-      bg.setDisplaySize(texW * coverScale, texH * coverScale);
-    }
+  /** Cover-fit island.png to farm soil bounds; scaled by FARM_ISLAND_SCALE_BOOST. */
+  private layoutFarmIsland(): void {
+    const image = this.farmIslandImage;
+    if (!image) return;
 
-    bg.setPosition(mapBounds.centerX, mapBounds.centerY);
+    const frame = image.frame;
+    const texW = frame.cutWidth || frame.width;
+    const texH = frame.cutHeight || frame.height;
+    image.setDepth(computeFarmIslandWorldDepth());
+    layoutFarmIslandImage(image, this.grid.getFarmSoilScreenRhombus(), texW, texH, {
+      scaleBoost: FARM_ISLAND_SCALE_BOOST,
+    });
   }
 
   private renderMap(): void {
@@ -328,6 +378,26 @@ export class FarmScene extends Phaser.Scene {
 
     this.renderTileDebugOutlines();
     this.decorations = renderMapDecorations(this, this.grid);
+    this.ensureNorthApexGroundDrawnOnTop();
+  }
+
+  /** Re-stack north path/soil ground sprites above island.png after layout changes. */
+  private ensureNorthApexGroundDrawnOnTop(): void {
+    const island = this.farmIslandImage;
+    if (island) {
+      island.setDepth(computeFarmIslandWorldDepth());
+      this.children.sendToBack(island);
+    }
+    const size = this.grid.size;
+    for (let gy = 0; gy < size; gy++) {
+      for (let gx = 0; gx < size; gx++) {
+        if (!isFarmNorthEdgeCell(gx, gy)) continue;
+        const spr = this.tileSprites[gy * size + gx];
+        if (!spr?.visible) continue;
+        spr.setDepth(this.grid.getDepth(gx, gy, 'ground'));
+        this.children.bringToTop(spr);
+      }
+    }
   }
 
   private renderTileDebugOutlines(): void {
@@ -392,20 +462,68 @@ export class FarmScene extends Phaser.Scene {
       spr.setVisible(false);
       return;
     }
+    if (this.grid.hidesGroundForFarmIsland(gx, gy)) {
+      spr.setVisible(false);
+      return;
+    }
     spr.setVisible(true);
-    spr.setTexture(
-      this.grid.getGroundTextureKey(gx, gy, {
-        farmPlotGround: this.farming.showsFarmPlotGround(gx, gy),
-        dug: this.farming.isDugEmptySoil(gx, gy),
-      })
-    );
+    const textureKey = this.grid.getGroundTextureKey(gx, gy, {
+      farmPlotGround: this.farming.showsFarmPlotGround(gx, gy),
+      dug: this.farming.showsSoilMoistureGround(gx, gy),
+      soilWaterLevel: this.farming.getGroundSoilWaterLevel(gx, gy),
+    });
+    spr.setTexture(textureKey);
+    spr.clearTint();
     const top = this.grid.gridToScreen(gx, gy);
-    spr.setPosition(top.x, top.y);
-    applyIsoTileSprite(
-      spr,
-      cell.type === 'water' ? WATER_GROUND_DISPLAY_SCALE : 1
-    );
+    let px = top.x;
+    let py = top.y;
+    if (cell.type === 'water') {
+      const probe: WaterNeighborProbe = (nx, ny) => {
+        if (!this.grid.inBounds(nx, ny)) return false;
+        return this.grid.getCell(nx, ny)?.type === 'water';
+      };
+      const nudge = getWaterCornerDisplayOffset(gx, gy, probe);
+      if (nudge) {
+        px += nudge.dx;
+        py += nudge.dy;
+      }
+      const textureNudge = getWaterTextureDisplayOffset(textureKey);
+      if (textureNudge) {
+        px += textureNudge.dx;
+        py += textureNudge.dy;
+      }
+    }
+    spr.setPosition(px, py);
+    const underFarmIsland = this.grid.isFarmIslandFootprintCell(gx, gy);
+    if (cell.type === 'water') {
+      if (textureKey === WATER_TOP_BORDER_TEXTURE_KEY) {
+        applyIsoTopBorderWaterSprite(spr);
+      } else if (textureKey === WATER_BOTTOM_BORDER_TEXTURE_KEY) {
+        applyIsoBottomBorderWaterSprite(spr);
+      } else {
+        const waterScale = getWaterGroundDisplayScale();
+        applyIsoTileSprite(
+          spr,
+          underFarmIsland
+            ? Math.max(waterScale, GROUND_TILE_SEAM_SCALE)
+            : waterScale
+        );
+      }
+    } else {
+      applyIsoTileSprite(spr, this.farmFootprintGroundScale(gx, gy));
+    }
     spr.setDepth(this.grid.getDepth(gx, gy, 'ground'));
+  }
+
+  /** Seam scale for farm soil + path ring; north apex row is enlarged to mask island cliff bleed. */
+  private farmFootprintGroundScale(gx: number, gy: number): number {
+    if (!this.grid.isFarmIslandFootprintCell(gx, gy)) {
+      return GROUND_TILE_SEAM_SCALE;
+    }
+    if (isFarmNorthEdgeCell(gx, gy)) {
+      return Math.max(GROUND_TILE_SEAM_SCALE, FARM_NORTH_EDGE_GROUND_SCALE);
+    }
+    return GROUND_TILE_SEAM_SCALE;
   }
 
   private refreshTileAt(gx: number, gy: number): void {
@@ -413,6 +531,19 @@ export class FarmScene extends Phaser.Scene {
     const spr = this.tileSprites[idx];
     if (!spr) return;
     this.applyGroundTileAt(gx, gy, spr);
+  }
+
+  /** Refresh purchased tile and orthogonal neighbors (locked decor / moisture edges). */
+  private refreshPurchasedLandTiles(gx: number, gy: number): void {
+    this.refreshTileAt(gx, gy);
+    for (const [ax, ay] of [
+      [gx + 1, gy],
+      [gx - 1, gy],
+      [gx, gy + 1],
+      [gx, gy - 1],
+    ]) {
+      if (this.grid.inBounds(ax, ay)) this.refreshTileAt(ax, ay);
+    }
   }
 
   /** Refresh unlocked/locked farm soil ground textures (moisture + decor). */
@@ -427,64 +558,83 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private setupCamera(): void {
-    this.centerCameraOnMap();
+    this.focusCameraOnFarmSoil();
+    this.time.delayedCall(0, () => this.focusCameraOnFarmSoil());
   }
 
   /**
-   * Fit farm soil diamond in the playable HUD band with bottom-right anchored on screen.
+   * Re-layout grid + camera after HUD/safe-area/viewport are stable (first load, ui-ready, resize).
+   */
+  private focusCameraOnFarmSoil(): void {
+    const { width: w, height: h } = this.getLayoutViewportSize();
+    if (w <= 1 || h <= 1) return;
+    this.syncMainCameraViewport();
+    this.grid.centerInViewport(w, h, this.topHudBand(), this.bottomHudBand());
+    this.repositionWorld();
+    this.centerCameraOnMap();
+    this.layoutBackground();
+  }
+
+  /**
+   * Fit the full farm soil patch in the playable HUD band, centered on patch center.
    * screen = (world - scroll) * zoom  =>  scroll = world - screen / zoom
    */
   private centerCameraOnMap(): void {
     const cam = this.cameras.main;
-    const mapBounds = this.grid.getMapScreenBounds();
     const farm = this.grid.getFarmSoilScreenBounds();
-    const anchor = this.grid.getFarmSoilBottomRightAnchor();
-    const pad = 80;
-    cam.setBounds(
-      mapBounds.minX - pad,
-      mapBounds.minY - pad,
-      mapBounds.maxX - mapBounds.minX + pad * 2,
-      mapBounds.maxY - mapBounds.minY + pad * 2
-    );
+    const anchor = this.grid.getFarmSoilPatchCenterScreen();
+    cam.removeBounds();
 
-    const viewW = cam.width;
-    const viewH = cam.height;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
     const playableLeft = FARM_FIT_PAD_X;
     const topBand = this.topHudBand();
     const bottomBand = this.bottomHudBand();
+    const rightBand = this.rightHudBand();
     const playableTop = topBand + FARM_FIT_PAD_Y;
-    const playableRight = viewW - FARM_FIT_PAD_X;
+    const playableRight = viewW - rightBand - FARM_FIT_PAD_X;
     const playableBottom = viewH - bottomBand - FARM_FIT_PAD_Y;
-    const targetAnchorX = viewW - FARM_ANCHOR_MARGIN_X;
-    const targetAnchorY = viewH - bottomBand - FARM_ANCHOR_MARGIN_Y;
+    // Match GridSystem.centerInViewport: patch center at viewport center (not playable-band center).
+    const targetCenterX = viewW / 2;
+    const targetCenterY = (viewH + topBand - bottomBand) / 2;
 
     const farmW = farm.maxX - farm.minX;
     const farmH = farm.maxY - farm.minY;
-    const fitZoom = Math.min(
-      (playableRight - playableLeft) / farmW,
-      (playableBottom - playableTop) / farmH
+    const map = this.grid.getMapScreenBounds();
+    const mapW = map.maxX - map.minX;
+    const mapH = map.maxY - map.minY;
+    const playableW = playableRight - playableLeft;
+    const playableH = playableBottom - playableTop;
+    const fitZoom = Math.min(playableW / farmW, playableH / farmH);
+    const mapCoverZoom = Math.min(playableW / mapW, playableH / mapH);
+    const zoom = Phaser.Math.Clamp(
+      Math.min(fitZoom * FARM_INITIAL_ZOOM_BOOST, mapCoverZoom),
+      MIN_CAMERA_ZOOM,
+      MAX_CAMERA_ZOOM
     );
-    let zoom = Phaser.Math.Clamp(fitZoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
 
-    const applyAnchorScroll = (z: number): void => {
-      cam.setZoom(z);
-      cam.scrollX = anchor.x - targetAnchorX / z;
-      cam.scrollY = anchor.y - targetAnchorY / z;
-    };
+    const idealScroll = (z: number): { x: number; y: number } => ({
+      x: anchor.x - targetCenterX / z,
+      y: anchor.y - targetCenterY / z,
+    });
 
-    applyAnchorScroll(zoom);
+    cam.setZoom(zoom);
+    const scroll = idealScroll(zoom);
+    cam.scrollX = scroll.x;
+    cam.scrollY = scroll.y;
 
-    const farmScreenMinX = (farm.minX - cam.scrollX) * zoom;
-    const farmScreenMinY = (farm.minY - cam.scrollY) * zoom;
-    if (farmScreenMinX < playableLeft || farmScreenMinY < playableTop) {
-      zoom = Phaser.Math.Clamp(Math.min(fitZoom, zoom), MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
-      applyAnchorScroll(zoom);
-      if ((farm.minX - cam.scrollX) * zoom < playableLeft) {
-        cam.scrollX = farm.minX - playableLeft / zoom;
-      }
-      if ((farm.minY - cam.scrollY) * zoom < playableTop) {
-        cam.scrollY = farm.minY - playableTop / zoom;
-      }
+    const scrollMinX = farm.maxX - playableRight / zoom;
+    const scrollMaxX = farm.minX - playableLeft / zoom;
+    const scrollMinY = farm.maxY - playableBottom / zoom;
+    const scrollMaxY = farm.minY - playableTop / zoom;
+    if (scrollMinX <= scrollMaxX) {
+      cam.scrollX = Phaser.Math.Clamp(cam.scrollX, scrollMinX, scrollMaxX);
+    }
+    if (scrollMinY <= scrollMaxY) {
+      cam.scrollY = Phaser.Math.Clamp(cam.scrollY, scrollMinY, scrollMaxY);
+    }
+    cam.scrollY -= FARM_CAMERA_NORTH_BIAS_PX / zoom;
+    if (scrollMinY <= scrollMaxY) {
+      cam.scrollY = Phaser.Math.Clamp(cam.scrollY, scrollMinY, scrollMaxY);
     }
   }
 
@@ -497,31 +647,26 @@ export class FarmScene extends Phaser.Scene {
 
   private handleResize(gameSize: Phaser.Structs.Size): void {
     this.toolBar?.resize(gameSize.width, gameSize.height);
+    this.landUnlockConfirm?.resize();
+    this.syncMainCameraViewport();
+    this.layoutBackground();
     if (this.resizeLayoutTimer !== undefined) {
       clearTimeout(this.resizeLayoutTimer);
     }
     this.resizeLayoutTimer = setTimeout(() => {
       this.resizeLayoutTimer = undefined;
-      this.grid.centerInViewport(
-        gameSize.width,
-        gameSize.height,
-        topHudBandHeight(gameSize.width, gameSize.height),
-        bottomHudBandHeight(gameSize.width, gameSize.height),
-        FARM_ANCHOR_MARGIN_X,
-        FARM_ANCHOR_MARGIN_Y
-      );
-      this.repositionWorld();
-      this.centerCameraOnMap();
-      this.layoutBackground();
+      this.focusCameraOnFarmSoil();
     }, 100);
   }
 
   private repositionWorld(): void {
+    this.layoutFarmIsland();
     for (let i = 0; i < this.tileSprites.length; i++) {
       const gx = i % this.grid.size;
       const gy = Math.floor(i / this.grid.size);
       this.applyGroundTileAt(gx, gy, this.tileSprites[i]);
     }
+    this.ensureNorthApexGroundDrawnOnTop();
     for (const d of this.decorations) {
       const foot = this.grid.gridToTileBottom(d.gridX, d.gridY);
       d.sprite.setPosition(foot.x, foot.y);
@@ -537,6 +682,7 @@ export class FarmScene extends Phaser.Scene {
     renderBuildings(this, this.grid, this.buildSystem.getBuildings(), this.buildingSprites);
     this.renderTileDebugOutlines();
     this.refreshClickPickDebug();
+    this.expandDimOverlay?.refresh();
   }
 
   private topHudBand(): number {
@@ -547,13 +693,119 @@ export class FarmScene extends Phaser.Scene {
     return bottomHudBandHeight(this.scale.width, this.scale.height);
   }
 
+  private rightHudBand(): number {
+    return rightHudBandWidth(this.scale.width, this.scale.height);
+  }
+
   /** Screen Y at which the bottom HUD bar begins (leave taps for UIScene). */
   private bottomHudBandTopY(): number {
     return bottomHudBandTop(this.scale.width, this.scale.height);
   }
 
+  private rightHudBandLeftX(): number {
+    return this.scale.width - this.rightHudBand();
+  }
+
   private isPointerInBottomHud(pointer: Phaser.Input.Pointer): boolean {
     return pointer.y >= this.bottomHudBandTopY();
+  }
+
+  private isPointerInRightHud(pointer: Phaser.Input.Pointer): boolean {
+    return pointer.x >= this.rightHudBandLeftX();
+  }
+
+  private beginPointerGesture(pointer: Phaser.Input.Pointer): void {
+    this.pointerGestureActive = true;
+    this.pointerGestureDragged = false;
+    this.pointerGestureCancelled = false;
+    this.pointerGestureStartX = pointer.x;
+    this.pointerGestureStartY = pointer.y;
+    this.isDragging = false;
+  }
+
+  private cancelPointerGesture(): void {
+    this.pointerGestureActive = false;
+    this.pointerGestureDragged = false;
+    this.pointerGestureCancelled = true;
+    this.isDragging = false;
+  }
+
+  private endPointerGesture(): void {
+    this.pointerGestureActive = false;
+    this.isDragging = false;
+  }
+
+  private updatePointerDragState(pointer: Phaser.Input.Pointer): void {
+    if (!this.pointerGestureActive || this.pointerGestureCancelled) return;
+    if (
+      !this.pointerGestureDragged &&
+      exceedsDragThreshold(
+        this.pointerGestureStartX,
+        this.pointerGestureStartY,
+        pointer.x,
+        pointer.y
+      )
+    ) {
+      this.pointerGestureDragged = true;
+      this.isDragging = true;
+    }
+  }
+
+  private panCameraWithPointer(pointer: Phaser.Input.Pointer): void {
+    const cam = this.cameras.main;
+    cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
+    cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+  }
+
+  /**
+   * Tile/building/walk handling on pointerup when movement stayed within drag threshold.
+   * Deferred from pointerdown so panning works when press starts on farm soil.
+   */
+  private handlePointerTap(pointer: Phaser.Input.Pointer): void {
+    const { x, y } = this.screenPointToGrid(pointer);
+    if (isDebugMode()) {
+      this.showClickPickDebug(x, y);
+    }
+
+    if (this.buildSystem.active && this.buildSystem.selectedItem) {
+      this.handleBuildPlace(x, y);
+      return;
+    }
+
+    if (this.farmMode === 'expand') {
+      if (!this.landUnlockConfirm.isVisible()) {
+        this.handleExpandLand(x, y);
+      }
+      return;
+    }
+
+    const cell = this.grid.getCell(x, y);
+    const building = this.buildSystem.findBuildingAt(x, y);
+
+    if (building && this.farmMode === 'normal') {
+      this.dismissFarmPopups();
+      this.events.emit('open-upgrade', building);
+      return;
+    }
+
+    if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
+      this.handleLockedFarmSoilTap(x, y);
+      return;
+    }
+
+    if (this.farmMode === 'normal' && cell && this.isFarmInteractableTile(x, y, cell)) {
+      this.dismissFarmPopups();
+      this.handleFarmTileTap(x, y, cell);
+      return;
+    }
+
+    this.dismissFarmPopups();
+    this.player.clearOnReach();
+    this.pendingFarmTile = undefined;
+
+    if (this.grid.isWalkable(x, y)) {
+      this.player.moveTo(x, y, this.grid);
+    }
   }
 
   private setupInput(): void {
@@ -564,7 +816,7 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
-      if (this.isPointerInBottomHud(pointer)) {
+      if (this.isPointerInBottomHud(pointer) || this.isPointerInRightHud(pointer)) {
         if (this.farmActionPopup.isVisible() || this.cropSelectPopup.isVisible()) {
           this.dismissFarmPopups();
         }
@@ -578,6 +830,11 @@ export class FarmScene extends Phaser.Scene {
           this.input.pointer2.x,
           this.input.pointer2.y
         );
+        this.cancelPointerGesture();
+        return;
+      }
+
+      if (this.handleLandUnlockPointer(pointer)) {
         return;
       }
 
@@ -585,50 +842,7 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
-      const { x, y } = this.screenPointToGrid(pointer);
-      if (isDebugMode()) {
-        this.showClickPickDebug(x, y);
-      }
-
-      if (this.buildSystem.active && this.buildSystem.selectedItem) {
-        this.handleBuildPlace(x, y);
-        return;
-      }
-
-      if (this.farmMode === 'expand') {
-        this.handleExpandLand(x, y);
-        return;
-      }
-
-      const cell = this.grid.getCell(x, y);
-      const building = this.buildSystem.findBuildingAt(x, y);
-
-      if (building && this.farmMode === 'normal') {
-        this.dismissFarmPopups();
-        this.events.emit('open-upgrade', building);
-        return;
-      }
-
-      if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
-        this.handleLockedFarmSoilTap(x, y);
-        return;
-      }
-
-      if (this.farmMode === 'normal' && cell && this.isFarmInteractableTile(x, y, cell)) {
-        this.dismissFarmPopups();
-        this.handleFarmTileTap(x, y, cell);
-        return;
-      }
-
-      this.dismissFarmPopups();
-      this.player.clearOnReach();
-      this.pendingFarmTile = undefined;
-
-      if (this.grid.isWalkable(x, y)) {
-        this.player.moveTo(x, y, this.grid);
-      } else if (!this.buildSystem.active) {
-        this.isDragging = true;
-      }
+      this.beginPointerGesture(pointer);
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -638,21 +852,28 @@ export class FarmScene extends Phaser.Scene {
         this.updateGhostSprite();
       }
 
-      if (this.farmMode === 'expand') {
-        const { x, y } = this.screenPointToGrid(pointer);
-        this.updateExpandHighlight(x, y);
+      if (this.pointerGestureActive && pointer.isDown) {
+        this.updatePointerDragState(pointer);
       }
 
       if (this.isDragging && pointer.isDown) {
-        const cam = this.cameras.main;
-        cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
-        cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+        this.panCameraWithPointer(pointer);
       }
     });
 
-    this.input.on('pointerup', () => {
-      this.isDragging = false;
-      this.expandHighlight?.setVisible(false);
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      const wasTap =
+        this.pointerGestureActive &&
+        !this.pointerGestureCancelled &&
+        !this.pointerGestureDragged;
+      this.endPointerGesture();
+      if (wasTap) {
+        this.handlePointerTap(pointer);
+      }
+    });
+
+    this.input.on('pointerupoutside', () => {
+      this.endPointerGesture();
     });
 
     this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, dy: number) => {
@@ -666,6 +887,7 @@ export class FarmScene extends Phaser.Scene {
 
     this.input.on('pointermove', () => {
       if (this.input.pointer1.isDown && this.input.pointer2?.isDown) {
+        this.cancelPointerGesture();
         const dist = Phaser.Math.Distance.Between(
           this.input.pointer1.x,
           this.input.pointer1.y,
@@ -696,57 +918,81 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
-  private handleExpandLand(gx: number, gy: number): void {
-    const canUnlock = this.landSystem.canUnlockSoilAt(this.grid, gx, gy);
-    const canExpand = this.landSystem.canExpandAt(this.grid, gx, gy);
-    const hasLocked = this.grid.getSoilTileCoords().some(({ x, y }) => this.grid.isLockedSoil(x, y));
+  private isExpandPurchaseTarget(gx: number, gy: number): boolean {
+    return (
+      this.landSystem.canUnlockSoilAt(this.grid, gx, gy) ||
+      this.landSystem.canExpandAt(this.grid, gx, gy)
+    );
+  }
 
-    if (!canUnlock && !canExpand && !hasLocked) {
-      this.showToast('Tap grass next to your farm');
+  private handleExpandLand(gx: number, gy: number): void {
+    if (!this.isExpandPurchaseTarget(gx, gy)) {
+      this.cancelExpandMode();
       return;
     }
-    if (!canUnlock && !canExpand && hasLocked) {
-      this.showToast('Tap locked plot or grass next to farm');
+
+    this.pendingExpandTile = { x: gx, y: gy };
+    const cost = this.economy.getLandCost();
+    this.expandDimOverlay?.hide();
+    this.landUnlockConfirm.show(
+      cost,
+      this.economy.getCoins(),
+      () => {
+        const tile = this.pendingExpandTile ?? { x: gx, y: gy };
+        this.confirmExpandLand(tile.x, tile.y);
+        if (this.farmMode === 'expand') {
+          this.expandDimOverlay?.show();
+        }
+      },
+      () => {
+        this.pendingExpandTile = undefined;
+        if (this.farmMode === 'expand') {
+          this.expandDimOverlay?.show();
+        }
+      }
+    );
+  }
+
+  private cancelExpandMode(): void {
+    this.landUnlockConfirm.hide();
+    this.pendingExpandTile = undefined;
+    if (this.farmMode === 'expand') {
+      this.setFarmMode('normal');
+    }
+  }
+
+  private confirmExpandLand(gx: number, gy: number): void {
+    this.pendingExpandTile = undefined;
+
+    if (!this.isExpandPurchaseTarget(gx, gy)) {
+      this.showToast(LAND_EXPAND_STRINGS.invalidTile);
       return;
     }
 
     const cost = this.economy.getLandCost();
     if (!this.economy.canAfford(cost)) {
-      this.showToast(`Need ${cost} coins to buy land`);
+      this.showToast(LAND_EXPAND_STRINGS.insufficientCoins(cost));
       return;
     }
+
     const spent = this.economy.purchaseLand();
     if (spent === null) return;
 
-    const beforeLocked = new Set(
-      this.grid.getSoilTileCoords().filter(({ x, y }) => this.grid.isLockedSoil(x, y)).map(({ x, y }) => `${x},${y}`)
-    );
     const result = this.landSystem.purchaseAt(this.grid, gx, gy);
     if (!result.ok) {
       this.economy.earn(spent);
-      this.showToast('No land available to buy here');
+      this.showToast(LAND_EXPAND_STRINGS.invalidTile);
       return;
     }
 
+    const tx = result.x ?? gx;
+    const ty = result.y ?? gy;
+    this.refreshPurchasedLandTiles(tx, ty);
+
     if (result.kind === 'unlock') {
-      for (const key of beforeLocked) {
-        const [nx, ny] = key.split(',').map(Number);
-        if (!this.grid.isLockedSoil(nx, ny)) {
-          this.refreshTileAt(nx, ny);
-          for (const [ax, ay] of [
-            [nx + 1, ny],
-            [nx - 1, ny],
-            [nx, ny + 1],
-            [nx, ny - 1],
-          ]) {
-            if (this.grid.inBounds(ax, ay)) this.refreshTileAt(ax, ay);
-          }
-        }
-      }
-      this.showToast(`Plot unlocked for ${spent} 🪙`);
+      this.showToast(LAND_EXPAND_STRINGS.successUnlock(spent));
     } else {
-      this.refreshTileAt(gx, gy);
-      this.showToast(`Land bought for ${spent} 🪙`);
+      this.showToast(LAND_EXPAND_STRINGS.successExpand(spent));
     }
     this.emitHud();
     this.scheduleSave();
@@ -764,11 +1010,107 @@ export class FarmScene extends Phaser.Scene {
       this.selectedSeedId = seedId;
       this.tryPlant(this.pendingFarmTile.x, this.pendingFarmTile.y, seedId);
     });
+    this.landUnlockConfirm = new LandUnlockConfirm(this);
+    this.expandDimOverlay = new ExpandLandDimOverlay(this, this.grid, (gx, gy) =>
+      this.isExpandPurchaseTarget(gx, gy)
+    );
     this.farmPopupsReady = true;
   }
 
   isFarmPopupsReadyForTest(): boolean {
     return this.farmPopupsReady;
+  }
+
+  /** Dev/test: neglect-dry a tilled plot immediately (see {@link FarmingSystem.forceSoilIdleDryForTest}). */
+  forceSoilIdleDryForTest(gx: number, gy: number): boolean {
+    if (!this.farming.forceSoilIdleDryForTest(gx, gy)) return false;
+    this.refreshTileAt(gx, gy);
+    return true;
+  }
+
+  refocusFarmCameraForTest(): ReturnType<FarmScene['getFarmCameraCenterMetricsForTest']> {
+    this.focusCameraOnFarmSoil();
+    return this.getFarmCameraCenterMetricsForTest();
+  }
+
+  /** Dev/e2e: farm patch center vs viewport center after camera layout. */
+  getFarmViewportDebugMetricsForTest(): {
+    scaleW: number;
+    scaleH: number;
+    displayScaleW: number;
+    displayScaleH: number;
+    gameConfigW: number;
+    gameConfigH: number;
+    camW: number;
+    camH: number;
+    camX: number;
+    camY: number;
+    camZoom: number;
+    gridOriginX: number;
+    gridOriginY: number;
+    mapBounds: ReturnType<GridSystem['getMapScreenBounds']>;
+    bg: { x: number; y: number; displayW: number; displayH: number } | null;
+  } {
+    const cam = this.cameras.main;
+    const bg = this.backgroundImage;
+    return {
+      scaleW: this.scale.width,
+      scaleH: this.scale.height,
+      displayScaleW: this.scale.displaySize.width,
+      displayScaleH: this.scale.displaySize.height,
+      gameConfigW: this.game.config.width as number,
+      gameConfigH: this.game.config.height as number,
+      camW: cam.width,
+      camH: cam.height,
+      camX: cam.x,
+      camY: cam.y,
+      camZoom: cam.zoom,
+      gridOriginX: this.grid.originX,
+      gridOriginY: this.grid.originY,
+      mapBounds: this.grid.getMapScreenBounds(),
+      bg: bg
+        ? { x: bg.x, y: bg.y, displayW: bg.displayWidth, displayH: bg.displayHeight }
+        : null,
+    };
+  }
+
+  getFarmCameraCenterMetricsForTest(): {
+    viewW: number;
+    viewH: number;
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    patchScreenX: number;
+    patchScreenY: number;
+    targetCenterX: number;
+    targetCenterY: number;
+    errorX: number;
+    errorY: number;
+  } {
+    const cam = this.cameras.main;
+    const anchor = this.grid.getFarmSoilPatchCenterScreen();
+    const z = cam.zoom;
+    const viewW = this.scale.width;
+    const viewH = this.scale.height;
+    const topBand = this.topHudBand();
+    const bottomBand = this.bottomHudBand();
+    const targetCenterX = viewW / 2;
+    const targetCenterY = (viewH + topBand - bottomBand) / 2;
+    const patchScreenX = (anchor.x - cam.scrollX) * z;
+    const patchScreenY = (anchor.y - cam.scrollY) * z;
+    return {
+      viewW,
+      viewH,
+      scrollX: cam.scrollX,
+      scrollY: cam.scrollY,
+      zoom: z,
+      patchScreenX,
+      patchScreenY,
+      targetCenterX,
+      targetCenterY,
+      errorX: patchScreenX - targetCenterX,
+      errorY: patchScreenY - targetCenterY,
+    };
   }
 
   /** Clears pending tile state after popups close / plant completes. */
@@ -803,6 +1145,11 @@ export class FarmScene extends Phaser.Scene {
   /** Bottom bar + hint band — never steal clicks from UIScene HUD. */
   private isPointerOnHud(pointer: Phaser.Input.Pointer): boolean {
     return pointer.y >= this.scale.height - 80;
+  }
+
+  private handleLandUnlockPointer(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.landUnlockConfirm?.isVisible()) return false;
+    return this.landUnlockConfirm.handlePointerDown(pointer);
   }
 
   private handleFarmPopupPointer(pointer: Phaser.Input.Pointer): boolean {
@@ -1109,6 +1456,10 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private handleHarvest(gx: number, gy: number): boolean {
+    if (this.farming.isReadyButSoilIdleDry(gx, gy)) {
+      this.showToast(SOIL_IDLE_STRINGS.cannotHarvest);
+      return false;
+    }
     if (!this.farming.isReady(gx, gy)) {
       if (this.farming.isGrowing(gx, gy)) this.showToast('Not ready yet');
       return false;
@@ -1172,6 +1523,9 @@ export class FarmScene extends Phaser.Scene {
     }
     if (!this.farming.plant(gx, gy, kind)) {
       this.inventory.add(seedId, 1);
+      if (this.farming.isSoilIdleDry(gx, gy)) {
+        this.showToast(SOIL_IDLE_STRINGS.cannotPlant);
+      }
       this.finishFarmInteraction();
       return false;
     }
@@ -1209,38 +1563,53 @@ export class FarmScene extends Phaser.Scene {
   }
 
   setFarmMode(mode: FarmMode): void {
+    const enteringExpand = mode === 'expand' && this.farmMode !== 'expand';
     this.farmMode = mode;
     if (mode !== 'build') {
       this.buildSystem.exitBuildMode();
       this.ghostSprite?.setVisible(false);
     }
+    if (mode !== 'expand') {
+      this.landUnlockConfirm?.hide();
+      this.pendingExpandTile = undefined;
+      this.expandDimOverlay?.hide();
+    } else if (enteringExpand) {
+      this.showToast(LAND_EXPAND_STRINGS.selectHint, { prominent: true });
+      this.expandDimOverlay?.show();
+    }
     const seedHint =
       this.selectedSeedId && this.inventory.cropKindFromSeedId(this.selectedSeedId)
         ? getCropDef(this.inventory.cropKindFromSeedId(this.selectedSeedId)!).name
         : 'a crop';
-    const hints: Record<FarmMode, string> = {
-      normal: 'Tap farm soil for actions — walk elsewhere',
+    const hints: Record<Exclude<FarmMode, 'normal'>, string> = {
       build: 'Tap to place building',
-      expand: `Buy land (${this.economy.getLandCost()} 🪙) — tap locked plot or grass`,
+      expand: LAND_EXPAND_STRINGS.selectHint,
       plant: this.selectedSeedId
         ? `Seed tool: tap dug soil to plant ${seedHint}`
         : 'Seed tool: pick seed in panel, dig soil, then plant',
     };
-    this.events.emit('mode-hint', hints[mode]);
+    if (mode === 'normal') {
+      this.events.emit('mode-hint', { text: '', prominent: false });
+    } else {
+      this.events.emit('mode-hint', { text: hints[mode], prominent: mode === 'expand' });
+    }
   }
 
   private setupUISync(): void {
-    const ui = this.scene.get('UIScene');
-    this.events.on('ui-ready', () => this.emitGameRefs());
-    ui.events.on('build-select', (item: BuildItemDef) => {
+    // UIScene emits these on FarmScene.events (not UIScene.events).
+    this.events.on('ui-ready', () => {
+      this.emitGameRefs();
+      this.focusCameraOnFarmSoil();
+    });
+    this.events.on('build-select', (item: BuildItemDef) => {
       this.buildSystem.enterBuildMode(item);
       this.setFarmMode('build');
       this.updateGhostSprite();
     });
-    ui.events.on('menu-action', (action: string) => this.handleMenuAction(action));
-    ui.events.on('dismiss-farm-popups', () => this.dismissFarmPopups());
-    ui.events.on('plant-seed-selected', (seedId: string) => this.tryPlantFromUI(seedId));
-    ui.events.on('request-save', () => this.scheduleSave());
+    this.events.on('menu-action', (action: string) => this.handleMenuAction(action));
+    this.events.on('dismiss-farm-popups', () => this.dismissFarmPopups());
+    this.events.on('plant-seed-selected', (seedId: string) => this.tryPlantFromUI(seedId));
+    this.events.on('request-save', () => this.scheduleSave());
     this.events.on('upgrade-building', (building: BuildingData) => {
       this.upgradeBuilding(building);
     });
@@ -1272,29 +1641,20 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
-  private updateExpandHighlight(gx: number, gy: number): void {
-    const can =
-      this.landSystem.canUnlockSoilAt(this.grid, gx, gy) ||
-      this.landSystem.canExpandAt(this.grid, gx, gy);
-    const pos = this.grid.gridToTileCenter(gx, gy);
-    if (!this.expandHighlight) {
-      this.expandHighlight = this.add
-        .rectangle(pos.x, pos.y, TILE_WIDTH, TILE_HEIGHT, 0x27ae60, 0.35)
-        .setOrigin(0.5, 0.5)
-        .setDepth(5000);
-    }
-    this.expandHighlight.setPosition(pos.x, pos.y);
-    this.expandHighlight.setFillStyle(can ? 0x27ae60 : 0xe74c3c, 0.35);
-    this.expandHighlight.setVisible(this.farmMode === 'expand');
-  }
-
-  private showToast(msg: string): void {
+  private showToast(msg: string, opts?: { prominent?: boolean }): void {
+    const vw = this.scale.width;
+    const vh = this.scale.height;
+    const prominent = Boolean(opts?.prominent);
+    const fontSize = prominent
+      ? expandSelectHintToastFontSize(vw, vh)
+      : '14px';
+    const pad = prominent ? { x: 16, y: 10 } : { x: 10, y: 6 };
     const txt = this.add
-      .text(this.scale.width / 2, 80, msg, {
-        fontSize: '14px',
+      .text(vw / 2, prominent ? 96 : 80, msg, {
+        fontSize,
         color: '#fff',
         backgroundColor: '#000000aa',
-        padding: { x: 10, y: 6 },
+        padding: pad,
         fontFamily: 'Arial',
       })
       .setOrigin(0.5)

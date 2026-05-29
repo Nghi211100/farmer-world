@@ -12,6 +12,15 @@ import {
   type CropKind,
   type CropTileData,
 } from '../config/gameConfig';
+import {
+  applyFarmActivityStamp,
+  applySoilIdleDryState,
+  isPlotSubjectToSoilIdle,
+  isSoilIdleDryAt,
+  shouldBecomeSoilIdleDry,
+  type FarmActivityKind,
+  type SoilIdlePlotContext,
+} from './soilIdleLogic';
 import type { GridSystem } from './GridSystem';
 import {
   advanceCropGrowth,
@@ -64,6 +73,9 @@ function normalizeCrop(data: CropTileData): CropTileData {
     growthElapsedSec: data.growthElapsedSec ?? 0,
     lastTickAt: data.lastTickAt ?? now,
     dug: data.dug ?? false,
+    lastFarmActivityAt: data.lastFarmActivityAt,
+    soilIdleDry: data.soilIdleDry ?? false,
+    soilIdleDrySince: data.soilIdleDrySince,
   };
   if (kind) {
     const def = getCropDef(kind);
@@ -116,6 +128,78 @@ export class FarmingSystem {
     this.onChange?.();
   }
 
+  private soilIdleContext(gx: number, gy: number, crop: CropTileData | null): SoilIdlePlotContext {
+    const cell = this.grid.getCell(gx, gy);
+    return {
+      unlocked: this.grid.isFarmUnlocked(gx, gy),
+      cellType: cell?.type ?? 'grass',
+      crop,
+    };
+  }
+
+  isPlotSubjectToSoilIdle(gx: number, gy: number): boolean {
+    return isPlotSubjectToSoilIdle(this.soilIdleContext(gx, gy, this.getCrop(gx, gy)));
+  }
+
+  isSoilIdleDry(gx: number, gy: number, now = Date.now()): boolean {
+    const crop = this.crops.get(this.key(gx, gy));
+    if (!crop) return false;
+    if (crop.soilIdleDry) return true;
+    return isSoilIdleDryAt(
+      crop.lastFarmActivityAt,
+      now,
+      isPlotSubjectToSoilIdle(this.soilIdleContext(gx, gy, crop))
+    );
+  }
+
+  /** Record canh tác and clear neglect-dry. */
+  touchFarmActivity(gx: number, gy: number, _kind: FarmActivityKind, now = Date.now()): void {
+    const crop = this.crops.get(this.key(gx, gy));
+    if (!crop) return;
+    applyFarmActivityStamp(crop, now);
+    this.onChange?.();
+  }
+
+  private markFarmActivity(gx: number, gy: number, kind: FarmActivityKind, now = Date.now()): void {
+    this.touchFarmActivity(gx, gy, kind, now);
+  }
+
+  private applyNeglectDryIfNeeded(gx: number, gy: number, now: number): boolean {
+    const crop = this.crops.get(this.key(gx, gy));
+    if (!crop) return false;
+    const subject = isPlotSubjectToSoilIdle(this.soilIdleContext(gx, gy, crop));
+    if (!shouldBecomeSoilIdleDry(crop, now, subject)) return false;
+    applySoilIdleDryState(crop, now);
+    this.grid.setSoilWaterLevel(gx, gy, 0);
+    return true;
+  }
+
+  private tickSoilIdle(now: number): boolean {
+    let changed = false;
+    for (const [k] of this.crops.entries()) {
+      const [gx, gy] = k.split(',').map(Number);
+      if (this.applyNeglectDryIfNeeded(gx, gy, now)) changed = true;
+    }
+    return changed;
+  }
+
+  /** After load/offline: apply elapsed neglect without waiting for next tick. */
+  applySoilIdleAfterLoad(now = Date.now()): void {
+    this.tickSoilIdle(now);
+    this.onChange?.();
+  }
+
+  /** Dev/test: force neglect-dry visuals on a tilled plot without waiting 2 minutes. */
+  forceSoilIdleDryForTest(gx: number, gy: number, now = Date.now()): boolean {
+    const crop = this.crops.get(this.key(gx, gy));
+    if (!crop || !isPlotSubjectToSoilIdle(this.soilIdleContext(gx, gy, crop))) return false;
+    crop.lastFarmActivityAt = now - FARMING.soilIdleDryMs - 1;
+    applySoilIdleDryState(crop, now);
+    this.grid.setSoilWaterLevel(gx, gy, 0);
+    this.onChange?.();
+    return true;
+  }
+
   hasCropRecord(gx: number, gy: number): boolean {
     return this.crops.has(this.key(gx, gy));
   }
@@ -144,6 +228,7 @@ export class FarmingSystem {
     }
 
     const now = Date.now();
+    const hadRecord = this.hasCropRecord(gx, gy);
     this.setCrop(gx, gy, {
       stage: CropLifecycleState.DIGGING,
       waterLevel: 0,
@@ -152,19 +237,27 @@ export class FarmingSystem {
       growthElapsedSec: 0,
       lastTickAt: now,
       dug: false,
+      soilIdleDry: false,
+      soilIdleDrySince: undefined,
     });
+    this.markFarmActivity(gx, gy, 'dig', now);
 
     this.grid.setSoilWaterLevel(gx, gy, 0);
 
     setTimeout(() => {
       const cur = this.crops.get(this.key(gx, gy));
       if (cur?.stage === CropLifecycleState.DIGGING) {
+        const doneAt = Date.now();
+        applyFarmActivityStamp(cur, doneAt);
         this.setCrop(gx, gy, {
           ...cur,
           stage: CropLifecycleState.EMPTY,
           dug: true,
-          lastTickAt: Date.now(),
+          lastTickAt: doneAt,
         });
+        if (hadRecord) {
+          this.grid.setSoilWaterLevel(gx, gy, FARMING.waterRestoreAmount);
+        }
       }
     }, FARMING.digDurationMs);
 
@@ -172,6 +265,7 @@ export class FarmingSystem {
   }
 
   canPlant(gx: number, gy: number): boolean {
+    if (this.isSoilIdleDry(gx, gy)) return false;
     const cell = this.grid.getCell(gx, gy);
     if (!cell || cell.type !== 'soil' || cell.object || !this.grid.isFarmUnlocked(gx, gy)) return false;
     const crop = this.getCrop(gx, gy);
@@ -193,7 +287,10 @@ export class FarmingSystem {
       growthElapsedSec: 0,
       lastTickAt: now,
       dug: true,
+      soilIdleDry: false,
+      soilIdleDrySince: undefined,
     });
+    this.markFarmActivity(gx, gy, 'plant', now);
     return true;
   }
 
@@ -202,6 +299,20 @@ export class FarmingSystem {
     const crop = this.getCrop(gx, gy);
     if (!crop || cropKindOf(crop)) return false;
     return crop.dug === true;
+  }
+
+  /** Tilled plots (empty dug or crop) use soil / mud / wet_soil instead of empty_plot. */
+  showsSoilMoistureGround(gx: number, gy: number): boolean {
+    const crop = this.getCrop(gx, gy);
+    if (!crop || crop.stage === CropLifecycleState.DIGGING) return false;
+    if (cropKindOf(crop)) return true;
+    return crop.dug === true;
+  }
+
+  /** Moisture for ground texture; neglect-dry and idle-dry plots read as 0 (light soil). */
+  getGroundSoilWaterLevel(gx: number, gy: number): number {
+    if (this.isSoilIdleDry(gx, gy)) return 0;
+    return this.grid.getSoilWaterLevel(gx, gy);
   }
 
   /** Dug empty soil (no crop sprite) — moisture lives on the grid cell */
@@ -215,29 +326,41 @@ export class FarmingSystem {
   }
 
   canWater(gx: number, gy: number): boolean {
+    if (this.isSoilIdleDry(gx, gy) && this.isPlotSubjectToSoilIdle(gx, gy)) return true;
     if (this.canWaterEmptySoil(gx, gy)) return true;
     const crop = this.getCrop(gx, gy);
     if (!crop) return false;
     const kind = cropKindOf(crop);
     if (!kind) return false;
-    const growing = [
+    const waterable = [
       CropLifecycleState.PLANTED,
       CropLifecycleState.STAGE1,
       CropLifecycleState.STAGE2,
       CropLifecycleState.STAGE3,
+      CropLifecycleState.READY,
     ];
-    return growing.includes(crop.stage);
+    return waterable.includes(crop.stage);
   }
 
   water(gx: number, gy: number): boolean {
+    const now = Date.now();
+    if (this.isSoilIdleDry(gx, gy) && this.isPlotSubjectToSoilIdle(gx, gy)) {
+      const crop = this.crops.get(this.key(gx, gy));
+      if (crop) applyFarmActivityStamp(crop, now);
+      if (this.canWaterEmptySoil(gx, gy)) {
+        this.grid.addSoilWater(gx, gy, FARMING.waterRestoreAmount);
+        this.onChange?.();
+        return true;
+      }
+    }
     if (this.canWaterEmptySoil(gx, gy)) {
       this.grid.addSoilWater(gx, gy, FARMING.waterRestoreAmount);
+      this.markFarmActivity(gx, gy, 'water', now);
       this.onChange?.();
       return true;
     }
     if (!this.canWater(gx, gy)) return false;
     const crop = this.crops.get(this.key(gx, gy))!;
-    const now = Date.now();
     this.simulateTile(crop, now);
     const kind = cropKindOf(crop);
     if (kind) {
@@ -255,6 +378,8 @@ export class FarmingSystem {
     }
     crop.lastWaterTime = now;
     crop.lastTickAt = now;
+    this.grid.setSoilWaterLevel(gx, gy, FARMING.waterRestoreAmount);
+    this.markFarmActivity(gx, gy, 'water', now);
     this.onChange?.();
     return true;
   }
@@ -270,10 +395,18 @@ export class FarmingSystem {
   }
 
   isReady(gx: number, gy: number): boolean {
+    if (this.isSoilIdleDry(gx, gy)) return false;
+    return this.getCrop(gx, gy)?.stage === CropLifecycleState.READY;
+  }
+
+  /** Crop reached READY stage but plot is neglect-dry (harvest blocked). */
+  isReadyButSoilIdleDry(gx: number, gy: number): boolean {
+    if (!this.isSoilIdleDry(gx, gy)) return false;
     return this.getCrop(gx, gy)?.stage === CropLifecycleState.READY;
   }
 
   harvest(gx: number, gy: number): { kind: CropKind; yield: number } | null {
+    if (this.isSoilIdleDry(gx, gy)) return null;
     const crop = this.getCrop(gx, gy);
     if (!crop || crop.stage !== CropLifecycleState.READY) return null;
     const kind = cropKindOf(crop);
@@ -289,7 +422,10 @@ export class FarmingSystem {
       growthElapsedSec: 0,
       lastTickAt: now,
       dug: true,
+      soilIdleDry: false,
+      soilIdleDrySince: undefined,
     });
+    this.markFarmActivity(gx, gy, 'harvest', now);
     setTimeout(() => {
       const cur = this.crops.get(this.key(gx, gy));
       if (cur?.stage === CropLifecycleState.HARVESTED) {
@@ -387,6 +523,7 @@ export class FarmingSystem {
       this.simulateTile(crop, now);
       if (crop.stage !== before) changed = true;
     }
+    if (this.tickSoilIdle(now)) changed = true;
     if (changed || this.crops.size > 0) this.onChange?.();
   }
 
@@ -394,6 +531,7 @@ export class FarmingSystem {
     for (const crop of this.crops.values()) {
       this.simulateTile(crop, now);
     }
+    this.tickSoilIdle(now);
     this.onChange?.();
   }
 
@@ -434,9 +572,14 @@ export class FarmingSystem {
       v.lastTickAt = now;
       this.crops.set(k, v);
     }
+    const migratedNow = Date.now();
     for (const crop of this.crops.values()) {
-      this.simulateTile(crop, now);
+      if (crop.lastFarmActivityAt == null) {
+        applyFarmActivityStamp(crop, migratedNow);
+      }
+      this.simulateTile(crop, migratedNow);
     }
+    this.tickSoilIdle(migratedNow);
     if (notify) this.onChange?.();
   }
 

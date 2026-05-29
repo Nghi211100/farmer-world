@@ -10,3 +10,4 @@ ios/
 *.log
 .env
 .env.local
+.capacitor-live-url

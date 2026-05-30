@@ -6,7 +6,7 @@ import { computeCoverDisplaySize } from './backgroundLayout';
  * Uniform scale past the farm soil screen rhombus (1 = flush with soil diamond).
  * ~1.65+ pulls island.png foliage, moat, and cliff art past the 8×8 patch edges.
  */
-export const FARM_ISLAND_SCALE_BOOST = 3.95;
+export const FARM_ISLAND_SCALE_BOOST = 4.345;
 
 /**
  * Render farm_island this many depth units below the shallowest farm soil ground tile in the
@@ -118,7 +118,7 @@ export function getFarmLandGroundDepth(
 export const FARM_ISLAND_OFFSET_X_FRAC = 0.06;
 
 /** Vertical island.png screen offset, as fraction of rhombus N–S span. */
-export const FARM_ISLAND_OFFSET_Y_FRAC = 0.28;
+export const FARM_ISLAND_OFFSET_Y_FRAC = 0.33;
 
 export type FarmSoilScreenRhombus = {
   north: { x: number; y: number };

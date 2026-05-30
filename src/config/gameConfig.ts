@@ -211,6 +211,21 @@ export function isPersistentToolBarEnabled(): boolean {
   return false;
 }
 
+/**
+ * Farm camera pan/zoom HUD (`?debugCamera=1` or global `?debug=1`).
+ */
+export function isFarmCameraDebug(): boolean {
+  if (isDebugMode()) return true;
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('debugCamera') === '1';
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 /** Warehouse modal slot grid overlay (`?debugWarehouse=1` or global `?debug=1`). */
 export function isWarehouseGridDebug(): boolean {
   if (isDebugMode()) return true;

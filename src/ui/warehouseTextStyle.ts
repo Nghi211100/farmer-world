@@ -1,13 +1,13 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 
 /** Dark brown outline on light/white fills (baked WAREHOUSE title on `ui/warehouse.png`). */
 export const WAREHOUSE_TITLE_STROKE_DARK = '#3d2817';
 /** White outline on dark brown fills (slot qty, cream footer labels). */
 export const WAREHOUSE_TITLE_STROKE_LIGHT = '#ffffff';
-/** @deprecated Use WAREHOUSE_TITLE_STROKE_DARK — kept for DOM qty input stroke */
+/** @deprecated Use WAREHOUSE_TITLE_STROKE_DARK â€” kept for DOM qty input stroke */
 export const WAREHOUSE_TITLE_STROKE = WAREHOUSE_TITLE_STROKE_DARK;
 
-/** No webfont preload — Arial Black / Impact approximate the baked title weight. */
+/** No webfont preload â€” Arial Black / Impact approximate the baked title weight. */
 export const WAREHOUSE_TITLE_FONT = '"Arial Black", "Arial Rounded MT Bold", Arial, Impact, sans-serif';
 
 export type WarehouseTextVariant = 'light' | 'dark' | 'small';
@@ -18,7 +18,7 @@ const WAREHOUSE_FILL_SMALL = '#5d4037';
 const WAREHOUSE_SHADOW = '#2a1a0e';
 
 export interface WarehouseTextStyleOpts {
-  /** Text fill color — stroke is chosen from luminance (light fill → dark stroke). */
+  /** Text fill color â€” stroke is chosen from luminance (light fill â†’ dark stroke). */
   color?: string;
   fontSize?: string | number;
   bold?: boolean;
@@ -53,7 +53,7 @@ function parseHexRgb(color: string): { r: number; g: number; b: number } | null 
   return null;
 }
 
-/** Light fills (white/cream/gold) → dark stroke; dark browns → white stroke. */
+/** Light fills (white/cream/gold) â†’ dark stroke; dark browns â†’ white stroke. */
 export function warehouseStrokeForColor(color: string): string {
   const rgb = parseHexRgb(color);
   if (!rgb) return WAREHOUSE_TITLE_STROKE_DARK;
@@ -70,7 +70,7 @@ function variantForColor(color: string): WarehouseTextVariant {
   return luminance >= 0.55 ? 'light' : 'dark';
 }
 
-/** Scale stroke to font size — thicker on large labels, tighter on small slot names. */
+/** Scale stroke to font size â€” thicker on large labels, tighter on small slot names. */
 export function warehouseStrokeThickness(fontSizePx: number, variant: WarehouseTextVariant): number {
   const tier = variant === 'small' || fontSizePx <= 11 ? 'small' : fontSizePx <= 16 ? 'medium' : 'large';
   if (tier === 'small') return Math.max(2, Math.round(fontSizePx * 0.22));
@@ -82,8 +82,8 @@ export function warehouseStrokeThickness(fontSizePx: number, variant: WarehouseT
  * Warehouse UI text: bold rounded sans, contrasting stroke, optional shadow on light fills.
  *
  * Stroke rules:
- * - Light/white fills (`#fff`, `#fff8e1`, …) → `#3d2817` stroke (thickness 3–4+ by size)
- * - Dark fills (`#3e2723`, `#5d4037`, …) → `#ffffff` stroke
+ * - Light/white fills (`#fff`, `#fff8e1`, â€¦) â†’ `#3d2817` stroke (thickness 3â€“4+ by size)
+ * - Dark fills (`#3e2723`, `#5d4037`, â€¦) â†’ `#ffffff` stroke
  */
 export function warehouseTextStyle(
   opts: WarehouseTextStyleOpts = {}
@@ -140,13 +140,17 @@ export function applyWarehouseTitleLikeSizing(
 /**
  * Preset variants for InventoryPanel (map to fill + stroke pairs above).
  *
- * - `light` — cream/white on dark pills/buttons
- * - `dark` — dark brown on cream footer/slots
- * - `small` — `#5d4037` slot names with white stroke
+ * - `light` â€” cream/white on dark pills/buttons
+ * - `dark` â€” dark brown on cream footer/slots
+ * - `small` â€” `#5d4037` slot names with white stroke
  */
+export type WarehouseTitleLikeTextOverrides = Omit<
+  Partial<Phaser.Types.GameObjects.Text.TextStyle>,
+  'shadow'
+> & { shadow?: boolean | Phaser.Types.GameObjects.Text.TextShadow };
 export function warehouseTitleLikeTextStyle(
   variant: WarehouseTextVariant,
-  overrides: Partial<Phaser.Types.GameObjects.Text.TextStyle> = {}
+  overrides: WarehouseTitleLikeTextOverrides = {}
 ): Phaser.Types.GameObjects.Text.TextStyle {
   const fill =
     variant === 'light'

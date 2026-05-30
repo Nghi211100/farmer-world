@@ -17,10 +17,10 @@ const unitRhombus = (): FarmSoilScreenRhombus => ({
 });
 
 describe('farmIslandLayout', () => {
-  it('default offsets are 6% right and 28% down of rhombus spans from center', () => {
+  it('default offsets are 6% right and 33% down of rhombus spans from center', () => {
     expect(FARM_ISLAND_OFFSET_X_FRAC).toBe(0.06);
-    expect(FARM_ISLAND_OFFSET_Y_FRAC).toBe(0.28);
-    expect(FARM_ISLAND_SCALE_BOOST).toBe(3.95);
+    expect(FARM_ISLAND_OFFSET_Y_FRAC).toBe(0.33);
+    expect(FARM_ISLAND_SCALE_BOOST).toBe(4.345);
   });
 
   it('cover display size uses boosted rhombus spans', () => {

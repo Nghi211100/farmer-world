@@ -239,6 +239,35 @@ export class GridSystem {
     };
   }
 
+  /**
+   * Screen AABB of soil + outer path ring (camera fit / scroll limits).
+   * Includes the iso north apex row that sits outside {@link getFarmSoilScreenBounds}.
+   */
+  getFarmFootprintScreenBounds(ringMargin = FARM_ISLAND_RING_MARGIN): {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    const corners: [number, number][] = [
+      [minX - ringMargin, minY - ringMargin],
+      [maxX + ringMargin, minY - ringMargin],
+      [minX - ringMargin, maxY + ringMargin],
+      [maxX + ringMargin, maxY + ringMargin],
+    ];
+    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    this.accumulateIsoBounds(corners, box);
+    const patchCenter = this.getFarmSoilPatchCenterScreen();
+    return {
+      ...box,
+      centerX: patchCenter.x,
+      centerY: patchCenter.y,
+    };
+  }
+
   /** Iso diamond center of the full farm soil rectangle (FARM_SOIL_BOUNDS). */
   getFarmSoilPatchCenterScreen(): { x: number; y: number } {
     const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;

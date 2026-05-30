@@ -239,6 +239,27 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     height: 110,
   },
   {
+    key: 'ui_warehouse_items_list_bg',
+    path: 'ui/warehouse-items-list-bg.png',
+    placeholderColor: 0xe8dcc8,
+    width: 77,
+    height: 43,
+  },
+  {
+    key: 'ui_warehouse_tablist_bg',
+    path: 'ui/warehouse-tablist-bg.png',
+    placeholderColor: 0x8d6e63,
+    width: 138,
+    height: 70,
+  },
+  {
+    key: 'ui_warehouse_process_bg',
+    path: 'ui/warehouse-process-bg.png',
+    placeholderColor: 0x8d6e63,
+    width: 124,
+    height: 70,
+  },
+  {
     key: 'ui_shop_item',
     path: 'ui/shop-item.png',
     placeholderColor: 0xc4a574,

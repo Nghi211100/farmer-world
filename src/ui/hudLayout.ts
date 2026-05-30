@@ -7,11 +7,11 @@ export const HUD_REFERENCE_VH = 1080;
 export const HUD_REFERENCE_VMIN = Math.min(HUD_REFERENCE_VW, HUD_REFERENCE_VH);
 
 /** Design-time top resource bar (art px at reference vmin). */
-const TOP_BAR_H_ART = 50.4; // 48 × 1.05 (+5% height)
+const TOP_BAR_H_ART = 55.44; // 50.4 × 1.10 (+10% height)
 const TOP_PAD_ART = 10;
 const TOP_EDGE_PAD_ART = 12;
 const TOP_SLOT_GAP_ART = 8;
-const TOP_SLOT_MAX_W_ART = 330; // 300 × 1.10 (+10% width)
+const TOP_SLOT_MAX_W_ART = 399; // 363 × 1.10 (+10% width)
 const TOP_VALUE_FONT_ART = 15;
 /** Farm playable inset below resource boxes (legacy band was 56 vs pad+bar 58). */
 const TOP_BAND_EXTRA_ART = -2;
@@ -19,9 +19,7 @@ const TOP_BAND_EXTRA_ART = -2;
 /** Design-time bottom nav bar (art px at reference vmin). */
 const BOTTOM_BAR_H_ART = 64;
 const BOTTOM_BOTTOM_INSET_ART = 4;
-const BOTTOM_ICON_Y_OFFSET_ART = 10;
 const BOTTOM_LABEL_Y_OFFSET_ART = 16;
-const BOTTOM_ICON_SIZE_ART = 48;
 const BOTTOM_LABEL_FONT_ART = 10;
 const BOTTOM_MODE_HINT_Y_OFFSET_ART = 42;
 const BOTTOM_MODE_HINT_FONT_ART = 11;
@@ -52,20 +50,18 @@ export const RIGHT_MENU_ICON_COUNT = 3;
 
 export const TOP_SLOT_COUNT = 3;
 
-/** Max single slot width as fraction of viewport width (300 / 1920). */
+/** Max single slot width as fraction of viewport width (399 / 1920). */
 export const TOP_SLOT_MAX_W_FRAC = TOP_SLOT_MAX_W_ART / HUD_REFERENCE_VW;
 
 /** Bottom nav icon centers along X (fractions of viewport width). */
 export const BOTTOM_MENU_X_FRACS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 
 /** Bag (inventory) left HUD: inset from viewport left edge (fraction of width). */
-export const HUD_BAG_LEFT_VW_FRAC = 0.03;
+export const HUD_BAG_LEFT_VW_FRAC = 0.015;
 /** Right HUD menu (expand / build / shop): inset from viewport right edge (fraction of width). */
-export const HUD_RIGHT_MENU_RIGHT_VW_FRAC = 0.03;
+export const HUD_RIGHT_MENU_RIGHT_VW_FRAC = 0.015;
 /** Bag (inventory) bottom HUD: inset from viewport bottom edge (fraction of height). */
-export const HUD_BAG_BOTTOM_VH_FRAC = 0.03;
-/** Bag icon display size vs baseline bottom-nav art size. */
-export const HUD_BAG_ICON_SIZE_MULTIPLIER = 2.25;
+export const HUD_BAG_BOTTOM_VH_FRAC = 0.015;
 /** Right HUD menu icon display size vs baseline vw-clamped size. */
 export const HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER = 1.105;
 /** Extra vertical gap between land (expand) and build icons vs other right-menu gaps. */
@@ -107,6 +103,21 @@ export function hudRightLandBuildIconWidthPx(viewportW: number): number {
 
 export function hudRightShopIconWidthPx(viewportW: number): number {
   return clampVwIconPx(viewportW, HUD_RIGHT_SHOP_VW_FRAC, HUD_RIGHT_SHOP_VW_FRAC_MAX);
+}
+
+/** Screen px for a right-menu icon from its vw-clamped base width. */
+export function hudRightMenuIconDisplaySizePx(baseWidthPx: number): number {
+  return Math.max(1, Math.round(baseWidthPx * HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER));
+}
+
+/** Right bar shop icon display size (expand/build use land/build bases). */
+export function hudRightShopIconDisplaySizePx(viewportW: number): number {
+  return hudRightMenuIconDisplaySizePx(hudRightShopIconWidthPx(viewportW));
+}
+
+/** Left HUD bag icon — same display size as the right bar shop icon. */
+export function hudBagIconSizePx(viewportW: number, _viewportH: number): number {
+  return hudRightShopIconDisplaySizePx(viewportW);
 }
 
 /**
@@ -166,11 +177,16 @@ export function computeTopHudSlots(
   return { slots, fontSizePx };
 }
 
-/** Playable-area inset: top pad + bar + small margin (FarmScene / ToolBar). */
+/** Playable-area inset: safe area + top pad + bar + small margin (FarmScene / ToolBar). */
 export function topHudBandHeight(viewportW: number, viewportH: number): number {
   const barH = hudSpan(TOP_BAR_H_ART, viewportW, viewportH);
   const topPad = hudSpan(TOP_PAD_ART, viewportW, viewportH);
-  return topPad + barH + hudSpan(TOP_BAND_EXTRA_ART, viewportW, viewportH);
+  return (
+    getHudSafeAreaInsets().top +
+    topPad +
+    barH +
+    hudSpan(TOP_BAND_EXTRA_ART, viewportW, viewportH)
+  );
 }
 
 export interface LeftMenuLayout {
@@ -179,16 +195,12 @@ export interface LeftMenuLayout {
   iconSize: number;
 }
 
-/** Left HUD bag: 3% from viewport left/bottom (+ safe area), icon 2.25× baseline nav size. */
+/** Left HUD bag: 1.5% from viewport left/bottom (+ safe area); size from {@link hudBagIconSizePx}. */
 export function computeLeftMenuLayout(
   viewportW: number,
   viewportH: number
 ): LeftMenuLayout {
-  const baseIconSize = hudSpan(BOTTOM_ICON_SIZE_ART, viewportW, viewportH);
-  const iconSize = Math.max(
-    1,
-    Math.round(baseIconSize * HUD_BAG_ICON_SIZE_MULTIPLIER)
-  );
+  const iconSize = hudBagIconSizePx(viewportW, viewportH);
 
   const leftInset =
     viewportW * HUD_BAG_LEFT_VW_FRAC + getHudSafeAreaInsets().left;
@@ -264,18 +276,16 @@ export interface RightMenuLayout {
   bandWidth: number;
 }
 
-/** Right column: expand (top), build, shop (bottom, 3% from viewport bottom). */
+/** Right column: expand (top), build, shop (bottom, 1.5% from viewport bottom). */
 export function computeRightMenuLayout(
   viewportW: number,
   viewportH: number
 ): RightMenuLayout {
   const iconSizes = [
-    hudRightLandBuildIconWidthPx(viewportW),
-    hudRightLandBuildIconWidthPx(viewportW),
-    hudRightShopIconWidthPx(viewportW),
-  ].map((size) =>
-    Math.max(1, Math.round(size * HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER))
-  );
+    hudRightMenuIconDisplaySizePx(hudRightLandBuildIconWidthPx(viewportW)),
+    hudRightMenuIconDisplaySizePx(hudRightLandBuildIconWidthPx(viewportW)),
+    hudRightShopIconDisplaySizePx(viewportW),
+  ];
 
   const bottomInset =
     viewportH * HUD_BAG_BOTTOM_VH_FRAC + getHudSafeAreaInsets().bottom;

@@ -33,9 +33,9 @@ async function waitForGame(page: import('@playwright/test').Page): Promise<Farme
   return api;
 }
 
-/** Left-bar bag: ~3% from left/bottom (see HUD_BAG_LEFT_VW_FRAC / HUD_BAG_BOTTOM_VH_FRAC). */
-const HUD_BAG_LEFT_X_FRAC = 0.06;
-const HUD_BAG_BOTTOM_Y_FRAC = 0.97;
+/** Left-bar bag tap: ~1.5% left inset + half icon (see HUD_BAG_LEFT_VW_FRAC). */
+const HUD_BAG_LEFT_X_FRAC = 0.05;
+const HUD_BAG_BOTTOM_Y_FRAC = 0.965;
 
 async function clickHudButton(
   page: import('@playwright/test').Page,

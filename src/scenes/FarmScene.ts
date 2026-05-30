@@ -13,6 +13,7 @@ import {
   DEFAULT_GEMS,
   FarmTool,
   isDebugMode,
+  isFarmCameraDebug,
   isFarmGridDebug,
   isPersistentToolBarEnabled,
   LAND_EXPAND_STRINGS,
@@ -68,19 +69,24 @@ import {
 } from '../ui/hudLayout';
 import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
+import {
+  clampScrollToFarmPlayable,
+  computeFarmCameraScrollLimits,
+  type PlayableBandRect,
+} from '../farmCameraScroll';
 
 type FarmMode = 'normal' | 'build' | 'expand' | 'plant';
 
-/** Farm camera zoom limits (wheel dy×0.001, pinch dist×0.005). */
-const MIN_CAMERA_ZOOM = 1.1;
+/** Farm camera zoom limits (wheel dy×0.001, pinch dist×0.005). Default / min zoom ~1.7. */
+const MIN_CAMERA_ZOOM = 1.7;
 const MAX_CAMERA_ZOOM = 3.0;
 /** Padding inside playable HUD band when fitting the farm diamond. */
 const FARM_FIT_PAD_X = 10;
 const FARM_FIT_PAD_Y = 10;
 /** Zoom past strict fit so FARM_SOIL_BOUNDS fills the viewport (less outer water at edges). */
-const FARM_INITIAL_ZOOM_BOOST = 1.12;
+const FARM_INITIAL_ZOOM_BOOST = 1.08;
 /** Nudge camera to keep north path/soil apex inside the playable band. */
-const FARM_CAMERA_NORTH_BIAS_PX = 28;
+const FARM_CAMERA_NORTH_BIAS_PX = 44;
 export class FarmScene extends Phaser.Scene {
   grid!: GridSystem;
   farming!: FarmingSystem;
@@ -112,6 +118,7 @@ export class FarmScene extends Phaser.Scene {
   private clickPickLabel?: Phaser.GameObjects.Text;
   private clickPickGx = -1;
   private clickPickGy = -1;
+  private cameraDebugLabel?: Phaser.GameObjects.Text;
   private cropSprites = new Map<string, CropSprite>();
   private buildingSprites = new Map<string, BuildingSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
@@ -128,6 +135,10 @@ export class FarmScene extends Phaser.Scene {
   private pointerGestureStartX = 0;
   private pointerGestureStartY = 0;
   private lastPinchDist = 0;
+  /** User panned/zoomed camera — skip auto-recenter on resize until explicit refocus. */
+  private cameraScrollTouchedByUser = false;
+  private lastCameraLayoutW = 0;
+  private lastCameraLayoutH = 0;
   private saveTimer = 0;
   private readonly onPageHide = () => this.flushSave();
   private readonly onBeforeUnload = () => this.flushSave();
@@ -162,6 +173,7 @@ export class FarmScene extends Phaser.Scene {
     this.setupPlayer();
     this.setupCamera();
     this.layoutBackground();
+    this.setupCameraDebugOverlay();
     this.setupFarmPopups();
     this.setupInput();
     if (isPersistentToolBarEnabled()) {
@@ -455,6 +467,42 @@ export class FarmScene extends Phaser.Scene {
     this.showClickPickDebug(this.clickPickGx, this.clickPickGy);
   }
 
+  private setupCameraDebugOverlay(): void {
+    this.cameraDebugLabel?.destroy();
+    this.cameraDebugLabel = undefined;
+    if (!isFarmCameraDebug()) return;
+
+    const topBand = this.topHudBand();
+    this.cameraDebugLabel = this.add
+      .text(8, topBand + 6, '', {
+        fontSize: '11px',
+        color: '#aaffcc',
+        backgroundColor: '#001a0dcc',
+        padding: { x: 6, y: 4 },
+        fontFamily: 'monospace',
+        lineSpacing: 2,
+      })
+      .setScrollFactor(0)
+      .setDepth(10002);
+    this.refreshCameraDebugOverlay();
+  }
+
+  private refreshCameraDebugOverlay(): void {
+    const label = this.cameraDebugLabel;
+    if (!label) return;
+
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    label.setPosition(8, this.topHudBand() + 6);
+    label.setText(
+      [
+        `zoom ${cam.zoom.toFixed(3)} (${MIN_CAMERA_ZOOM}–${MAX_CAMERA_ZOOM})`,
+        `scroll ${cam.scrollX.toFixed(1)}, ${cam.scrollY.toFixed(1)}`,
+        `view ${viewW}×${viewH}  userPan ${this.cameraScrollTouchedByUser ? 'yes' : 'no'}`,
+      ].join('\n')
+    );
+  }
+
   private applyGroundTileAt(gx: number, gy: number, spr: Phaser.GameObjects.Image): void {
     const cell = this.grid.getCell(gx, gy);
     if (!cell) return;
@@ -558,20 +606,51 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private setupCamera(): void {
-    this.focusCameraOnFarmSoil();
-    this.time.delayedCall(0, () => this.focusCameraOnFarmSoil());
+    this.cameraScrollTouchedByUser = false;
+    this.focusCameraOnFarmSoil({ recenterCamera: true });
+    this.time.delayedCall(0, () => this.focusCameraOnFarmSoil({ recenterCamera: true }));
   }
 
   /**
    * Re-layout grid + camera after HUD/safe-area/viewport are stable (first load, ui-ready, resize).
    */
-  private focusCameraOnFarmSoil(): void {
+  private focusCameraOnFarmSoil(options?: { recenterCamera?: boolean }): void {
     const { width: w, height: h } = this.getLayoutViewportSize();
     if (w <= 1 || h <= 1) return;
+    const cam = this.cameras.main;
+    const preserveView =
+      this.cameraScrollTouchedByUser && options?.recenterCamera !== true;
+    if (
+      preserveView &&
+      w === this.lastCameraLayoutW &&
+      h === this.lastCameraLayoutH
+    ) {
+      this.syncMainCameraViewport();
+      this.clampMainCameraScrollToPlayable();
+      return;
+    }
+    this.lastCameraLayoutW = w;
+    this.lastCameraLayoutH = h;
+    const anchorBefore = preserveView ? this.grid.getFarmSoilPatchCenterScreen() : null;
+    const patchScreenBefore = preserveView
+      ? {
+          x: (anchorBefore!.x - cam.scrollX) * cam.zoom,
+          y: (anchorBefore!.y - cam.scrollY) * cam.zoom,
+        }
+      : null;
+
     this.syncMainCameraViewport();
     this.grid.centerInViewport(w, h, this.topHudBand(), this.bottomHudBand());
     this.repositionWorld();
-    this.centerCameraOnMap();
+
+    if (preserveView && patchScreenBefore) {
+      const anchorAfter = this.grid.getFarmSoilPatchCenterScreen();
+      cam.scrollX = anchorAfter.x - patchScreenBefore.x / cam.zoom;
+      cam.scrollY = anchorAfter.y - patchScreenBefore.y / cam.zoom;
+      this.clampMainCameraScrollToPlayable();
+    } else {
+      this.centerCameraOnMap();
+    }
     this.layoutBackground();
   }
 
@@ -581,7 +660,7 @@ export class FarmScene extends Phaser.Scene {
    */
   private centerCameraOnMap(): void {
     const cam = this.cameras.main;
-    const farm = this.grid.getFarmSoilScreenBounds();
+    const farm = this.grid.getFarmFootprintScreenBounds();
     const anchor = this.grid.getFarmSoilPatchCenterScreen();
     cam.removeBounds();
 
@@ -622,20 +701,45 @@ export class FarmScene extends Phaser.Scene {
     cam.scrollX = scroll.x;
     cam.scrollY = scroll.y;
 
-    const scrollMinX = farm.maxX - playableRight / zoom;
-    const scrollMaxX = farm.minX - playableLeft / zoom;
-    const scrollMinY = farm.maxY - playableBottom / zoom;
-    const scrollMaxY = farm.minY - playableTop / zoom;
-    if (scrollMinX <= scrollMaxX) {
-      cam.scrollX = Phaser.Math.Clamp(cam.scrollX, scrollMinX, scrollMaxX);
-    }
-    if (scrollMinY <= scrollMaxY) {
-      cam.scrollY = Phaser.Math.Clamp(cam.scrollY, scrollMinY, scrollMaxY);
-    }
     cam.scrollY -= FARM_CAMERA_NORTH_BIAS_PX / zoom;
-    if (scrollMinY <= scrollMaxY) {
-      cam.scrollY = Phaser.Math.Clamp(cam.scrollY, scrollMinY, scrollMaxY);
-    }
+    this.clampMainCameraScroll(farm, {
+      playableLeft,
+      playableTop,
+      playableRight,
+      playableBottom,
+      zoom,
+    });
+  }
+
+  private getMainCameraPlayableBand(viewW: number, viewH: number): PlayableBandRect {
+    return {
+      playableLeft: FARM_FIT_PAD_X,
+      playableTop: this.topHudBand() + FARM_FIT_PAD_Y,
+      playableRight: viewW - this.rightHudBand() - FARM_FIT_PAD_X,
+      playableBottom: viewH - this.bottomHudBand() - FARM_FIT_PAD_Y,
+    };
+  }
+
+  /** Keep farm footprint inside HUD playable band after layout, pan, or zoom. */
+  private clampMainCameraScroll(
+    farm: { minX: number; minY: number; maxX: number; maxY: number },
+    playable: PlayableBandRect & { zoom: number }
+  ): void {
+    const cam = this.cameras.main;
+    const limits = computeFarmCameraScrollLimits(farm, playable, playable.zoom);
+    const next = clampScrollToFarmPlayable(cam.scrollX, cam.scrollY, limits);
+    cam.scrollX = next.scrollX;
+    cam.scrollY = next.scrollY;
+  }
+
+  private clampMainCameraScrollToPlayable(): void {
+    const cam = this.cameras.main;
+    const farm = this.grid.getFarmFootprintScreenBounds();
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    this.clampMainCameraScroll(farm, {
+      ...this.getMainCameraPlayableBand(viewW, viewH),
+      zoom: cam.zoom,
+    });
   }
 
   private setupToolBar(): void {
@@ -655,6 +759,7 @@ export class FarmScene extends Phaser.Scene {
     }
     this.resizeLayoutTimer = setTimeout(() => {
       this.resizeLayoutTimer = undefined;
+      if (this.pointerGestureActive || this.isDragging) return;
       this.focusCameraOnFarmSoil();
     }, 100);
   }
@@ -682,6 +787,7 @@ export class FarmScene extends Phaser.Scene {
     renderBuildings(this, this.grid, this.buildSystem.getBuildings(), this.buildingSprites);
     this.renderTileDebugOutlines();
     this.refreshClickPickDebug();
+    this.refreshCameraDebugOverlay();
     this.expandDimOverlay?.refresh();
   }
 
@@ -752,6 +858,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private panCameraWithPointer(pointer: Phaser.Input.Pointer): void {
+    this.cameraScrollTouchedByUser = true;
     const cam = this.cameras.main;
     cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
     cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
@@ -843,6 +950,7 @@ export class FarmScene extends Phaser.Scene {
       }
 
       this.beginPointerGesture(pointer);
+      this.cameraScrollTouchedByUser = true;
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -862,11 +970,15 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      const wasDrag = this.pointerGestureDragged;
       const wasTap =
         this.pointerGestureActive &&
         !this.pointerGestureCancelled &&
         !this.pointerGestureDragged;
       this.endPointerGesture();
+      if (wasDrag) {
+        this.clampMainCameraScrollToPlayable();
+      }
       if (wasTap) {
         this.handlePointerTap(pointer);
       }
@@ -877,10 +989,12 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, dy: number) => {
+      this.cameraScrollTouchedByUser = true;
       const cam = this.cameras.main;
       cam.setZoom(
         Phaser.Math.Clamp(cam.zoom - dy * 0.001, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM)
       );
+      this.clampMainCameraScrollToPlayable();
     });
 
     this.input.addPointer(2);
@@ -895,8 +1009,10 @@ export class FarmScene extends Phaser.Scene {
           this.input.pointer2.y
         );
         const cam = this.cameras.main;
+        this.cameraScrollTouchedByUser = true;
         const delta = (dist - this.lastPinchDist) * 0.005;
         cam.setZoom(Phaser.Math.Clamp(cam.zoom + delta, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM));
+        this.clampMainCameraScrollToPlayable();
         this.lastPinchDist = dist;
       }
     });
@@ -1029,8 +1145,44 @@ export class FarmScene extends Phaser.Scene {
   }
 
   refocusFarmCameraForTest(): ReturnType<FarmScene['getFarmCameraCenterMetricsForTest']> {
-    this.focusCameraOnFarmSoil();
+    this.cameraScrollTouchedByUser = false;
+    this.focusCameraOnFarmSoil({ recenterCamera: true });
     return this.getFarmCameraCenterMetricsForTest();
+  }
+
+  /** Dev/e2e: pan camera by screen pixels (same math as pointer drag). */
+  panFarmCameraForTest(dxScreen: number, dyScreen: number): void {
+    this.cameraScrollTouchedByUser = true;
+    const cam = this.cameras.main;
+    cam.scrollX -= dxScreen / cam.zoom;
+    cam.scrollY -= dyScreen / cam.zoom;
+    this.clampMainCameraScrollToPlayable();
+  }
+
+  /** Dev/e2e: set zoom keeping a screen anchor fixed (defaults to viewport center). */
+  setFarmCameraZoomForTest(
+    zoom: number,
+    anchorScreenX?: number,
+    anchorScreenY?: number
+  ): void {
+    this.cameraScrollTouchedByUser = true;
+    const cam = this.cameras.main;
+    const nextZoom = Phaser.Math.Clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+    const viewW = this.scale.width;
+    const viewH = this.scale.height;
+    const sx = anchorScreenX ?? viewW / 2;
+    const sy = anchorScreenY ?? viewH / 2;
+    const worldX = cam.scrollX + sx / cam.zoom;
+    const worldY = cam.scrollY + sy / cam.zoom;
+    cam.setZoom(nextZoom);
+    cam.scrollX = worldX - sx / nextZoom;
+    cam.scrollY = worldY - sy / nextZoom;
+    this.clampMainCameraScrollToPlayable();
+  }
+
+  /** Dev/e2e: run debounced resize camera relayout (respects user view when flagged). */
+  simulateFarmCameraResizeLayoutForTest(): void {
+    this.focusCameraOnFarmSoil();
   }
 
   /** Dev/e2e: farm patch center vs viewport center after camera layout. */
@@ -1086,7 +1238,8 @@ export class FarmScene extends Phaser.Scene {
     targetCenterY: number;
     errorX: number;
     errorY: number;
-  } {
+  } | null {
+    if (!this.grid) return null;
     const cam = this.cameras.main;
     const anchor = this.grid.getFarmSoilPatchCenterScreen();
     const z = cam.zoom;
@@ -1456,10 +1609,6 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private handleHarvest(gx: number, gy: number): boolean {
-    if (this.farming.isReadyButSoilIdleDry(gx, gy)) {
-      this.showToast(SOIL_IDLE_STRINGS.cannotHarvest);
-      return false;
-    }
     if (!this.farming.isReady(gx, gy)) {
       if (this.farming.isGrowing(gx, gy)) this.showToast('Not ready yet');
       return false;
@@ -1599,7 +1748,9 @@ export class FarmScene extends Phaser.Scene {
     // UIScene emits these on FarmScene.events (not UIScene.events).
     this.events.on('ui-ready', () => {
       this.emitGameRefs();
-      this.focusCameraOnFarmSoil();
+      if (!this.cameraScrollTouchedByUser) {
+        this.focusCameraOnFarmSoil();
+      }
     });
     this.events.on('build-select', (item: BuildItemDef) => {
       this.buildSystem.enterBuildMode(item);
@@ -1696,6 +1847,8 @@ export class FarmScene extends Phaser.Scene {
 
   shutdown(): void {
     this.flushSave();
+    this.cameraDebugLabel?.destroy();
+    this.cameraDebugLabel = undefined;
     this.teardownPersistenceHooks();
     this.farming.stopTick();
     this.toolBar?.destroy();
@@ -1707,6 +1860,8 @@ export class FarmScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    if (this.cameraDebugLabel) this.refreshCameraDebugOverlay();
+
     this.player.update(this.grid, delta);
 
     this.energyPassiveTimer += delta;

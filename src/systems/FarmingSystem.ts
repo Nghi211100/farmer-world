@@ -326,18 +326,20 @@ export class FarmingSystem {
   }
 
   canWater(gx: number, gy: number): boolean {
+    const crop = this.getCrop(gx, gy);
+    const kind = crop ? cropKindOf(crop) : null;
+    // Once a crop is harvest-ready, interaction should prioritize harvesting.
+    if (crop && kind && crop.stage === CropLifecycleState.READY) return false;
+
     if (this.isSoilIdleDry(gx, gy) && this.isPlotSubjectToSoilIdle(gx, gy)) return true;
     if (this.canWaterEmptySoil(gx, gy)) return true;
-    const crop = this.getCrop(gx, gy);
     if (!crop) return false;
-    const kind = cropKindOf(crop);
     if (!kind) return false;
     const waterable = [
       CropLifecycleState.PLANTED,
       CropLifecycleState.STAGE1,
       CropLifecycleState.STAGE2,
       CropLifecycleState.STAGE3,
-      CropLifecycleState.READY,
     ];
     return waterable.includes(crop.stage);
   }
@@ -395,7 +397,6 @@ export class FarmingSystem {
   }
 
   isReady(gx: number, gy: number): boolean {
-    if (this.isSoilIdleDry(gx, gy)) return false;
     return this.getCrop(gx, gy)?.stage === CropLifecycleState.READY;
   }
 
@@ -406,7 +407,6 @@ export class FarmingSystem {
   }
 
   harvest(gx: number, gy: number): { kind: CropKind; yield: number } | null {
-    if (this.isSoilIdleDry(gx, gy)) return null;
     const crop = this.getCrop(gx, gy);
     if (!crop || crop.stage !== CropLifecycleState.READY) return null;
     const kind = cropKindOf(crop);

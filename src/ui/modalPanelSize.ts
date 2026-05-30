@@ -1,4 +1,4 @@
-/** Viewport fractions shared by warehouse modal (1536×1024 art). */
+/** Viewport fractions for legacy/tool modals (1536×1024 art). */
 export const PANEL_WIDTH_FRAC = 0.96;
 export const PANEL_HEIGHT_FRAC = 0.88;
 
@@ -53,18 +53,17 @@ export function computeModalPanelSize(
  * Shop: largest contain-fit panel (up to 100%×100% caps). Preserves 1536×1024 aspect so
  * layout fractions stay inside the visible region; `applyImageObjectCover` only trims texture margins.
  */
-/** Warehouse modal — contain-fit within default panel caps (logical viewport when zoomed). */
+/** Warehouse modal — same fullscreen contain-fit caps as shop (100%×100%). */
 export function computeWarehouseModalPanelSize(
   viewportW: number,
   viewportH: number,
   artW: number,
   artH: number,
-  scaleZoom = 1
+  _scaleZoom = 1
 ): { panelW: number; panelH: number } {
-  const { width, height } = logicalViewportFromGame(viewportW, viewportH, scaleZoom);
-  return computeModalPanelSize(width, height, artW, artH, {
-    widthFrac: PANEL_WIDTH_FRAC,
-    heightFrac: PANEL_HEIGHT_FRAC,
+  return computeModalPanelSize(viewportW, viewportH, artW, artH, {
+    widthFrac: SHOP_PANEL_WIDTH_FRAC,
+    heightFrac: SHOP_PANEL_HEIGHT_FRAC,
     fit: 'contain',
   });
 }

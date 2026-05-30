@@ -222,6 +222,9 @@ export interface FarmerWorldTestApi {
     errorX: number;
     errorY: number;
   } | null;
+  panFarmCamera: (dxScreen: number, dyScreen: number) => void;
+  setFarmCameraZoom: (zoom: number, anchorScreenX?: number, anchorScreenY?: number) => void;
+  simulateFarmCameraResizeLayout: () => void;
   getFarmViewportDebugMetrics: () => {
     scaleW: number;
     scaleH: number;
@@ -570,6 +573,15 @@ export function installGameTestApi(game: Phaser.Game): void {
     refocusFarmCamera: () => getFarmScene(game)?.refocusFarmCameraForTest() ?? null,
     getFarmCameraCenterMetrics: () =>
       getFarmScene(game)?.getFarmCameraCenterMetricsForTest() ?? null,
+    panFarmCamera: (dxScreen, dyScreen) => {
+      getFarmScene(game)?.panFarmCameraForTest(dxScreen, dyScreen);
+    },
+    setFarmCameraZoom: (zoom, anchorScreenX, anchorScreenY) => {
+      getFarmScene(game)?.setFarmCameraZoomForTest(zoom, anchorScreenX, anchorScreenY);
+    },
+    simulateFarmCameraResizeLayout: () => {
+      getFarmScene(game)?.simulateFarmCameraResizeLayoutForTest();
+    },
     getFarmViewportDebugMetrics: () =>
       getFarmScene(game)?.getFarmViewportDebugMetricsForTest() ?? null,
     forceSoilIdleDryAt: (gx: number, gy: number) =>

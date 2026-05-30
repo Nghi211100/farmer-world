@@ -13,13 +13,18 @@ import {
   warehouseTitleLikeTextStyle,
   warehouseStrokeForColor,
   WAREHOUSE_TITLE_FONT,
+  WAREHOUSE_TITLE_STROKE_DARK,
 } from './warehouseTextStyle';
 import type { EconomySystem } from '../systems/EconomySystem';
 import type { EnergySystem } from '../systems/EnergySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { InventorySlot } from '../systems/InventorySystem';
 import { computeWarehouseModalPanelSize } from './modalPanelSize';
-import { applyImageObjectCover, artPxToScreen, type ObjectCoverCrop } from './ShopPanel';
+import {
+  artPxToScreen,
+  computeObjectCoverCrop,
+  type ObjectCoverCrop,
+} from './ShopPanel';
 import {
   getModalTypographyScale,
   scaledFontSize,
@@ -33,23 +38,46 @@ type SortMode = 'name' | 'quantity';
 /** Native size of `ui/warehouse.png` — layout fractions are tuned to this art. */
 const WAREHOUSE_ART_W = 1536;
 const WAREHOUSE_ART_H = 1024;
+/** Vertical section spacing in modal (% of modal/panel height). */
+const TOP_INSET_FRAC = 0.11;
+const BOTTOM_INSET_FRAC = 0.112;
+const SECTION_GAP_FRAC = 0.014;
+const HEADER_SECTION_HEIGHT_FRAC = 0.145;
+const BOTTOM_SECTION_HEIGHT_FRAC = 0.22;
+const GRID_SECTION_HEIGHT_FRAC = 0.33124;
 /** Screen-pixel nudge for art-aligned inner UI vs warehouse bg (negative = left/up). */
-const WAREHOUSE_INNER_OFFSET_X_PX = -10;
+const WAREHOUSE_INNER_OFFSET_X_PX = 0;
 const WAREHOUSE_INNER_OFFSET_Y_PX = -10;
 /** Additional fraction-of-panel nudge (applied via fracX/fracY; panelBg/dimOverlay unchanged). */
-const WAREHOUSE_INNER_OFFSET_X_FRAC = -0.025;
+const WAREHOUSE_INNER_OFFSET_X_FRAC = 0;
 const WAREHOUSE_INNER_OFFSET_Y_FRAC = -0.01;
-/** Visible item slots in warehouse grid (10×3 viewport). */
-const GRID_COLS = 10;
-const GRID_ROWS_VISIBLE = 3;
+/** Visible item slots in warehouse grid (6×2 viewport = 12 per page). */
+const WAREHOUSE_GRID_COLS = 6;
+const WAREHOUSE_GRID_ROWS = 2;
 
 /** Normalized layout vs 1536×1024 warehouse art (fractions of panel W/H). */
-/** Beige item inset on `ui/warehouse.png` (~x 88–1330, y 248–590 for 10×3 viewport). */
-const GRID_LEFT_FRAC = 0.057;
-const GRID_TOP_FRAC = 0.234;
-const GRID_WIDTH_FRAC = 0.886;
-/** Visible viewport only (3 rows) — not full scroll content height. */
-const GRID_HEIGHT_FRAC = 0.338;
+/** Beige item inset on `ui/warehouse.png` (x 88–1330, y 248–590 for 6×2 viewport). */
+const GRID_INSET_LEFT_FRAC = 88 / WAREHOUSE_ART_W;
+const GRID_INSET_RIGHT_FRAC = 1330 / WAREHOUSE_ART_W;
+const HEADER_SECTION_TOP_FRAC = TOP_INSET_FRAC;
+const HEADER_SECTION_BOTTOM_FRAC = HEADER_SECTION_TOP_FRAC + HEADER_SECTION_HEIGHT_FRAC;
+/** Nudge item grid up vs header section (% of panel height). */
+const GRID_TOP_NUDGE_UP_FRAC = 0.035;
+const GRID_TOP_FRAC =
+  HEADER_SECTION_BOTTOM_FRAC + SECTION_GAP_FRAC - GRID_TOP_NUDGE_UP_FRAC;
+/** Item grid viewport width — matches beige inset on warehouse art. */
+const GRID_WIDTH_FRAC = GRID_INSET_RIGHT_FRAC - GRID_INSET_LEFT_FRAC;
+const GRID_LEFT_FRAC = GRID_INSET_LEFT_FRAC;
+/** Widen list-bg / scroll mask vs art inset; slot pitch still uses `GRID_WIDTH_FRAC`. */
+const ITEMS_LIST_WIDTH_SCALE = 1.029169; // 1.034341 × 0.995 — items list container width −0.5%
+/** Panel-relative nudge for items list viewport, mask, beige bg, and slot band. */
+const ITEMS_LIST_OFFSET_X_PANEL_FRAC = -0.005;
+const ITEMS_LIST_OFFSET_Y_PANEL_FRAC = -0.002;
+const WAREHOUSE_ITEMS_LIST_BG_KEY = 'ui_warehouse_items_list_bg';
+const WAREHOUSE_TABLIST_BG_KEY = 'ui_warehouse_tablist_bg';
+const WAREHOUSE_PROCESS_BG_KEY = 'ui_warehouse_process_bg';
+/** Visible viewport only (2 rows) — not full scroll content height. */
+const GRID_HEIGHT_FRAC = GRID_SECTION_HEIGHT_FRAC; // 0.338 × 0.98 — height −2%
 /** Extra art px height for beige grid inset (viewport / scroll mask), not per-item tiles. */
 const GRID_VIEWPORT_HEIGHT_EXTRA_ART_PX = 10;
 
@@ -57,8 +85,10 @@ const GRID_VIEWPORT_HEIGHT_EXTRA_ART_PX = 10;
 const CELL_SLOT_SHRINK_W_ART_PX = 5;
 /** Extra display height for `ui_warehouse_item` tiles vs row pitch (art px). */
 const CELL_SLOT_HEIGHT_EXTRA_ART_PX = 2;
+/** Per-slot card width vs layout `cellW` (renderList only; grid viewport unchanged). */
+const ITEM_SLOT_WIDTH_SCALE = 1.086585; // 1.083336 × 1.003 — slot card width +0.3%
 /** Nudge grid origin downward (art px, positive Y = lower). */
-const GRID_TOP_OFFSET_ART_PX = 66;
+const GRID_TOP_OFFSET_FRAC = 66 / WAREHOUSE_ART_H;
 
 /** Per-cell overlays vs `ui/warehouse-item.png` (110×110) slot art. */
 const WAREHOUSE_ITEM_ART_W = 110;
@@ -74,7 +104,7 @@ const SLOT_ICON_MAX_ART_PX = Math.round(47 * SLOT_ICON_SCALE);
 const SLOT_ICON_MIN_EDGE_FRAC = 0.84;
 /** Nudge icon center downward in art px (positive Y = lower, scaled at layout). */
 const SLOT_ICON_OFFSET_Y_ART_PX = 7;
-const SLOT_NAME_FONT_BASE_PX = 10;
+const SLOT_NAME_FONT_BASE_PX = 17.55; // 19.5 × 0.90 — grid item name (CAKE, CARROT)
 const DEBUG_LABEL_FONT_BASE_PX = 8;
 /** Tan qty pill interior on `ui/warehouse-item.png` (measured art px). */
 const SLOT_QTY_BADGE_X0_PX = 85;
@@ -82,8 +112,8 @@ const SLOT_QTY_BADGE_X1_PX = 106;
 const SLOT_QTY_BADGE_Y0_PX = 70;
 const SLOT_QTY_BADGE_Y1_PX = 81;
 /** Default qty badge size (1–2 digits); shrinks for hundreds. */
-const SLOT_QTY_FONT_BASE_PX = 10;
-const SLOT_QTY_FONT_3DIGIT_BASE_PX = 8;
+const SLOT_QTY_FONT_BASE_PX = 17.55; // 19.5 × 0.90 — grid qty badge (6, 8, 36)
+const SLOT_QTY_FONT_3DIGIT_BASE_PX = 13.5; // 15 × 0.90 — hundreds on badge
 
 function slotQtyBadgeCenterFrac(): { x: number; y: number } {
   return {
@@ -97,10 +127,11 @@ function slotQtyFontSizePx(count: number, scale: number): number {
   return scaledFontSize(base, scale);
 }
 const DEBUG_GRID_COLOR = 0xdfe963;
+const DEBUG_LAYOUT_GRID_COLOR = 0x00e5ff;
 const DEBUG_GRID_ALPHA = 0.72;
 
 /**
- * Sell-preview footer region (fractions vs 1536×1024 `ui_warehouse` art).
+ * Sell-preview detail panel (fractions vs modal panel W/H).
  * Horizontal: 40% preview | 60% right column (15px top/bottom, 20px right).
  * Vertical (right column, after 15px gaps): name : owned : sell price = 27 : 21 : 42 of
  * (inset height − 2×gap), normalized to fill the column (weights sum 90).
@@ -113,15 +144,24 @@ interface SellFooterCellFrac {
   y1: number;
 }
 
-/** Footer content area on warehouse art (cream sell-preview block). */
-const SELL_FOOTER_REGION_X0 = 0.0872;
-/** +75px vs prior right edge on 1536px warehouse art (widen sell-preview footer). */
-const SELL_FOOTER_REGION_X1 = 0.3444 + 75 / WAREHOUSE_ART_W;
-const SELL_FOOTER_REGION_Y0 = 0.669;
-/** +70px vs prior 0.819 on 1024px art (expand downward; clear of upgrade panel on the right). */
-const SELL_FOOTER_REGION_Y1 = 0.819 + 70 / WAREHOUSE_ART_H;
+const BOTTOM_SECTION_BOTTOM_FRAC = 1 - BOTTOM_INSET_FRAC;
+const BOTTOM_SECTION_TOP_FRAC = BOTTOM_SECTION_BOTTOM_FRAC - BOTTOM_SECTION_HEIGHT_FRAC;
+/** Unified sell footer row — 90% modal width, centered; three columns inside. */
+const SELL_FOOTER_ROW_WIDTH_FRAC = 0.9;
+const SELL_FOOTER_ROW_LEFT_FRAC = (1 - SELL_FOOTER_ROW_WIDTH_FRAC) / 2;
+const SELL_FOOTER_COL1_FRAC = 0.35;
+const SELL_FOOTER_COL2_FRAC = 0.3;
+const SELL_FOOTER_COL3_FRAC = 0.35;
+/** Item detail footer vertical band — fractions of modal panel height. */
+const DETAIL_BOTTOM_FRAC = 0.05;
+const DETAIL_HEIGHT_FRAC =
+  BOTTOM_SECTION_BOTTOM_FRAC - 0.001 - (BOTTOM_SECTION_TOP_FRAC + 0.005);
+const SELL_FOOTER_ROW_Y1 = 1 - DETAIL_BOTTOM_FRAC;
+const SELL_FOOTER_ROW_Y0 = SELL_FOOTER_ROW_Y1 - DETAIL_HEIGHT_FRAC;
+/** Col1 width as panel fraction (for inset → col-local conversion). */
+const SELL_FOOTER_COL1_PANEL_W_FRAC = SELL_FOOTER_ROW_WIDTH_FRAC * SELL_FOOTER_COL1_FRAC;
 const SELL_FOOTER_PREVIEW_WIDTH_FRAC = 0.4;
-const SELL_FOOTER_BAND_GAP_PX = 15;
+const SELL_FOOTER_BAND_GAP_FRAC = 15 / WAREHOUSE_ART_H;
 /** Band heights as fractions of (right-column content height − 2×gap). */
 /** Right-column band weights (normalized; 27 + 21 + 42 = 90). */
 const SELL_FOOTER_BAND_WEIGHTS = { name: 0.27, owned: 0.21, price: 0.42 } as const;
@@ -129,29 +169,29 @@ const SELL_FOOTER_NAME_BAND_FRAC = SELL_FOOTER_BAND_WEIGHTS.name;
 const SELL_FOOTER_OWNED_BAND_FRAC = SELL_FOOTER_BAND_WEIGHTS.owned;
 const SELL_FOOTER_PRICE_BAND_FRAC = SELL_FOOTER_BAND_WEIGHTS.price;
 /** Right column inset (name / owned / sell price bands and debug overlay). */
-const SELL_RIGHT_PAD_TOP = 15;
-const SELL_RIGHT_PAD_BOTTOM = 15;
-const SELL_RIGHT_PAD_RIGHT = 20;
+const SELL_RIGHT_PAD_TOP_FRAC = 15 / WAREHOUSE_ART_H;
+const SELL_RIGHT_PAD_BOTTOM_FRAC = 15 / WAREHOUSE_ART_H;
+const SELL_RIGHT_PAD_RIGHT_FRAC = 20 / WAREHOUSE_ART_W;
 
-function buildSellFooterCells(panelH: number, panelW: number): SellFooterCellFrac[] {
-  const x0 = SELL_FOOTER_REGION_X0;
-  const x1 = SELL_FOOTER_REGION_X1;
-  const y0 = SELL_FOOTER_REGION_Y0;
-  const y1 = SELL_FOOTER_REGION_Y1;
+function buildSellFooterCells(): SellFooterCellFrac[] {
+  const x0 = 0;
+  const x1 = 1;
+  const y0 = 0;
+  const y1 = 1;
   const regionW = x1 - x0;
   const splitX = x0 + regionW * SELL_FOOTER_PREVIEW_WIDTH_FRAC;
 
-  const padTopFrac = SELL_RIGHT_PAD_TOP / panelH;
-  const padBottomFrac = SELL_RIGHT_PAD_BOTTOM / panelH;
-  const padRightFrac = SELL_RIGHT_PAD_RIGHT / panelW;
+  const padTopLocal = SELL_RIGHT_PAD_TOP_FRAC / DETAIL_HEIGHT_FRAC;
+  const padBottomLocal = SELL_RIGHT_PAD_BOTTOM_FRAC / DETAIL_HEIGHT_FRAC;
+  const padRightLocal = SELL_RIGHT_PAD_RIGHT_FRAC / SELL_FOOTER_COL1_PANEL_W_FRAC;
   const colX0 = splitX;
-  const colX1 = x1 - padRightFrac;
-  const colY0 = y0 + padTopFrac;
-  const colY1 = y1 - padBottomFrac;
+  const colX1 = x1 - padRightLocal;
+  const colY0 = y0 + padTopLocal;
+  const colY1 = y1 - padBottomLocal;
 
-  const gapFrac = SELL_FOOTER_BAND_GAP_PX / panelH;
+  const gapLocal = SELL_FOOTER_BAND_GAP_FRAC / DETAIL_HEIGHT_FRAC;
   const regionHFrac = colY1 - colY0;
-  const contentHFrac = regionHFrac - 2 * gapFrac;
+  const contentHFrac = regionHFrac - 2 * gapLocal;
   const bandWeightSum =
     SELL_FOOTER_NAME_BAND_FRAC + SELL_FOOTER_OWNED_BAND_FRAC + SELL_FOOTER_PRICE_BAND_FRAC;
   const nameHFrac = (contentHFrac * SELL_FOOTER_NAME_BAND_FRAC) / bandWeightSum;
@@ -159,9 +199,9 @@ function buildSellFooterCells(panelH: number, panelW: number): SellFooterCellFra
   const priceHFrac = (contentHFrac * SELL_FOOTER_PRICE_BAND_FRAC) / bandWeightSum;
 
   const nameY1 = colY0 + nameHFrac;
-  const ownedY0 = nameY1 + gapFrac;
+  const ownedY0 = nameY1 + gapLocal;
   const ownedY1 = ownedY0 + ownedHFrac;
-  const priceY0 = ownedY1 + gapFrac;
+  const priceY0 = ownedY1 + gapLocal;
   const priceY1 = priceY0 + priceHFrac;
   const ownedMidX = colX0 + (colX1 - colX0) / 2;
   const priceMidX = colX0 + (colX1 - colX0) * SELL_PRICE_LEFT_HALF_FRAC;
@@ -177,12 +217,14 @@ function buildSellFooterCells(panelH: number, panelW: number): SellFooterCellFra
   ];
 }
 
-const SELL_NAME_FONT_BASE_PX = 14;
-const SELL_OWNED_LABEL_FONT_BASE_PX = 14;
-const SELL_OWNED_COUNT_FONT_BASE_PX = 16;
+/** Sell-detail panel (item name, owned, sell price) — +20% vs original design. */
+const WAREHOUSE_DETAIL_FONT_SCALE = 1.2;
+const SELL_NAME_FONT_BASE_PX = 14 * WAREHOUSE_DETAIL_FONT_SCALE;
+const SELL_OWNED_LABEL_FONT_BASE_PX = 14 * WAREHOUSE_DETAIL_FONT_SCALE;
+const SELL_OWNED_COUNT_FONT_BASE_PX = 16 * WAREHOUSE_DETAIL_FONT_SCALE;
 const SELL_OWNED_LABEL_OFFSET_ART_PX = 11;
-const SELL_PRICE_LABEL_FONT_BASE_PX = 12;
-const SELL_PRICE_VALUE_FONT_BASE_PX = 14;
+const SELL_PRICE_LABEL_FONT_BASE_PX = 12 * WAREHOUSE_DETAIL_FONT_SCALE;
+const SELL_PRICE_VALUE_FONT_BASE_PX = 14 * WAREHOUSE_DETAIL_FONT_SCALE;
 /** Icon fits inside preview frame (fraction of shorter cell edge). */
 const SELL_ICON_EDGE_FRAC = 0.68;
 /** Max sell-preview icon size in warehouse art px (scales with panel via `artSpanH`). */
@@ -197,7 +239,12 @@ const SELL_PRICE_VALUE_PAD_ART_PX = 6;
 const SELL_PRICE_LEFT_PAD_ART_PX = 16;
 /** Sell-price band: left half = price label/coin; right half = USE (food). */
 const SELL_PRICE_LEFT_HALF_FRAC = 0.5;
-const SELL_USE_BTN_FONT_BASE_PX = 14;
+/** Orange `ui_button` label — ~25% larger than legacy 14px for readability. */
+const SELL_USE_BTN_FONT_BASE_PX = 18;
+/** Thinner dark stroke on cream fill (default warehouse stroke is heavier + shadow). */
+const SELL_USE_BTN_STROKE_FACTOR = 0.2;
+const SELL_USE_BTN_TEXT_PAD_PX = 6;
+const SELL_USE_BTN_FONT_MIN_PX = 12;
 /** Inset inside `sellPriceUse` cell when fitting `ui_button` (px). */
 const SELL_USE_BTN_INSET_PX = 4;
 /** Registered in `assets.ts` as `ui/button.png` (150×78). */
@@ -230,25 +277,58 @@ const SELL_ACTION_BTN_HEIGHT_SHRINK_ART_PX = 20;
 /** Nudge SELL / SELL ALL centers and hit rects downward (art px). */
 const SELL_ACTION_BTN_OFFSET_ART_PX = 15;
 
-const SELL_CONTROLS_CELLS: SellFooterCellFrac[] = [
-  { id: 'qtyMinus', x0: SELL_QTY_MINUS_X0, y0: SELL_QTY_ROW_Y0, x1: SELL_QTY_MINUS_X1, y1: SELL_QTY_ROW_Y1 },
-  {
-    id: 'qtyField',
-    x0: SELL_QTY_MINUS_X1,
-    y0: SELL_QTY_ROW_Y0,
-    x1: SELL_QTY_FIELD_X1,
-    y1: SELL_QTY_ROW_Y1,
-  },
-  { id: 'qtyPlus', x0: SELL_QTY_PLUS_X0, y0: SELL_QTY_ROW_Y0, x1: SELL_QTY_PLUS_X1, y1: SELL_QTY_ROW_Y1 },
-  { id: 'sellBtn', x0: 0.4108, y0: 0.7598, x1: 0.5202, y1: 0.9004 },
-  { id: 'sellAllBtn', x0: 0.5202, y0: 0.7598, x1: 0.6341, y1: 0.9004 },
-];
+/** Legacy art bounding box for center sell controls — maps into footer col2. */
+const SELL_COL2_ART = {
+  x0: SELL_QTY_MINUS_X0,
+  x1: 0.6341,
+  y0: SELL_QTY_ROW_Y0,
+  y1: 0.9004,
+} as const;
+
+function artRectToCol2Local(
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number
+): { x0: number; x1: number; y0: number; y1: number } {
+  const src = SELL_COL2_ART;
+  const w = src.x1 - src.x0;
+  const h = src.y1 - src.y0;
+  return {
+    x0: (x0 - src.x0) / w,
+    x1: (x1 - src.x0) / w,
+    y0: (y0 - src.y0) / h,
+    y1: (y1 - src.y0) / h,
+  };
+}
+
+function buildSellControlsCells(): SellFooterCellFrac[] {
+  const raw: SellFooterCellFrac[] = [
+    { id: 'qtyMinus', x0: SELL_QTY_MINUS_X0, y0: SELL_QTY_ROW_Y0, x1: SELL_QTY_MINUS_X1, y1: SELL_QTY_ROW_Y1 },
+    {
+      id: 'qtyField',
+      x0: SELL_QTY_MINUS_X1,
+      y0: SELL_QTY_ROW_Y0,
+      x1: SELL_QTY_FIELD_X1,
+      y1: SELL_QTY_ROW_Y1,
+    },
+    { id: 'qtyPlus', x0: SELL_QTY_PLUS_X0, y0: SELL_QTY_ROW_Y0, x1: SELL_QTY_PLUS_X1, y1: SELL_QTY_ROW_Y1 },
+    { id: 'sellBtn', x0: 0.4108, y0: 0.7598, x1: 0.5202, y1: 0.9004 },
+    { id: 'sellAllBtn', x0: 0.5202, y0: 0.7598, x1: 0.6341, y1: 0.9004 },
+  ];
+  return raw.map(({ id, x0, x1, y0, y1 }) => ({
+    id,
+    ...artRectToCol2Local(x0, x1, y0, y1),
+  }));
+}
+
+const SELL_CONTROLS_CELLS: SellFooterCellFrac[] = buildSellControlsCells();
 
 /** Min px for sell qty display + HTML overlay (fraction of field height). */
 const SELL_QTY_FIELD_FONT_MIN_PX = 12;
 const SELL_QTY_FIELD_FONT_HEIGHT_FRAC = 0.55;
 const SELL_ACTION_BTN_FONT_BASE_PX = 17;
-const CAPACITY_TEXT_FONT_BASE_PX = 13;
+const CAPACITY_TEXT_FONT_BASE_PX = 16; // 13 × 1.20 — warehouse used/max counter (e.g. 155 / 500)
 const HEADER_ICON_FONT_BASE_PX = 14;
 const SELL_STATUS_FONT_BASE_PX = 11;
 
@@ -263,16 +343,56 @@ function sellQtyFieldFontSizePx(fieldHeightPx: number): number {
  * Right-bottom warehouse upgrade panel (fractions vs 1536×1024 `ui_warehouse` art).
  * Measured from recessed input boxes in `src/assets/ui/warehouse.png`.
  */
-const UPGRADE_HIT_REGION = { x0: 0.638, y0: 0.668, x1: 0.924, y1: 0.888 };
-const UPGRADE_PANEL_CELLS: SellFooterCellFrac[] = [
-  { id: 'upgradeIcon', x0: 0.662, y0: 0.688, x1: 0.748, y1: 0.818 },
-  { id: 'levelBox', x0: 0.7572, y0: 0.6924, x1: 0.8932, y1: 0.7295 },
-  { id: 'capacityBox', x0: 0.7572, y0: 0.7432, x1: 0.8932, y1: 0.7813 },
-  /** Dark-pill text areas (right of icon), measured from `warehouse.png` recessed boxes. */
-  { id: 'coinSlot', x0: 0.7044, y0: 0.8223, x1: 0.735, y1: 0.8584 },
-  { id: 'woodSlot', x0: 0.776, y0: 0.8223, x1: 0.8118, y1: 0.8584 },
-  { id: 'stoneSlot', x0: 0.8542, y0: 0.8233, x1: 0.89, y1: 0.8584 },
-];
+const UPGRADE_HIT_REGION = {
+  x0: 0.638,
+  y0: BOTTOM_SECTION_TOP_FRAC + 0.004,
+  x1: 0.924,
+  y1: BOTTOM_SECTION_BOTTOM_FRAC,
+};
+const UPGRADE_BASE_HIT_Y0 = 0.668;
+const UPGRADE_BASE_HIT_Y1 = 0.888;
+const UPGRADE_BASE_HIT_SPAN = UPGRADE_BASE_HIT_Y1 - UPGRADE_BASE_HIT_Y0;
+const upgradeYInBottomSection = (legacyYFrac: number): number => {
+  const rel = (legacyYFrac - UPGRADE_BASE_HIT_Y0) / UPGRADE_BASE_HIT_SPAN;
+  return UPGRADE_HIT_REGION.y0 + rel * (UPGRADE_HIT_REGION.y1 - UPGRADE_HIT_REGION.y0);
+};
+
+function artRectToCol3Local(
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number
+): { x0: number; x1: number; y0: number; y1: number } {
+  const src = UPGRADE_HIT_REGION;
+  const w = src.x1 - src.x0;
+  const h = src.y1 - src.y0;
+  return {
+    x0: (x0 - src.x0) / w,
+    x1: (x1 - src.x0) / w,
+    y0: (y0 - src.y0) / h,
+    y1: (y1 - src.y0) / h,
+  };
+}
+
+function buildUpgradePanelCells(): SellFooterCellFrac[] {
+  const raw: SellFooterCellFrac[] = [
+    { id: 'upgradeIcon', x0: 0.662, y0: upgradeYInBottomSection(0.688), x1: 0.748, y1: upgradeYInBottomSection(0.818) },
+    { id: 'levelBox', x0: 0.7572, y0: upgradeYInBottomSection(0.6924), x1: 0.8932, y1: upgradeYInBottomSection(0.7295) },
+    { id: 'capacityBox', x0: 0.7572, y0: upgradeYInBottomSection(0.7432), x1: 0.8932, y1: upgradeYInBottomSection(0.7813) },
+    /** Dark-pill text areas (right of icon), measured from `warehouse.png` recessed boxes. */
+    { id: 'coinSlot', x0: 0.7044, y0: upgradeYInBottomSection(0.8223), x1: 0.735, y1: upgradeYInBottomSection(0.8584) },
+    { id: 'woodSlot', x0: 0.776, y0: upgradeYInBottomSection(0.8223), x1: 0.8118, y1: upgradeYInBottomSection(0.8584) },
+    { id: 'stoneSlot', x0: 0.8542, y0: upgradeYInBottomSection(0.8233), x1: 0.89, y1: upgradeYInBottomSection(0.8584) },
+  ];
+  return raw.map(({ id, x0, x1, y0, y1 }) => ({
+    id,
+    ...artRectToCol3Local(x0, x1, y0, y1),
+  }));
+}
+
+const UPGRADE_PANEL_CELLS: SellFooterCellFrac[] = buildUpgradePanelCells();
+/** Full col3 hit target (legacy upgrade art region). */
+const UPGRADE_HIT_CELL: SellFooterCellFrac = { id: 'upgradeHit', x0: 0, y0: 0, x1: 1, y1: 1 };
 /** Widen coin cost pill leftward for wider number display (art px). */
 const UPGRADE_COIN_SLOT_EXPAND_LEFT_ART_PX = 5;
 const UPGRADE_LEVEL_FONT_BASE_PX = 17;
@@ -282,25 +402,28 @@ const UPGRADE_DEBUG_COLOR = 0x9c27b0;
 const UPGRADE_DEBUG_HIT_COLOR = 0x00bcd4;
 
 /**
- * Red X close button on `ui/warehouse.png` (1536×1024), measured from art pixels.
- * Base center ≈ (1405, 120) on art; nudged by CLOSE_BTN_OFFSET_*; radius ~56px scaled to panel width.
+ * Warehouse close hit — panel-relative inset from top-right of modal rect
+ * (panelLeft/panelTop/panelW/panelH; same box as cover-cropped bg).
  */
-/** Extra nudge on warehouse art X (negative = left); ~30px left vs prior +10. */
-const CLOSE_BTN_OFFSET_X_PX = -20;
-/** Additional close X nudge as fraction of panel width (negative = left). */
-const CLOSE_BTN_OFFSET_X_PANEL_FRAC = 0.05;
-const CLOSE_BTN_OFFSET_Y_PX = 40;
-const CLOSE_BTN_CENTER_X_FRAC = (1405 + CLOSE_BTN_OFFSET_X_PX) / WAREHOUSE_ART_W;
-const CLOSE_BTN_CENTER_Y_FRAC = (120 + CLOSE_BTN_OFFSET_Y_PX) / WAREHOUSE_ART_H;
+/** Inset from panel right edge as fraction of panel width (center at 1 − frac). */
+const CLOSE_RIGHT_FRAC = 0.05;
+/** Inset from panel top edge as fraction of panel height (top anchor of hit circle). */
+const CLOSE_TOP_FRAC = 0.05;
+/** Hit radius on warehouse art (1536×1024), scaled by panel width. */
 const CLOSE_BTN_RADIUS_ART_PX = 56;
 
 /** Capacity bar on `ui/warehouse.png` — display height is half the art slot, centered vertically. */
 const CAPACITY_TRACK_SLOT_Y0_FRAC = 125 / WAREHOUSE_ART_H;
 const CAPACITY_TRACK_SLOT_H_FRAC = 134 / WAREHOUSE_ART_H;
 const CAPACITY_TRACK_X0_FRAC = 355 / WAREHOUSE_ART_W;
-/** Nudge capacity track (`process-empty`) as fraction of panel width (negative = left). */
-const CAPACITY_TRACK_OFFSET_X_PANEL_FRAC = -0.01;
+/** Art slot width for `process-empty` (reference for fill ratio only). */
 const CAPACITY_TRACK_W_FRAC = 668 / WAREHOUSE_ART_W;
+/** Process bar outer region width as fraction of modal panel width. */
+const PROCESS_BAR_WIDTH_FRAC = 0.8;
+/** Inner `process-empty` track width as fraction of outer process bar width. */
+const PROCESS_INNER_WIDTH_FRAC = 0.7;
+/** Nudge process row vertically as fraction of panel height (negative = up). */
+const PROCESS_ROW_Y_OFFSET_PANEL_FRAC = -0.001;
 const CAPACITY_TRACK_H_FRAC = CAPACITY_TRACK_SLOT_H_FRAC * 0.5;
 const CAPACITY_TRACK_Y0_FRAC =
   CAPACITY_TRACK_SLOT_Y0_FRAC + (CAPACITY_TRACK_SLOT_H_FRAC - CAPACITY_TRACK_H_FRAC) / 2;
@@ -331,16 +454,16 @@ const CAPACITY_TEXT_PILL_OFFSET_ART_PX = -72;
 /** Capacity text is centered in pill (origin 0.5, 0.5 at pill center). */
 const CAPACITY_TEXT_OFFSET_ART_PX = 4;
 
-/** Category tab row: half art size + extras; row band centered on panel, justify-between inside. */
+/** Category tab row: half art size + extras; fixed gap between tabs, group centered on tab rail. */
 const TAB_DISPLAY_SCALE = 0.5;
+/** Vertical scale for tab sprites and tablist background (width unchanged). */
+const TAB_HEIGHT_SCALE = 1.01;
+/** Per-tab sprite shrink applied after base display size (icons scale with tab). */
+const TAB_SPRITE_SCALE = 0.92;
 const TAB_EXTRA_W_ART_PX = 68;
 const TAB_EXTRA_H_ART_PX = 13;
-/** Tab row band on art (first/last tab outer edges); width scaled to modal via `TAB_ROW_SCALE`. */
-const TAB_ROW_LEFT_ART_PX = 473 - 266 / 2;
-const TAB_ROW_RIGHT_ART_PX = 1352.5 + 263 / 2;
-const TAB_ROW_LEFT_FRAC = TAB_ROW_LEFT_ART_PX / WAREHOUSE_ART_W;
-const TAB_ROW_RIGHT_FRAC = TAB_ROW_RIGHT_ART_PX / WAREHOUSE_ART_W;
-const TAB_ROW_SCALE = 0.874;
+/** Horizontal gap between adjacent category tab sprites (warehouse art px). */
+const TAB_GAP_ART_PX = 24;
 /** Nudge tab row vertically as fraction of panel height (negative = up). */
 const TAB_ROW_OFFSET_Y_PANEL_FRAC = -0.01;
 
@@ -402,7 +525,7 @@ const WAREHOUSE_TAB_LAYOUT: {
 
 /** Shared tab-row baseline Y on warehouse art (mean of tab center Y pixels). */
 const TAB_ROW_CENTER_Y_FRAC =
-  WAREHOUSE_TAB_LAYOUT.reduce((sum, tab) => sum + tab.centerYFrac, 0) / WAREHOUSE_TAB_LAYOUT.length;
+  HEADER_SECTION_TOP_FRAC + HEADER_SECTION_HEIGHT_FRAC * 0.325;
 
 const HEADER_TAB_CELL_ID: Record<TabId, string> = {
   all: 'tabAll',
@@ -426,25 +549,42 @@ type CapacityHeaderRectPx = {
   centerY: number;
 };
 
-/** Base art slot for `process-empty` (fractions → px at layout time). */
-function capacityTrackBaseRectPx(panelW: number, panelH: number, panelLeft: number, panelTop: number): CapacityHeaderRectPx {
-  const left = panelLeft + panelW * CAPACITY_TRACK_X0_FRAC + panelW * CAPACITY_TRACK_OFFSET_X_PANEL_FRAC;
-  const top = panelTop + panelH * CAPACITY_TRACK_Y0_FRAC;
-  const width = panelW * CAPACITY_TRACK_W_FRAC;
+/** Outer process bar region (`capacityProcessBg`) — full process slot width. */
+function capacityProcessBgRectPx(
+  panelW: number,
+  panelH: number,
+  panelLeft: number,
+  panelTop: number
+): CapacityHeaderRectPx {
+  const yOffset = panelH * PROCESS_ROW_Y_OFFSET_PANEL_FRAC;
+  const top = panelTop + panelH * CAPACITY_TRACK_Y0_FRAC + yOffset;
   const height = panelH * CAPACITY_TRACK_H_FRAC;
+  const width = panelW * PROCESS_BAR_WIDTH_FRAC;
+  const left = panelLeft + panelW * 0.5 - width * 0.5;
+  const centerX = panelLeft + panelW * 0.5;
   return {
     left,
     top,
     width,
     height,
-    centerX: left + width / 2,
+    centerX,
     centerY: top + height / 2,
   };
 }
 
-/** Display rect: single track aligned to art slot (no extra shrink/offset frames). */
+/** Inner `process-empty` track — centered within outer process bar. */
 function capacityTrackRectPx(panelW: number, panelH: number, panelLeft: number, panelTop: number): CapacityHeaderRectPx {
-  return capacityTrackBaseRectPx(panelW, panelH, panelLeft, panelTop);
+  const outer = capacityProcessBgRectPx(panelW, panelH, panelLeft, panelTop);
+  const width = outer.width * PROCESS_INNER_WIDTH_FRAC;
+  const left = outer.centerX - width * 0.5;
+  return {
+    left,
+    top: outer.top,
+    width,
+    height: outer.height,
+    centerX: outer.centerX,
+    centerY: outer.centerY,
+  };
 }
 
 function capacityFillRectPx(panelW: number, panelH: number, panelLeft: number, panelTop: number): CapacityHeaderRectPx {
@@ -455,15 +595,12 @@ function capacityFillRectPx(panelW: number, panelH: number, panelLeft: number, p
     panelH * CAPACITY_FILL_OFFSET_Y_PANEL_FRAC +
     CAPACITY_FILL_NUDGE_ART_Y * (panelH / WAREHOUSE_ART_H);
   const fillTop = fillCenterY - fillHeight / 2;
+  const fillLeftInset = CAPACITY_FILL_OFFSET_ART_PX * (panelW / WAREHOUSE_ART_W);
   const fillMaxWidth = Math.max(
     0,
-    track.width * CAPACITY_FILL_MAX_TRACK_W_FRAC -
-      CAPACITY_FILL_OFFSET_ART_PX * (panelW / WAREHOUSE_ART_W)
+    track.width * CAPACITY_FILL_MAX_TRACK_W_FRAC - fillLeftInset
   );
-  const fillLeft =
-    track.left +
-    CAPACITY_FILL_OFFSET_ART_PX * (panelW / WAREHOUSE_ART_W) +
-    panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
+  const fillLeft = track.left + fillLeftInset + panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
   return {
     left: fillLeft,
     top: fillTop,
@@ -537,12 +674,16 @@ export interface WarehouseGridLayoutMetrics {
   panelH: number;
   panelLeft: number;
   panelTop: number;
+  warehouseCoverCrop: { cropX: number; cropY: number; cropW: number; cropH: number };
   gridLeft: number;
   gridTop: number;
   gridViewportW: number;
   gridViewportH: number;
   gridContentOffsetX: number;
   gridContentW: number;
+  itemsListWidthScale: number;
+  itemSlotWidthScale: number;
+  slotDisplayWidth: number;
   cellW: number;
   cellH: number;
   cols: number;
@@ -551,6 +692,9 @@ export interface WarehouseGridLayoutMetrics {
   maxScrollOffset: number;
   slotCount: number;
   debugGrid: boolean;
+  modalSectionCells: { id: string; left: number; top: number; width: number; height: number }[];
+  sellFooterRow: { left: number; top: number; width: number; height: number };
+  sellFooterCols: { id: string; left: number; top: number; width: number; height: number }[];
   sellFooterCells: { id: string; left: number; top: number; width: number; height: number }[];
   sellControlsCells: { id: string; left: number; top: number; width: number; height: number }[];
   upgradePanelCells: { id: string; left: number; top: number; width: number; height: number }[];
@@ -565,9 +709,12 @@ export interface WarehouseGridLayoutMetrics {
     top: number;
     width: number;
     height: number;
+    displayWidth: number;
+    displayHeight: number;
     textureKey: string;
     active: boolean;
   }[];
+  tabListBg: { left: number; top: number; width: number; height: number; textureKey: string };
   closeHit: { centerX: number; centerY: number; radius: number };
   upgradeCostTexts: {
     id: 'coin' | 'wood' | 'stone';
@@ -590,7 +737,8 @@ export class InventoryPanel {
   private visible = false;
   private scrollViewport: Phaser.GameObjects.Container;
   private scrollContent: Phaser.GameObjects.Container;
-  private itemsBgContainer: Phaser.GameObjects.Container;
+  private itemsListBg: Phaser.GameObjects.Image;
+  private tabListBg: Phaser.GameObjects.Image;
   private listContainer: Phaser.GameObjects.Container;
   private scrollMaskGraphics?: Phaser.GameObjects.Graphics;
   private scrollGeometryMask?: Phaser.Display.Masks.GeometryMask;
@@ -609,6 +757,7 @@ export class InventoryPanel {
   private scrollDragActive = false;
   private scrollDragStartY = 0;
   private scrollDragStartOffset = 0;
+  private capacityProcessBg!: Phaser.GameObjects.Image;
   private capacityTrack!: Phaser.GameObjects.Image;
   private capacityFill!: Phaser.GameObjects.Image;
   private capacityText!: Phaser.GameObjects.Text;
@@ -684,6 +833,7 @@ export class InventoryPanel {
   /** Vertical step between grid rows (viewport / visible rows). */
   private pitchCellH: number;
   private debugGridContainer?: Phaser.GameObjects.Container;
+  private modalLayoutDebugContainer?: Phaser.GameObjects.Container;
   private sellFooterDebugContainer?: Phaser.GameObjects.Container;
   private upgradePanelDebugContainer?: Phaser.GameObjects.Container;
   private headerDebugContainer?: Phaser.GameObjects.Container;
@@ -723,8 +873,23 @@ export class InventoryPanel {
 
     this.panelBg = scene.add.image(this.cx, this.cy, 'ui_warehouse');
     this.panelBg.setScrollFactor(0);
-    this.warehouseCoverCrop = applyImageObjectCover(this.panelBg, this.panelW, this.panelH);
+    this.panelBg.setDisplaySize(this.panelW, this.panelH);
+    const panelFrame = this.panelBg.frame;
+    this.warehouseCoverCrop = computeObjectCoverCrop(
+      panelFrame.width,
+      panelFrame.height,
+      this.panelW,
+      this.panelH
+    );
     this.panelBg.setInteractive();
+
+    const processBgKey = scene.textures.exists(WAREHOUSE_PROCESS_BG_KEY)
+      ? WAREHOUSE_PROCESS_BG_KEY
+      : 'ui_warehouse';
+    this.capacityProcessBg = scene.add
+      .image(0, 0, processBgKey)
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0);
 
     this.capacityTrack = scene.add
       .image(0, 0, 'ui_process_empty')
@@ -741,8 +906,19 @@ export class InventoryPanel {
         0,
         0,
         '',
-        warehouseTitleLikeTextStyle('light', { fontSize: '13px', align: 'center' })
+        warehouseTitleLikeTextStyle('light', {
+          fontSize: `${CAPACITY_TEXT_FONT_BASE_PX}px`,
+          align: 'center',
+        })
       )
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0);
+
+    const tabListBgKey = scene.textures.exists(WAREHOUSE_TABLIST_BG_KEY)
+      ? WAREHOUSE_TABLIST_BG_KEY
+      : 'ui_warehouse';
+    this.tabListBg = scene.add
+      .image(0, 0, tabListBgKey)
       .setOrigin(0.5, 0.5)
       .setScrollFactor(0);
 
@@ -886,7 +1062,7 @@ export class InventoryPanel {
         'USE',
         warehouseTitleLikeTextStyle('light', {
           fontSize: scaledFontSizePx(SELL_USE_BTN_FONT_BASE_PX, this.typographyScale),
-          color: '#ffffff',
+          shadow: false,
         })
       )
       .setOrigin(0.5, 0.5)
@@ -934,10 +1110,7 @@ export class InventoryPanel {
       .setOrigin(0.5)
       .setScrollFactor(0);
 
-    const upgradeHitRect = this.sellCellRectPx({
-      id: 'upgradeHit',
-      ...UPGRADE_HIT_REGION,
-    });
+    const upgradeHitRect = this.upgradePanelCellRectPx(UPGRADE_HIT_CELL);
     this.upgradeHit = scene.add
       .rectangle(
         upgradeHitRect.centerX,
@@ -1019,11 +1192,18 @@ export class InventoryPanel {
     this.scrollViewport = scene.add.container(this.gridLeft, this.gridTop);
     this.scrollViewport.setScrollFactor(0);
 
+    const itemsListBgKey = scene.textures.exists(WAREHOUSE_ITEMS_LIST_BG_KEY)
+      ? WAREHOUSE_ITEMS_LIST_BG_KEY
+      : 'ui_warehouse';
+    this.itemsListBg = scene.add
+      .image(0, 0, itemsListBgKey)
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0);
+
     this.scrollContent = scene.add.container(0, 0);
-    this.itemsBgContainer = scene.add.container(this.gridContentOffsetX, 0);
     this.listContainer = scene.add.container(this.gridContentOffsetX, 0);
-    this.scrollContent.add([this.itemsBgContainer, this.listContainer]);
-    this.scrollViewport.add(this.scrollContent);
+    this.scrollContent.add(this.listContainer);
+    this.scrollViewport.add([this.itemsListBg, this.scrollContent]);
 
     // Geometry masks require the graphics object to stay visible (alpha 0 is fine).
     this.scrollMaskGraphics = scene.add.graphics({
@@ -1083,9 +1263,11 @@ export class InventoryPanel {
     const panelChildren: Phaser.GameObjects.GameObject[] = [
       this.dimOverlay,
       this.panelBg,
+      this.capacityProcessBg,
       this.capacityTrack,
       this.capacityFill,
       this.capacityText,
+      this.tabListBg,
       ...this.tabButtons.map((t) => t.image),
       this.searchLabel,
       this.sortLabel,
@@ -1093,6 +1275,7 @@ export class InventoryPanel {
       this.scrollViewport,
       this.scrollMaskGraphics,
     ];
+    if (this.modalLayoutDebugContainer) panelChildren.push(this.modalLayoutDebugContainer);
     if (this.debugGridContainer) panelChildren.push(this.debugGridContainer);
     if (this.headerDebugContainer) panelChildren.push(this.headerDebugContainer);
     if (this.sellFooterDebugContainer) panelChildren.push(this.sellFooterDebugContainer);
@@ -1146,6 +1329,7 @@ export class InventoryPanel {
     this.closeHit.on('pointerdown', onClosePointer);
     this.closeHit.on('pointerup', onClosePointer);
 
+    this.syncModalLayoutDebugGrid();
     this.syncSellFooterDebugGrid();
     this.syncUpgradePanelDebugGrid();
     this.syncHeaderDebugGrid();
@@ -1164,6 +1348,7 @@ export class InventoryPanel {
       this.renderList();
       this.refreshSellFooter();
       this.refreshUpgradePanel();
+      this.syncModalLayoutDebugGrid();
       this.syncSellFooterDebugGrid();
       this.syncUpgradePanelDebugGrid();
       this.syncHeaderDebugGrid();
@@ -1188,10 +1373,17 @@ export class InventoryPanel {
     this.cy = this.viewportH / 2;
     this.panelLeft = this.cx - this.panelW / 2;
     this.panelTop = this.cy - this.panelH / 2;
-    this.sellFooterCells = buildSellFooterCells(this.panelH, this.panelW);
+    this.sellFooterCells = buildSellFooterCells();
     if (this.panelBg) {
       this.panelBg.setPosition(this.cx, this.cy);
-      this.warehouseCoverCrop = applyImageObjectCover(this.panelBg, this.panelW, this.panelH);
+      this.panelBg.setDisplaySize(this.panelW, this.panelH);
+      const frame = this.panelBg.frame;
+      this.warehouseCoverCrop = computeObjectCoverCrop(
+        frame.width,
+        frame.height,
+        this.panelW,
+        this.panelH
+      );
     }
     if (this.dimOverlay) {
       this.dimOverlay.setPosition(this.cx, this.cy);
@@ -1262,7 +1454,8 @@ export class InventoryPanel {
       'dark',
       this.scaleFont(SELL_PRICE_VALUE_FONT_BASE_PX)
     );
-    applyWarehouseTitleLikeSizing(this.sellUseBtn, 'dark', this.scaleFont(SELL_USE_BTN_FONT_BASE_PX));
+    this.applySellUseBtnTextStyle(this.scaleFont(SELL_USE_BTN_FONT_BASE_PX));
+    this.fitSellUseBtnTextToButton();
     applyWarehouseTitleLikeSizing(
       this.sellBtn,
       'light',
@@ -1297,22 +1490,25 @@ export class InventoryPanel {
       GRID_TOP_FRAC,
       GRID_TOP_FRAC + GRID_HEIGHT_FRAC
     );
-    this.gridLeft = grid.left;
-    this.gridTop = grid.top + this.artSpanH(GRID_TOP_OFFSET_ART_PX);
-    this.gridViewportW = grid.width;
+    const slotBandW = grid.width;
+    this.gridViewportW = slotBandW * ITEMS_LIST_WIDTH_SCALE;
+    const itemsListOffsetX = this.panelW * ITEMS_LIST_OFFSET_X_PANEL_FRAC;
+    const itemsListOffsetY = this.panelH * ITEMS_LIST_OFFSET_Y_PANEL_FRAC;
+    this.gridLeft = grid.centerX - this.gridViewportW / 2 + itemsListOffsetX;
+    this.gridTop = grid.top + this.spanH(GRID_TOP_OFFSET_FRAC) + itemsListOffsetY;
     this.gridViewportH = grid.height + this.artSpanH(GRID_VIEWPORT_HEIGHT_EXTRA_ART_PX);
-    this.gridContentW = this.gridViewportW;
-    const pitchCellW = this.gridContentW / GRID_COLS;
-    const pitchCellH = this.gridViewportH / GRID_ROWS_VISIBLE;
+    this.gridContentW = slotBandW;
+    const pitchCellW = this.gridContentW / WAREHOUSE_GRID_COLS;
+    const pitchCellH = this.gridViewportH / WAREHOUSE_GRID_ROWS;
     this.pitchCellH = pitchCellH;
     this.cellW = pitchCellW - this.artSpanW(CELL_SLOT_SHRINK_W_ART_PX);
     this.cellH = pitchCellH + this.artSpanH(CELL_SLOT_HEIGHT_EXTRA_ART_PX);
-    const totalGridWidth = GRID_COLS * this.cellW;
+    const totalGridWidth = WAREHOUSE_GRID_COLS * this.cellW;
     this.gridContentOffsetX = (this.gridViewportW - totalGridWidth) / 2;
 
     this.scrollViewport.setPosition(this.gridLeft, this.gridTop);
-    this.itemsBgContainer.setPosition(this.gridContentOffsetX, 0);
     this.listContainer.setPosition(this.gridContentOffsetX, 0);
+    this.layoutItemsListBackground();
     this.scrollMaskGraphics?.clear();
     this.scrollMaskGraphics?.fillStyle(0xffffff);
     this.scrollMaskGraphics?.fillRect(0, 0, this.gridViewportW, this.gridViewportH);
@@ -1326,10 +1522,9 @@ export class InventoryPanel {
   }
 
   private layoutCloseButton(): void {
-    const closeX =
-      this.fracX(CLOSE_BTN_CENTER_X_FRAC) + this.panelW * CLOSE_BTN_OFFSET_X_PANEL_FRAC;
-    const closeY = this.fracY(CLOSE_BTN_CENTER_Y_FRAC);
-    const closeRadius = this.spanW(CLOSE_BTN_RADIUS_ART_PX / WAREHOUSE_ART_W);
+    const closeRadius = this.panelW * (CLOSE_BTN_RADIUS_ART_PX / WAREHOUSE_ART_W);
+    const closeX = this.panelLeft + this.panelW * (1 - CLOSE_RIGHT_FRAC);
+    const closeY = this.panelTop + this.panelH * CLOSE_TOP_FRAC + closeRadius;
     this.closeHit.setPosition(closeX, closeY);
     this.closeHit.setRadius(closeRadius);
     this.closeHit.setDepth(WAREHOUSE_CLOSE_DEPTH);
@@ -1431,7 +1626,7 @@ export class InventoryPanel {
     return { left, top, width, height, centerX: left + width / 2, centerY: top + height / 2 };
   }
 
-  private sellCellRectPx(cell: SellFooterCellFrac): {
+  private artFracCellRectPx(cell: SellFooterCellFrac): {
     left: number;
     top: number;
     width: number;
@@ -1453,6 +1648,103 @@ export class InventoryPanel {
     };
   }
 
+  private sellFooterRowRectPx(): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const left = this.panelLeft + this.panelW * SELL_FOOTER_ROW_LEFT_FRAC;
+    const top = this.panelTop + this.panelH * SELL_FOOTER_ROW_Y0;
+    const width = this.panelW * SELL_FOOTER_ROW_WIDTH_FRAC;
+    const height = this.panelH * (SELL_FOOTER_ROW_Y1 - SELL_FOOTER_ROW_Y0);
+    return {
+      left,
+      top,
+      width,
+      height,
+      centerX: left + width / 2,
+      centerY: top + height / 2,
+    };
+  }
+
+  private sellFooterColRectPx(col: 1 | 2 | 3): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const row = this.sellFooterRowRectPx();
+    const colStart =
+      col === 1 ? 0 : col === 2 ? SELL_FOOTER_COL1_FRAC : SELL_FOOTER_COL1_FRAC + SELL_FOOTER_COL2_FRAC;
+    const colWidth =
+      col === 1 ? SELL_FOOTER_COL1_FRAC : col === 2 ? SELL_FOOTER_COL2_FRAC : SELL_FOOTER_COL3_FRAC;
+    const left = row.left + row.width * colStart;
+    const width = row.width * colWidth;
+    return {
+      left,
+      top: row.top,
+      width,
+      height: row.height,
+      centerX: left + width / 2,
+      centerY: row.centerY,
+    };
+  }
+
+  private sellFooterColCellRectPx(
+    col: 1 | 2 | 3,
+    cell: SellFooterCellFrac
+  ): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const colRect = this.sellFooterColRectPx(col);
+    const left = colRect.left + colRect.width * cell.x0;
+    const top = colRect.top + colRect.height * cell.y0;
+    const width = colRect.width * (cell.x1 - cell.x0);
+    const height = colRect.height * (cell.y1 - cell.y0);
+    return {
+      left,
+      top,
+      width,
+      height,
+      centerX: left + width / 2,
+      centerY: top + height / 2,
+    };
+  }
+
+  /** Sell-preview detail cells — col1 of unified footer row. */
+  private sellDetailCellRectPx(cell: SellFooterCellFrac): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    return this.sellFooterColCellRectPx(1, cell);
+  }
+
+  /** Center sell controls — col2 of unified footer row. */
+  private sellControlsCellRectPx(cell: SellFooterCellFrac): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    return this.sellFooterColCellRectPx(2, cell);
+  }
+
   private upgradePanelCellRectPx(cell: SellFooterCellFrac): {
     left: number;
     top: number;
@@ -1461,7 +1753,7 @@ export class InventoryPanel {
     centerX: number;
     centerY: number;
   } {
-    const rect = this.sellCellRectPx(cell);
+    const rect = this.sellFooterColCellRectPx(3, cell);
     if (cell.id !== 'coinSlot') return rect;
     const expand = this.artSpanW(UPGRADE_COIN_SLOT_EXPAND_LEFT_ART_PX);
     const left = rect.left - expand;
@@ -1494,7 +1786,7 @@ export class InventoryPanel {
     centerX: number;
     centerY: number;
   } {
-    const base = this.sellCellRectPx(this.getSellControlsCell('qtyMinus'));
+    const base = this.sellControlsCellRectPx(this.getSellControlsCell('qtyMinus'));
     return {
       ...base,
       left: base.left + this.artSpanW(SELL_QTY_MINUS_OFFSET_ART_PX),
@@ -1510,7 +1802,7 @@ export class InventoryPanel {
     centerX: number;
     centerY: number;
   } {
-    const base = this.sellCellRectPx(this.getSellControlsCell('qtyField'));
+    const base = this.sellControlsCellRectPx(this.getSellControlsCell('qtyField'));
     return {
       ...base,
       left: base.left + this.artSpanW(SELL_QTY_FIELD_OFFSET_ART_PX),
@@ -1526,7 +1818,7 @@ export class InventoryPanel {
     centerX: number;
     centerY: number;
   } {
-    const base = this.sellCellRectPx(this.getSellControlsCell(id));
+    const base = this.sellControlsCellRectPx(this.getSellControlsCell(id));
     const height = Math.max(1, base.height - this.artSpanH(SELL_ACTION_BTN_HEIGHT_SHRINK_ART_PX));
     const top = base.top + this.artSpanH(SELL_ACTION_BTN_OFFSET_ART_PX);
     return {
@@ -1551,21 +1843,38 @@ export class InventoryPanel {
     return cell;
   }
 
-  private layoutCapacityTrackRectPx(): CapacityHeaderRectPx {
+  private layoutCapacityProcessBgRectPx(): CapacityHeaderRectPx {
     const base = this.rectFromFrac(
       CAPACITY_TRACK_X0_FRAC,
       CAPACITY_TRACK_X0_FRAC + CAPACITY_TRACK_W_FRAC,
       CAPACITY_TRACK_Y0_FRAC,
       CAPACITY_TRACK_Y0_FRAC + CAPACITY_TRACK_H_FRAC
     );
-    const trackOffsetX = this.panelW * CAPACITY_TRACK_OFFSET_X_PANEL_FRAC;
+    const width = this.panelW * PROCESS_BAR_WIDTH_FRAC;
+    const left = this.panelLeft + this.panelW * 0.5 - width * 0.5;
+    const centerX = this.panelLeft + this.panelW * 0.5;
+    const yOffset = this.panelH * PROCESS_ROW_Y_OFFSET_PANEL_FRAC;
     return {
-      left: base.left + trackOffsetX,
-      top: base.top,
-      width: base.width,
+      left,
+      top: base.top + yOffset,
+      width,
       height: base.height,
-      centerX: base.centerX + trackOffsetX,
-      centerY: base.centerY,
+      centerX,
+      centerY: base.centerY + yOffset,
+    };
+  }
+
+  private layoutCapacityTrackRectPx(): CapacityHeaderRectPx {
+    const outer = this.layoutCapacityProcessBgRectPx();
+    const width = outer.width * PROCESS_INNER_WIDTH_FRAC;
+    const left = outer.centerX - width * 0.5;
+    return {
+      left,
+      top: outer.top,
+      width,
+      height: outer.height,
+      centerX: outer.centerX,
+      centerY: outer.centerY,
     };
   }
 
@@ -1577,12 +1886,13 @@ export class InventoryPanel {
       this.artSpanH(CAPACITY_FILL_NUDGE_ART_Y) +
       this.panelH * CAPACITY_FILL_OFFSET_Y_PANEL_FRAC;
     const fillTop = fillCenterY - fillHeight / 2;
+    const fillLeftInset = this.artSpanW(CAPACITY_FILL_OFFSET_ART_PX);
     const fillMaxWidth = Math.max(
       0,
-      track.width * CAPACITY_FILL_MAX_TRACK_W_FRAC - this.artSpanW(CAPACITY_FILL_OFFSET_ART_PX)
+      track.width * CAPACITY_FILL_MAX_TRACK_W_FRAC - fillLeftInset
     );
     const fillLeft =
-      track.left + this.artSpanW(CAPACITY_FILL_OFFSET_ART_PX) + this.panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
+      track.left + fillLeftInset + this.panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
     return {
       left: fillLeft,
       top: fillTop,
@@ -1619,41 +1929,120 @@ export class InventoryPanel {
     if (id === 'capacityTrack') return this.layoutCapacityTrackRectPx();
     if (id === 'capacityFill') return this.layoutCapacityFillRectPx();
     if (id === 'capacityTextPill') return this.layoutCapacityTextPillRectPx();
-    return this.sellCellRectPx(this.getWarehouseHeaderCell(id));
+    return this.artFracCellRectPx(this.getWarehouseHeaderCell(id));
   }
 
-  /**
-   * Tab display size: panelW × (artW/1536) × scale, panelH × (artH/1024) × scale.
-   */
+  /** Stretch tab art to the slot (ShopPanel category tabs); active/inactive share one display box. */
+  private layoutTabSpriteImage(
+    image: Phaser.GameObjects.Image,
+    width: number,
+    height: number
+  ): void {
+    const frame = image.frame;
+    image.setCrop(0, 0, frame.width, frame.height);
+    image.setDisplaySize(width, height);
+  }
+
+  /** Tab display size: panelW × (artW/1536) × scale, panelH × (artH/1024) × scale. */
   private tabDisplaySizePx(tab: (typeof WAREHOUSE_TAB_LAYOUT)[number]): { w: number; h: number } {
     return {
-      w: this.artSpanW(tab.artW) * TAB_DISPLAY_SCALE + this.artSpanW(TAB_EXTRA_W_ART_PX),
-      h: this.artSpanH(tab.artH) * TAB_DISPLAY_SCALE + this.artSpanH(TAB_EXTRA_H_ART_PX),
+      w:
+        (this.artSpanW(tab.artW) * TAB_DISPLAY_SCALE + this.artSpanW(TAB_EXTRA_W_ART_PX)) *
+        TAB_SPRITE_SCALE,
+      h:
+        (this.artSpanH(tab.artH) * TAB_DISPLAY_SCALE + this.artSpanH(TAB_EXTRA_H_ART_PX)) *
+        TAB_SPRITE_SCALE *
+        TAB_HEIGHT_SCALE,
     };
   }
 
-  /** Tab row band: art band width × scale, centered on panel; justify-between inside. */
-  private layoutTabRowBandPx(): { rowLeft: number; rowWidth: number } {
-    const rowLeftBase = this.fracX(TAB_ROW_LEFT_FRAC);
-    const rowRightBase = this.fracX(TAB_ROW_RIGHT_FRAC);
-    const fullWidth = rowRightBase - rowLeftBase;
-    const rowWidth = fullWidth * TAB_ROW_SCALE;
-    const panelCenterX = this.fracX(0.5);
-    const rowLeft = panelCenterX - rowWidth / 2;
-    return { rowLeft, rowWidth };
+  private tabGapPx(): number {
+    return this.artSpanW(TAB_GAP_ART_PX);
+  }
+
+  /** Screen X for centering the tab group on the modal panel (wooden frame), not baked rail art. */
+  private tabRowCenterXPx(): number {
+    // Geometric panel center (visible modal after cover-crop). Baked rail art center (~0.594 via
+    // fracX) sits further right; fracX(0.5) can also differ from panelLeft + panelW/2 when crop
+    // uses texture frame size — prefer the panel rect the player sees.
+    return this.panelLeft + this.panelW * 0.5;
+  }
+
+  /** Sum of tab sprite widths plus gaps; group is centered on modal panel X. */
+  private tabRowGroupWidthPx(): number {
+    const gapPx = this.tabGapPx();
+    const tabCount = WAREHOUSE_TAB_LAYOUT.length;
+    const tabsWidth = WAREHOUSE_TAB_LAYOUT.reduce(
+      (sum, layout) => sum + this.tabDisplaySizePx(layout).w,
+      0
+    );
+    return tabsWidth + Math.max(0, tabCount - 1) * gapPx;
+  }
+
+  private tabRowGroupLeftPx(): number {
+    return this.tabRowCenterXPx() - this.tabRowGroupWidthPx() / 2;
+  }
+
+  private tabRowLeftPx(index: number): number {
+    const gapPx = this.tabGapPx();
+    let left = this.tabRowGroupLeftPx();
+    for (let i = 0; i < index; i++) {
+      left += this.tabDisplaySizePx(WAREHOUSE_TAB_LAYOUT[i]).w + gapPx;
+    }
+    return left;
   }
 
   private tabRowCenterYPx(tabH: number): number {
-    const track = this.layoutCapacityTrackRectPx();
+    const anchor = this.rectFromFrac(
+      CAPACITY_TRACK_X0_FRAC,
+      CAPACITY_TRACK_X0_FRAC + CAPACITY_TRACK_W_FRAC,
+      CAPACITY_TRACK_Y0_FRAC,
+      CAPACITY_TRACK_Y0_FRAC + CAPACITY_TRACK_H_FRAC
+    );
     const minCenterY =
-      track.top + track.height + this.artSpanH(CAPACITY_TAB_MIN_GAP_ART_PX) + tabH / 2;
+      anchor.top + anchor.height + this.artSpanH(CAPACITY_TAB_MIN_GAP_ART_PX) + tabH / 2;
     return (
       Math.max(this.fracY(TAB_ROW_CENTER_Y_FRAC), minCenterY) +
       this.panelH * TAB_ROW_OFFSET_Y_PANEL_FRAC
     );
   }
 
-  /** Tab row: justify-between across scaled row band; shared baseline Y below capacity. */
+  /** Tab row wooden rail bg — centered on modal panel, width spans tab group. */
+  private tabListBgRectPx(): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const tabH = this.tabDisplaySizePx(WAREHOUSE_TAB_LAYOUT[0]).h;
+    const centerY = this.tabRowCenterYPx(tabH);
+    const width = this.tabRowGroupWidthPx();
+    const height = tabH;
+    const centerX = this.tabRowCenterXPx();
+    return {
+      left: centerX - width / 2,
+      top: centerY - height / 2,
+      width,
+      height,
+      centerX,
+      centerY,
+    };
+  }
+
+  private layoutTabListBackground(): void {
+    const rect = this.tabListBgRectPx();
+    this.tabListBg.setPosition(rect.centerX, rect.centerY);
+    this.tabListBg.setDisplaySize(rect.width, rect.height);
+    if (this.tabListBg.texture.key !== WAREHOUSE_TABLIST_BG_KEY) {
+      this.tabListBg.setAlpha(0.35);
+    } else {
+      this.tabListBg.setAlpha(1);
+    }
+  }
+
+  /** Tab row: fixed gap between sprites; group centered on panel; shared baseline Y below capacity. */
   private tabSpriteRectPx(index: number, tab: (typeof WAREHOUSE_TAB_LAYOUT)[number]): {
     left: number;
     top: number;
@@ -1663,12 +2052,7 @@ export class InventoryPanel {
     centerY: number;
   } {
     const size = this.tabDisplaySizePx(tab);
-    const { rowLeft, rowWidth } = this.layoutTabRowBandPx();
-    const n = WAREHOUSE_TAB_LAYOUT.length;
-    const left =
-      n <= 1
-        ? rowLeft + (rowWidth - size.w) / 2
-        : rowLeft + (index * (rowWidth - size.w)) / (n - 1);
+    const left = this.tabRowLeftPx(index);
     const sharedCenterY = this.tabRowCenterYPx(size.h);
     const centerX = left + size.w / 2;
     return {
@@ -1683,7 +2067,10 @@ export class InventoryPanel {
 
   /** Align capacity track/fill/pill and tab sprites to header layout. */
   private layoutWarehouseHeader(): void {
+    const processBgCell = this.layoutCapacityProcessBgRectPx();
     const trackCell = this.layoutCapacityTrackRectPx();
+    this.capacityProcessBg.setPosition(processBgCell.centerX, processBgCell.centerY);
+    this.capacityProcessBg.setDisplaySize(processBgCell.width, processBgCell.height);
     this.capacityTrack.setPosition(trackCell.centerX, trackCell.centerY);
     this.capacityTrack.setDisplaySize(trackCell.width, trackCell.height);
 
@@ -1701,12 +2088,14 @@ export class InventoryPanel {
         pill.centerY + this.panelH * CAPACITY_TEXT_OFFSET_Y_PANEL_FRAC
       );
 
+    this.layoutTabListBackground();
+
     WAREHOUSE_TAB_LAYOUT.forEach((layout, index) => {
       const tab = this.tabButtons.find((t) => t.id === layout.id);
       if (!tab) return;
       const rect = this.tabSpriteRectPx(index, layout);
       tab.image.setPosition(rect.centerX, rect.centerY);
-      tab.image.setDisplaySize(rect.width, rect.height);
+      this.layoutTabSpriteImage(tab.image, rect.width, rect.height);
     });
   }
 
@@ -1719,8 +2108,8 @@ export class InventoryPanel {
 
   /** Right-bottom upgrade labels centered in recessed art slots. */
   private layoutUpgradePanel(): void {
-    const level = this.sellCellRectPx(this.getUpgradePanelCell('levelBox'));
-    const capacity = this.sellCellRectPx(this.getUpgradePanelCell('capacityBox'));
+    const level = this.upgradePanelCellRectPx(this.getUpgradePanelCell('levelBox'));
+    const capacity = this.upgradePanelCellRectPx(this.getUpgradePanelCell('capacityBox'));
     this.upgradeLevelText.setPosition(level.centerX, level.centerY);
     this.upgradeLevelText.setWordWrapWidth(level.width * 0.94);
 
@@ -1734,16 +2123,16 @@ export class InventoryPanel {
     this.upgradeWoodText.setPosition(woodPos.x, woodPos.y);
     this.upgradeStoneText.setPosition(stonePos.x, stonePos.y);
 
-    const hit = this.sellCellRectPx({ id: 'upgradeHit', ...UPGRADE_HIT_REGION });
+    const hit = this.upgradePanelCellRectPx(UPGRADE_HIT_CELL);
     this.upgradeHit.setPosition(hit.centerX, hit.centerY);
     this.upgradeHit.setSize(hit.width, hit.height);
   }
 
-  /** Center-bottom qty / sell buttons aligned to baked art placeholders. */
+  /** Center-bottom qty / sell buttons aligned to footer col2. */
   private layoutSellControls(): void {
     const minus = this.sellQtyMinusRectPx();
     const field = this.sellQtyFieldRectPx();
-    const plus = this.sellCellRectPx(this.getSellControlsCell('qtyPlus'));
+    const plus = this.sellControlsCellRectPx(this.getSellControlsCell('qtyPlus'));
     const sell = this.sellActionBtnRectPx('sellBtn');
     const sellAll = this.sellActionBtnRectPx('sellAllBtn');
 
@@ -1813,12 +2202,12 @@ export class InventoryPanel {
 
   /** Position sell-preview footer widgets to computed band cells. */
   private layoutSellFooterElements(): void {
-    const preview = this.sellCellRectPx(this.getSellFooterCell('preview'));
-    const name = this.sellCellRectPx(this.getSellFooterCell('name'));
-    const ownedLabel = this.sellCellRectPx(this.getSellFooterCell('ownedLabel'));
-    const ownedCount = this.sellCellRectPx(this.getSellFooterCell('ownedCount'));
-    const priceLeft = this.sellCellRectPx(this.getSellFooterCell('sellPriceLeft'));
-    const priceUse = this.sellCellRectPx(this.getSellFooterCell('sellPriceUse'));
+    const preview = this.sellDetailCellRectPx(this.getSellFooterCell('preview'));
+    const name = this.sellDetailCellRectPx(this.getSellFooterCell('name'));
+    const ownedLabel = this.sellDetailCellRectPx(this.getSellFooterCell('ownedLabel'));
+    const ownedCount = this.sellDetailCellRectPx(this.getSellFooterCell('ownedCount'));
+    const priceLeft = this.sellDetailCellRectPx(this.getSellFooterCell('sellPriceLeft'));
+    const priceUse = this.sellDetailCellRectPx(this.getSellFooterCell('sellPriceUse'));
 
     const iconSize = this.computeSellPreviewIconSize();
     this.sellItemIcon.setPosition(preview.centerX, preview.centerY);
@@ -1872,10 +2261,40 @@ export class InventoryPanel {
     this.sellUseBtn.setPosition(cell.centerX, cell.centerY);
     this.sellUseZone.setPosition(cell.centerX, cell.centerY);
     this.sellUseZone.setSize(cell.width, cell.height);
+    this.fitSellUseBtnTextToButton();
+  }
+
+  /** Cream label on orange `ui_button` — matches SELL pills, no drop shadow. */
+  private applySellUseBtnTextStyle(fontPx: number): void {
+    applyWarehouseTitleLikeSizing(this.sellUseBtn, 'light', fontPx);
+    this.sellUseBtn.setShadow(0, 0, '#000000', 0, false, false);
+    this.sellUseBtn.setStroke(
+      WAREHOUSE_TITLE_STROKE_DARK,
+      Math.max(2, Math.round(fontPx * SELL_USE_BTN_STROKE_FACTOR))
+    );
+  }
+
+  /** Shrink USE label if it overflows the scaled orange button art. */
+  private fitSellUseBtnTextToButton(): void {
+    const btnW = this.sellUseBtnImg.displayWidth;
+    const btnH = this.sellUseBtnImg.displayHeight;
+    if (btnW <= 0 || btnH <= 0) return;
+
+    const maxW = Math.max(1, btnW - SELL_USE_BTN_TEXT_PAD_PX);
+    const maxH = Math.max(1, btnH - SELL_USE_BTN_TEXT_PAD_PX);
+    let fontPx = this.scaleFont(SELL_USE_BTN_FONT_BASE_PX);
+    this.applySellUseBtnTextStyle(fontPx);
+    while (
+      fontPx > SELL_USE_BTN_FONT_MIN_PX &&
+      (this.sellUseBtn.width > maxW || this.sellUseBtn.height > maxH)
+    ) {
+      fontPx -= 1;
+      this.applySellUseBtnTextStyle(fontPx);
+    }
   }
 
   private computeSellPreviewIconSize(): number {
-    const { width, height } = this.sellCellRectPx(this.getSellFooterCell('preview'));
+    const { width, height } = this.sellDetailCellRectPx(this.getSellFooterCell('preview'));
     const edge = Math.min(width, height) * SELL_ICON_EDGE_FRAC;
     return Math.round(Math.min(edge, this.artSpanH(SELL_PREVIEW_ICON_MAX_ART_PX)));
   }
@@ -1906,6 +2325,11 @@ export class InventoryPanel {
         iconEdge * SLOT_ICON_MIN_EDGE_FRAC * SLOT_ICON_SCALE
       )
     );
+  }
+
+  /** Item card display width in renderList (does not affect grid viewport metrics). */
+  private computeSlotDisplayWidth(): number {
+    return this.cellW * ITEM_SLOT_WIDTH_SCALE;
   }
 
   private createSlotNameText(
@@ -1977,8 +2401,8 @@ export class InventoryPanel {
 
   private getScrollContentHeight(slotCount: number): number {
     const rows = Math.max(
-      GRID_ROWS_VISIBLE,
-      Math.ceil(slotCount / GRID_COLS),
+      WAREHOUSE_GRID_ROWS,
+      Math.ceil(slotCount / WAREHOUSE_GRID_COLS),
       this.minScrollRows
     );
     return rows * this.pitchCellH;
@@ -1986,40 +2410,128 @@ export class InventoryPanel {
 
   /** Dev/e2e: force extra scrollable rows (e.g. 8 rows when catalog has fewer item types). */
   setMinScrollRows(rows: number): void {
-    this.minScrollRows = Math.max(GRID_ROWS_VISIBLE, rows);
+    this.minScrollRows = Math.max(WAREHOUSE_GRID_ROWS, rows);
     this.repaint();
   }
 
-  private rebuildItemsBackground(contentHeight: number): void {
-    this.itemsBgContainer.removeAll(true);
-    const totalRows = Math.max(GRID_ROWS_VISIBLE, Math.ceil(contentHeight / this.pitchCellH));
-    const tex = this.sceneRef.textures.exists('ui_warehouse_item')
-      ? 'ui_warehouse_item'
-      : 'ui_warehouse';
-    for (let row = 0; row < totalRows; row++) {
-      for (let col = 0; col < GRID_COLS; col++) {
-        const x = col * this.cellW + this.cellW / 2;
-        const y = row * this.pitchCellH + this.cellH / 2;
-        const img = this.sceneRef.add.image(x, y, tex);
-        if (tex === 'ui_warehouse_item') {
-          img.setDisplaySize(this.cellW, this.cellH);
-        } else {
-          img.setDisplaySize(this.cellW, this.cellH);
-          img.setAlpha(0.35);
-        }
-        this.itemsBgContainer.add(img);
+  private layoutItemsListBackground(): void {
+    this.itemsListBg.setPosition(this.gridViewportW / 2, this.gridViewportH / 2);
+    this.itemsListBg.setDisplaySize(this.gridViewportW, this.gridViewportH);
+    this.scrollViewport.setPosition(this.gridLeft, this.gridTop);
+    this.scrollMaskGraphics?.setPosition(this.gridLeft, this.gridTop);
+    if (this.itemsListBg.texture.key !== WAREHOUSE_ITEMS_LIST_BG_KEY) {
+      this.itemsListBg.setAlpha(0.35);
+    } else {
+      this.itemsListBg.setAlpha(1);
+    }
+  }
+
+  /** Modal section bands (header / item grid / footer) — `?debugWarehouse=1`. */
+  private buildModalLayoutDebugOverlay(scene: Phaser.Scene): Phaser.GameObjects.Container {
+    const g = scene.add.graphics();
+    const labels: Phaser.GameObjects.Text[] = [];
+
+    g.lineStyle(2, DEBUG_LAYOUT_GRID_COLOR, DEBUG_GRID_ALPHA);
+    g.strokeRect(this.panelLeft, this.panelTop, this.panelW, this.panelH);
+
+    const sections: { id: string; x0: number; x1: number; y0: number; y1: number }[] = [
+      {
+        id: 'headerSection',
+        x0: 0,
+        x1: 1,
+        y0: HEADER_SECTION_TOP_FRAC,
+        y1: HEADER_SECTION_BOTTOM_FRAC,
+      },
+      {
+        id: 'gridSection',
+        x0: GRID_LEFT_FRAC,
+        x1: GRID_LEFT_FRAC + GRID_WIDTH_FRAC,
+        y0: GRID_TOP_FRAC,
+        y1: GRID_TOP_FRAC + GRID_HEIGHT_FRAC,
+      },
+      {
+        id: 'bottomSection',
+        x0: 0,
+        x1: 1,
+        y0: BOTTOM_SECTION_TOP_FRAC,
+        y1: BOTTOM_SECTION_BOTTOM_FRAC,
+      },
+    ];
+
+    g.lineStyle(2, DEBUG_LAYOUT_GRID_COLOR, DEBUG_GRID_ALPHA * 0.85);
+    for (const section of sections) {
+      const rect = this.rectFromFrac(section.x0, section.x1, section.y0, section.y1);
+      g.strokeRect(rect.left, rect.top, rect.width, rect.height);
+      labels.push(
+        scene.add
+          .text(rect.centerX, rect.top + 6, section.id, {
+            fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
+            color: '#80deea',
+            fontFamily: 'Arial',
+            align: 'center',
+          })
+          .setOrigin(0.5, 0)
+          .setScrollFactor(0)
+          .setAlpha(0.9)
+      );
+    }
+
+    return scene.add.container(0, 0, [g, ...labels]);
+  }
+
+  private getModalSectionCellsForMetrics(): {
+    id: string;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }[] {
+    return [
+      {
+        id: 'headerSection',
+        ...this.rectFromFrac(0, 1, HEADER_SECTION_TOP_FRAC, HEADER_SECTION_BOTTOM_FRAC),
+      },
+      {
+        id: 'gridSection',
+        ...this.rectFromFrac(
+          GRID_LEFT_FRAC,
+          GRID_LEFT_FRAC + GRID_WIDTH_FRAC,
+          GRID_TOP_FRAC,
+          GRID_TOP_FRAC + GRID_HEIGHT_FRAC
+        ),
+      },
+      {
+        id: 'bottomSection',
+        ...this.rectFromFrac(0, 1, BOTTOM_SECTION_TOP_FRAC, BOTTOM_SECTION_BOTTOM_FRAC),
+      },
+    ].map(({ id, left, top, width, height }) => ({ id, left, top, width, height }));
+  }
+
+  private syncModalLayoutDebugGrid(): void {
+    if (!isWarehouseGridDebug()) {
+      this.modalLayoutDebugContainer?.destroy();
+      this.modalLayoutDebugContainer = undefined;
+      return;
+    }
+    this.modalLayoutDebugContainer?.destroy();
+    this.modalLayoutDebugContainer = this.buildModalLayoutDebugOverlay(this.sceneRef);
+    this.modalLayoutDebugContainer.setScrollFactor(0);
+    this.modalLayoutDebugContainer.setDepth(WAREHOUSE_DEBUG_GRID_DEPTH - 1);
+    if (this.container) {
+      if (!this.container.list.includes(this.modalLayoutDebugContainer)) {
+        this.container.addAt(this.modalLayoutDebugContainer, 1);
       }
     }
   }
 
-  /** 10×3 viewport + extended rows for scroll tuning (debug only). */
+  /** 6×2 viewport + extended rows for scroll tuning (debug only). */
   private buildDebugGridOverlay(scene: Phaser.Scene, totalRows: number): Phaser.GameObjects.Container {
     const ox = this.gridContentOffsetX;
-    const gridW = GRID_COLS * this.cellW;
+    const gridW = WAREHOUSE_GRID_COLS * this.cellW;
     const contentH = Math.max(this.gridViewportH, totalRows * this.pitchCellH);
     const g = scene.add.graphics();
     g.lineStyle(1, DEBUG_GRID_COLOR, DEBUG_GRID_ALPHA * 0.55);
-    for (let c = 0; c <= GRID_COLS; c++) {
+    for (let c = 0; c <= WAREHOUSE_GRID_COLS; c++) {
       const x = ox + c * this.cellW;
       g.strokeLineShape(new Phaser.Geom.Line(x, 0, x, contentH));
     }
@@ -2029,7 +2541,7 @@ export class InventoryPanel {
     }
     g.lineStyle(2, DEBUG_GRID_COLOR, DEBUG_GRID_ALPHA);
     g.strokeRect(0, 0, this.gridViewportW, this.gridViewportH);
-    if (totalRows > GRID_ROWS_VISIBLE) {
+    if (totalRows > WAREHOUSE_GRID_ROWS) {
       g.lineStyle(1, DEBUG_GRID_COLOR, 0.45);
       g.strokeLineShape(
         new Phaser.Geom.Line(0, this.gridViewportH, this.gridViewportW, this.gridViewportH)
@@ -2038,8 +2550,8 @@ export class InventoryPanel {
 
     const labels: Phaser.GameObjects.Text[] = [];
     for (let row = 0; row < totalRows; row++) {
-      for (let col = 0; col < GRID_COLS; col++) {
-        const idx = row * GRID_COLS + col;
+      for (let col = 0; col < WAREHOUSE_GRID_COLS; col++) {
+        const idx = row * WAREHOUSE_GRID_COLS + col;
         labels.push(
           scene.add
             .text(
@@ -2048,13 +2560,13 @@ export class InventoryPanel {
               `${col},${row}\n${idx}`,
               {
                 fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
-                color: row < GRID_ROWS_VISIBLE ? '#dfe963' : '#b8c94e',
+                color: row < WAREHOUSE_GRID_ROWS ? '#dfe963' : '#b8c94e',
                 fontFamily: 'Arial',
                 align: 'center',
               }
             )
             .setOrigin(0.5)
-            .setAlpha(row < GRID_ROWS_VISIBLE ? 0.85 : 0.55)
+            .setAlpha(row < WAREHOUSE_GRID_ROWS ? 0.85 : 0.55)
         );
       }
     }
@@ -2069,25 +2581,57 @@ export class InventoryPanel {
     this.scrollContent.addAt(this.debugGridContainer, 1);
   }
 
-  /** Left-bottom sell preview placeholders (tune with `?debugWarehouse=1`). */
+  /** Sell footer row + col1 detail / col2 controls placeholders (`?debugWarehouse=1`). */
   private buildSellFooterDebugOverlay(scene: Phaser.Scene): Phaser.GameObjects.Container {
     const g = scene.add.graphics();
     g.lineStyle(2, DEBUG_GRID_COLOR, DEBUG_GRID_ALPHA);
     const labels: Phaser.GameObjects.Text[] = [];
 
-    const footerRegion = this.sellCellRectPx({
-      id: 'footerRegion',
-      x0: SELL_FOOTER_REGION_X0,
-      y0: SELL_FOOTER_REGION_Y0,
-      x1: SELL_FOOTER_REGION_X1,
-      y1: SELL_FOOTER_REGION_Y1,
-    });
-    g.lineStyle(1, DEBUG_GRID_COLOR, DEBUG_GRID_ALPHA * 0.45);
+    const footerRegion = this.sellFooterRowRectPx();
+    g.lineStyle(2, DEBUG_LAYOUT_GRID_COLOR, DEBUG_GRID_ALPHA * 0.85);
     g.strokeRect(footerRegion.left, footerRegion.top, footerRegion.width, footerRegion.height);
+    labels.push(
+      scene.add
+        .text(
+          footerRegion.centerX,
+          footerRegion.top + 4,
+          `sellFooterRow ${(SELL_FOOTER_ROW_WIDTH_FRAC * 100).toFixed(0)}%W`,
+          {
+            fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
+            color: '#80deea',
+            fontFamily: 'Arial',
+            align: 'center',
+          }
+        )
+        .setOrigin(0.5, 0)
+        .setAlpha(0.9)
+    );
+
+    for (const col of [1, 2, 3] as const) {
+      const colRect = this.sellFooterColRectPx(col);
+      g.lineStyle(1, DEBUG_LAYOUT_GRID_COLOR, DEBUG_GRID_ALPHA * 0.55);
+      g.strokeRect(colRect.left, colRect.top, colRect.width, colRect.height);
+      labels.push(
+        scene.add
+          .text(
+            colRect.centerX,
+            colRect.top + 4,
+            `col${col} ${((col === 1 ? SELL_FOOTER_COL1_FRAC : col === 2 ? SELL_FOOTER_COL2_FRAC : SELL_FOOTER_COL3_FRAC) * 100).toFixed(0)}%`,
+            {
+              fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
+              color: '#80deea',
+              fontFamily: 'Arial',
+              align: 'center',
+            }
+          )
+          .setOrigin(0.5, 0)
+          .setAlpha(0.85)
+      );
+    }
 
     const nameCell = this.getSellFooterCell('name');
     const priceCell = this.getSellFooterCell('sellPrice');
-    const rightColInset = this.sellCellRectPx({
+    const rightColInset = this.sellDetailCellRectPx({
       id: 'rightColInset',
       x0: nameCell.x0,
       y0: nameCell.y0,
@@ -2104,7 +2648,7 @@ export class InventoryPanel {
 
     g.lineStyle(2, DEBUG_GRID_COLOR, DEBUG_GRID_ALPHA);
     for (const cell of this.sellFooterCells) {
-      const { left, top, width, height, centerX, centerY } = this.sellCellRectPx(cell);
+      const { left, top, width, height, centerX, centerY } = this.sellDetailCellRectPx(cell);
       g.strokeRect(left, top, width, height);
       const fracLabel = `${cell.x0.toFixed(3)}–${cell.x1.toFixed(3)}\n${cell.y0.toFixed(3)}–${cell.y1.toFixed(3)}`;
       labels.push(
@@ -2129,7 +2673,7 @@ export class InventoryPanel {
             ? this.sellQtyFieldRectPx()
             : cell.id === 'sellBtn' || cell.id === 'sellAllBtn'
               ? this.sellActionBtnRectPx(cell.id)
-              : this.sellCellRectPx(cell);
+              : this.sellControlsCellRectPx(cell);
       const { left, top, width, height, centerX, centerY } = rect;
       g.strokeRect(left, top, width, height);
       const fracLabel = `${cell.x0.toFixed(3)}–${cell.x1.toFixed(3)}\n${cell.y0.toFixed(3)}–${cell.y1.toFixed(3)}`;
@@ -2151,7 +2695,7 @@ export class InventoryPanel {
         .text(
           footerRegion.left + 4,
           footerRegion.top + 4,
-          `gap=${SELL_FOOTER_BAND_GAP_PX}px padTB=${SELL_RIGHT_PAD_TOP}px padR=${SELL_RIGHT_PAD_RIGHT}px`,
+          `gap=${(SELL_FOOTER_BAND_GAP_FRAC * 100).toFixed(2)}% padTB=${(SELL_RIGHT_PAD_TOP_FRAC * 100).toFixed(2)}% padR=${(SELL_RIGHT_PAD_RIGHT_FRAC * 100).toFixed(2)}%`,
           {
             fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
             color: '#dfe963',
@@ -2205,7 +2749,7 @@ export class InventoryPanel {
           .text(
             centerX,
             centerY,
-            `${cellId}\nscale=${TAB_DISPLAY_SCALE} row=${TAB_ROW_SCALE} y=${TAB_ROW_CENTER_Y_FRAC.toFixed(4)}`,
+            `${cellId}\nscale=${TAB_DISPLAY_SCALE} gap=${TAB_GAP_ART_PX}px y=${TAB_ROW_CENTER_Y_FRAC.toFixed(4)}`,
             {
               fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
               color: '#ffb74d',
@@ -2253,12 +2797,12 @@ export class InventoryPanel {
     const g = scene.add.graphics();
     const labels: Phaser.GameObjects.Text[] = [];
 
-    const hit = this.sellCellRectPx({ id: 'upgradeHit', ...UPGRADE_HIT_REGION });
+    const hit = this.upgradePanelCellRectPx(UPGRADE_HIT_CELL);
     g.lineStyle(2, UPGRADE_DEBUG_HIT_COLOR, DEBUG_GRID_ALPHA);
     g.strokeRect(hit.left, hit.top, hit.width, hit.height);
     labels.push(
       scene.add
-        .text(hit.centerX, hit.top + 4, `upgradeHit\n${UPGRADE_HIT_REGION.x0.toFixed(3)}–${UPGRADE_HIT_REGION.x1.toFixed(3)}`, {
+        .text(hit.centerX, hit.top + 4, `upgradeHit\ncol3 0–1`, {
           fontSize: scaledFontSizePx(DEBUG_LABEL_FONT_BASE_PX, this.typographyScale),
           color: '#80deea',
           fontFamily: 'Arial',
@@ -2340,6 +2884,10 @@ export class InventoryPanel {
     this.scrollContent.setY(0);
     if (!this.selectedSellId) this.pickDefaultSellTarget();
     this.layoutWarehousePanel();
+    this.syncModalLayoutDebugGrid();
+    this.syncSellFooterDebugGrid();
+    this.syncUpgradePanelDebugGrid();
+    this.syncHeaderDebugGrid();
     this.updateCapacity();
     this.renderList();
     this.refreshSellFooter();
@@ -2376,7 +2924,7 @@ export class InventoryPanel {
       }
       const rect = this.tabSpriteRectPx(index, layout);
       tab.image.setPosition(rect.centerX, rect.centerY);
-      tab.image.setDisplaySize(rect.width, rect.height);
+      this.layoutTabSpriteImage(tab.image, rect.width, rect.height);
     });
     if (this.visible) this.bringModalHitsToTop();
   }
@@ -2786,13 +3334,12 @@ export class InventoryPanel {
     const slots = this.getFilteredSlots();
     this.lastRenderedSlotCount = slots.length;
     const totalRows = Math.max(
-      GRID_ROWS_VISIBLE,
-      Math.ceil(slots.length / GRID_COLS) || GRID_ROWS_VISIBLE,
+      WAREHOUSE_GRID_ROWS,
+      Math.ceil(slots.length / WAREHOUSE_GRID_COLS) || WAREHOUSE_GRID_ROWS,
       this.minScrollRows
     );
-    const contentHeight = this.getScrollContentHeight(slots.length);
 
-    this.rebuildItemsBackground(contentHeight);
+    this.layoutItemsListBackground();
     this.syncDebugGrid(totalRows);
     this.setScrollOffset(this.scrollOffset);
 
@@ -2800,23 +3347,33 @@ export class InventoryPanel {
       return;
     }
 
-    const iconSize = this.computeSlotIconSize(this.cellW, this.cellH);
-    const nameWrapW = this.cellW * 0.92;
+    const slotDisplayW = this.computeSlotDisplayWidth();
+    const iconSize = this.computeSlotIconSize(slotDisplayW, this.cellH);
+    const nameWrapW = slotDisplayW * 0.92;
 
     slots.forEach((slot, i) => {
-      const col = i % GRID_COLS;
-      const row = Math.floor(i / GRID_COLS);
+      const col = i % WAREHOUSE_GRID_COLS;
+      const row = Math.floor(i / WAREHOUSE_GRID_COLS);
       const cellLeft = col * this.cellW;
       const cellTop = row * this.pitchCellH;
       const { iconCenterY, nameCenterY } = this.slotCellLayout(cellTop);
-      const iconX = cellLeft + this.cellW / 2;
+      const slotCenterX = cellLeft + this.cellW / 2;
+      const slotCenterY = cellTop + this.cellH / 2;
+
+      const slotBgKey = this.container.scene.textures.exists('ui_warehouse_item')
+        ? 'ui_warehouse_item'
+        : 'ui_warehouse';
+      const slotBg = this.container.scene.add
+        .image(slotCenterX, slotCenterY, slotBgKey)
+        .setDisplaySize(slotDisplayW, this.cellH);
+
       const tex = this.container.scene.textures.exists(slot.iconKey) ? slot.iconKey : 'seed';
-      const icon = this.container.scene.add.image(iconX, iconCenterY, tex);
+      const icon = this.container.scene.add.image(slotCenterX, iconCenterY, tex);
       icon.setOrigin(0.5, 0.5);
       icon.setDisplaySize(iconSize, iconSize);
 
       const nameText = this.createSlotNameText(
-        iconX,
+        slotCenterX,
         nameCenterY,
         slot.label,
         nameWrapW
@@ -2824,11 +3381,13 @@ export class InventoryPanel {
 
       const isSelected = slot.id === this.selectedSellId;
       if (isSelected) {
+        const ringW = slotDisplayW * 0.94;
+        const ringH = this.cellH * 0.94;
         const ring = this.container.scene.add.rectangle(
-          cellLeft + this.cellW / 2,
-          cellTop + this.cellH / 2,
-          this.cellW * 0.94,
-          this.cellH * 0.94,
+          slotCenterX,
+          slotCenterY,
+          ringW,
+          ringH,
           0xffd700,
           0.22
         );
@@ -2837,18 +3396,18 @@ export class InventoryPanel {
 
       const qtyBadge = slotQtyBadgeCenterFrac();
       const qty = this.createSlotQtyText(
-        cellLeft + this.cellW * qtyBadge.x,
+        slotCenterX + (qtyBadge.x - 0.5) * slotDisplayW,
         cellTop + this.cellH * qtyBadge.y,
         slot.count
       );
 
-      this.listContainer.add([icon, nameText, qty]);
+      this.listContainer.add([slotBg, icon, nameText, qty]);
 
       const hit = this.container.scene.add
         .rectangle(
-          cellLeft + this.cellW / 2,
-          cellTop + this.cellH / 2,
-          this.cellW * 0.94,
+          slotCenterX,
+          slotCenterY,
+          slotDisplayW * 0.94,
           this.cellH * 0.94,
           0x000000,
           0.001
@@ -2885,8 +3444,16 @@ export class InventoryPanel {
 
   /** Dev/e2e: grid viewport and cell geometry in screen space. */
   getGridLayoutMetrics(): WarehouseGridLayoutMetrics {
+    const sellFooterRow = (() => {
+      const { left, top, width, height } = this.sellFooterRowRectPx();
+      return { left, top, width, height };
+    })();
+    const sellFooterCols = ([1, 2, 3] as const).map((col) => {
+      const { left, top, width, height } = this.sellFooterColRectPx(col);
+      return { id: `col${col}`, left, top, width, height };
+    });
     const sellFooterCells = this.sellFooterCells.map((cell) => {
-      const { left, top, width, height } = this.sellCellRectPx(cell);
+      const { left, top, width, height } = this.sellDetailCellRectPx(cell);
       return { id: cell.id, left, top, width, height };
     });
     const sellControlsCells = this.sellControlsCells.map((cell) => {
@@ -2897,7 +3464,7 @@ export class InventoryPanel {
             ? this.sellQtyFieldRectPx()
             : cell.id === 'sellBtn' || cell.id === 'sellAllBtn'
               ? this.sellActionBtnRectPx(cell.id)
-              : this.sellCellRectPx(cell);
+              : this.sellControlsCellRectPx(cell);
       return { id: cell.id, left, top, width, height };
     });
     const upgradePanelCells = this.upgradePanelCells.map((cell) => {
@@ -2923,6 +3490,8 @@ export class InventoryPanel {
         top: rect.top,
         width: rect.width,
         height: rect.height,
+        displayWidth: tab.image.displayWidth,
+        displayHeight: tab.image.displayHeight,
         textureKey: tab.image.texture.key,
         active: tab.id === this.activeTab,
       };
@@ -2955,20 +3524,32 @@ export class InventoryPanel {
       panelH: this.panelH,
       panelLeft: this.panelLeft,
       panelTop: this.panelTop,
+      warehouseCoverCrop: {
+        cropX: this.warehouseCoverCrop.cropX,
+        cropY: this.warehouseCoverCrop.cropY,
+        cropW: this.warehouseCoverCrop.cropW,
+        cropH: this.warehouseCoverCrop.cropH,
+      },
       gridLeft: this.gridLeft,
       gridTop: this.gridTop,
       gridViewportW: this.gridViewportW,
       gridViewportH: this.gridViewportH,
       gridContentOffsetX: this.gridContentOffsetX,
       gridContentW: this.gridContentW,
+      itemsListWidthScale: ITEMS_LIST_WIDTH_SCALE,
+      itemSlotWidthScale: ITEM_SLOT_WIDTH_SCALE,
+      slotDisplayWidth: this.computeSlotDisplayWidth(),
       cellW: this.cellW,
       cellH: this.cellH,
-      cols: GRID_COLS,
-      visibleRows: GRID_ROWS_VISIBLE,
+      cols: WAREHOUSE_GRID_COLS,
+      visibleRows: WAREHOUSE_GRID_ROWS,
       scrollOffset: this.scrollOffset,
       maxScrollOffset: this.getMaxScrollOffset(),
       slotCount: this.lastRenderedSlotCount,
       debugGrid: isWarehouseGridDebug(),
+      modalSectionCells: this.getModalSectionCellsForMetrics(),
+      sellFooterRow,
+      sellFooterCols,
       sellFooterCells,
       sellControlsCells,
       upgradePanelCells,
@@ -2982,6 +3563,16 @@ export class InventoryPanel {
         originY: this.capacityText.originY,
       },
       tabSprites,
+      tabListBg: (() => {
+        const rect = this.tabListBgRectPx();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          textureKey: this.tabListBg.texture.key,
+        };
+      })(),
       upgradeCostTexts,
       closeHit: this.getCloseHitMetrics(),
     };

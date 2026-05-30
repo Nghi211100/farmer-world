@@ -15,6 +15,7 @@ import type { EconomySystem } from '../systems/EconomySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { HUDResources } from './TopHUD';
 import { computeShopModalPanelSize } from './modalPanelSize';
+import { shopDetailCoinRowTotal } from './shopDetailPrice';
 import {
   CATEGORY_TAB_ZONE_GAP_Y_PX,
   CATEGORY_TAB_ZONE_PAD_X_PX,
@@ -96,6 +97,34 @@ export function computeObjectCoverCrop(
   return { texW, texH, cropX, cropY, cropW, cropH, scale };
 }
 
+/**
+ * Cover-fit anchored to fill display height (`scale = targetH / contentH`), center-crop width.
+ * `heightFill` is the fraction of texture height treated as visible tab art (1 = full frame;
+ * values below 1 zoom past transparent PNG vertical margins).
+ */
+export function computeObjectCoverCropHeightFill(
+  texW: number,
+  texH: number,
+  targetW: number,
+  targetH: number,
+  heightFill = 1
+): ObjectCoverCrop {
+  if (texW <= 0 || texH <= 0) {
+    return { texW, texH, cropX: 0, cropY: 0, cropW: texW, cropH: texH, scale: 1 };
+  }
+  const frac = Math.min(1, Math.max(0.05, heightFill));
+  const contentH = texH * frac;
+  const contentY = (texH - contentH) / 2;
+  const scale = targetH / contentH;
+  let cropW = targetW / scale;
+  let cropX = (texW - cropW) / 2;
+  if (cropW > texW) {
+    cropW = texW;
+    cropX = 0;
+  }
+  return { texW, texH, cropX, cropY: contentY, cropW, cropH: contentH, scale };
+}
+
 /** Map shop art pixel (1536×1024 space) to screen using cover crop + panel rect. */
 export function artPxToScreen(
   artX: number,
@@ -128,6 +157,26 @@ export function applyImageObjectCover(
     return { texW, texH, cropX: 0, cropY: 0, cropW: texW, cropH: texH, scale: 1 };
   }
   const crop = computeObjectCoverCrop(texW, texH, targetW, targetH);
+  image.setCrop(crop.cropX, crop.cropY, crop.cropW, crop.cropH);
+  image.setDisplaySize(targetW, targetH);
+  return crop;
+}
+
+/** Height-anchored cover for tab sprites (see `computeObjectCoverCropHeightFill`). */
+export function applyImageObjectCoverHeightFill(
+  image: Phaser.GameObjects.Image,
+  targetW: number,
+  targetH: number,
+  heightFill = 1
+): ObjectCoverCrop {
+  const frame = image.frame;
+  const texW = frame.width;
+  const texH = frame.height;
+  if (texW <= 0 || texH <= 0) {
+    image.setDisplaySize(targetW, targetH);
+    return { texW, texH, cropX: 0, cropY: 0, cropW: texW, cropH: texH, scale: 1 };
+  }
+  const crop = computeObjectCoverCropHeightFill(texW, texH, targetW, targetH, heightFill);
   image.setCrop(crop.cropX, crop.cropY, crop.cropW, crop.cropH);
   image.setDisplaySize(targetW, targetH);
   return crop;
@@ -2107,7 +2156,6 @@ export class ShopPanel {
     );
 
     this.detailPriceCoin.setVisible(true);
-    this.detailPriceAmount.setText(String(unit));
     this.layoutDetailPanel();
     this.bringDetailStatTextAboveBackgrounds();
     this.refreshBuyQuantity();
@@ -2130,6 +2178,18 @@ export class ShopPanel {
     const max = this.getMaxBuyQuantity(this.selectedId);
     this.buyQuantity = Phaser.Math.Clamp(Math.floor(qty), 1, max);
     this.updateBuyQtyDisplay();
+    this.updateDetailBuyTotalPrice();
+  }
+
+  /** Coin-row total (`unitPrice * buyQuantity`); unit line stays on `detailStatLines[0]`. */
+  private updateDetailBuyTotalPrice(): void {
+    if (!this.selectedId || !this.economy) {
+      this.detailPriceAmount?.setText('');
+      return;
+    }
+    const unit = this.economy.getShopPrice(this.selectedId);
+    this.detailPriceAmount.setText(String(shopDetailCoinRowTotal(unit, this.buyQuantity)));
+    this.layoutDetailPriceRow();
   }
 
   private adjustBuyQuantity(delta: number): void {

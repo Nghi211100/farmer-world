@@ -1110,6 +1110,8 @@ test.describe('Shop modal (Cửa hàng)', () => {
 
     const detail = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.getShopDetail());
     expect(detail?.buyQuantity).toBe(2);
+    expect(detail?.priceLine).toContain('Giá: 5 xu');
+    expect(detail?.unitPriceAmount).toBe('10');
   });
 
   test('buy qty canvas clicks adjust quantity', async ({ page }) => {

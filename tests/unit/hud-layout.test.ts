@@ -4,26 +4,23 @@ import {
   computeLeftMenuLayout,
   computeRightMenuLayout,
   HUD_BAG_BOTTOM_VH_FRAC,
-  HUD_BAG_ICON_SIZE_MULTIPLIER,
   HUD_BAG_LEFT_VW_FRAC,
   HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER,
   HUD_RIGHT_MENU_RIGHT_VW_FRAC,
+  hudBagIconSizePx,
   hudRightLandBuildIconWidthPx,
+  hudRightShopIconDisplaySizePx,
   hudRightShopIconWidthPx,
-  hudSpan,
 } from '../../src/ui/hudLayout';
-
-const BOTTOM_NAV_ICON_SIZE_ART = 48;
 import { setHudSafeAreaInsets } from '../../src/safeArea';
 
 describe('computeLeftMenuLayout', () => {
-  it('places bag left edge at 3% viewport width with no safe area', () => {
+  it('places bag left edge at 1.5% viewport width with no safe area', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
     const viewW = 1920;
     const viewH = 1080;
     const layout = computeLeftMenuLayout(viewW, viewH);
-    const baseSize = hudSpan(BOTTOM_NAV_ICON_SIZE_ART, viewW, viewH);
-    const expectedSize = Math.round(baseSize * HUD_BAG_ICON_SIZE_MULTIPLIER);
+    const expectedSize = hudBagIconSizePx(viewW, viewH);
 
     expect(layout.iconSize).toBe(expectedSize);
     expect(layout.iconCenterX - layout.iconSize / 2).toBeCloseTo(
@@ -45,17 +42,35 @@ describe('computeLeftMenuLayout', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
   });
 
-  it('scales bag icon by HUD_BAG_ICON_SIZE_MULTIPLIER vs baseline bottom-nav art size', () => {
+  it('matches right bar shop icon display size on phone', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
     const viewW = 390;
     const viewH = 844;
-    const baseSize = hudSpan(BOTTOM_NAV_ICON_SIZE_ART, viewW, viewH);
     const layout = computeLeftMenuLayout(viewW, viewH);
+    const right = computeRightMenuLayout(viewW, viewH);
+    const shopIndex = right.iconSizes.length - 1;
+    const shopSize = right.iconSizes[shopIndex] ?? 0;
 
-    expect(layout.iconSize).toBe(Math.round(baseSize * HUD_BAG_ICON_SIZE_MULTIPLIER));
+    expect(layout.iconSize).toBe(hudBagIconSizePx(viewW, viewH));
+    expect(layout.iconSize).toBe(shopSize);
+    expect(layout.iconSize).toBe(hudRightShopIconDisplaySizePx(viewW));
   });
 
-  it('places bag bottom edge at 3% viewport height with no safe area', () => {
+  it('matches right bar shop icon display size on laptop reference viewport', () => {
+    setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
+    const viewW = 1920;
+    const viewH = 1080;
+    const right = computeRightMenuLayout(viewW, viewH);
+    const shopIndex = right.iconSizes.length - 1;
+    const shopSize = right.iconSizes[shopIndex] ?? 0;
+
+    expect(hudBagIconSizePx(viewW, viewH)).toBe(shopSize);
+    expect(hudBagIconSizePx(viewW, viewH)).toBe(
+      Math.round(hudRightShopIconWidthPx(viewW) * HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER)
+    );
+  });
+
+  it('places bag bottom edge at 1.5% viewport height with no safe area', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
     const viewW = 1920;
     const viewH = 1080;
@@ -82,7 +97,7 @@ describe('computeLeftMenuLayout', () => {
 });
 
 describe('computeRightMenuLayout', () => {
-  it('places rightmost icon right edge at 3% viewport width with no safe area', () => {
+  it('places rightmost icon right edge at 1.5% viewport width with no safe area', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
     const viewW = 1920;
     const viewH = 1080;
@@ -126,7 +141,7 @@ describe('computeRightMenuLayout', () => {
     });
   });
 
-  it('places shop icon bottom edge at 3% viewport height with no safe area', () => {
+  it('places shop icon bottom edge at 1.5% viewport height with no safe area', () => {
     setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
     const viewW = 1920;
     const viewH = 1080;
@@ -169,9 +184,7 @@ describe('computeRightMenuLayout', () => {
     const expectedLandBuild = Math.round(
       hudRightLandBuildIconWidthPx(viewW) * HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER
     );
-    const expectedShop = Math.round(
-      hudRightShopIconWidthPx(viewW) * HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER
-    );
+    const expectedShop = hudRightShopIconDisplaySizePx(viewW);
 
     expect(layout.iconSizes[0]).toBe(expectedLandBuild);
     expect(layout.iconSizes[1]).toBe(expectedLandBuild);

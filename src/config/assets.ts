@@ -235,8 +235,8 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     key: 'ui_warehouse_item',
     path: 'ui/warehouse-item.png',
     placeholderColor: 0xc4a574,
-    width: 110,
-    height: 110,
+    width: 128,
+    height: 120,
   },
   {
     key: 'ui_warehouse_items_list_bg',

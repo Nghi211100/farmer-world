@@ -4,14 +4,21 @@ const WAREHOUSE_ART_W = 1536;
 const WAREHOUSE_ART_H = 1024;
 const TOP_INSET_FRAC = 0.11;
 const BOTTOM_INSET_FRAC = 0.112;
-const SECTION_GAP_FRAC = 0.014;
 const HEADER_SECTION_HEIGHT_FRAC = 0.145;
 const BOTTOM_SECTION_HEIGHT_FRAC = 0.22;
+const GRID_SECTION_HEIGHT_FRAC = 0.33124;
 const HEADER_SECTION_TOP_FRAC = TOP_INSET_FRAC;
 const HEADER_SECTION_BOTTOM_FRAC = HEADER_SECTION_TOP_FRAC + HEADER_SECTION_HEIGHT_FRAC;
-const GRID_TOP_NUDGE_UP_FRAC = 0.035;
-const GRID_TOP_FRAC =
-  HEADER_SECTION_BOTTOM_FRAC + SECTION_GAP_FRAC - GRID_TOP_NUDGE_UP_FRAC;
+/** Matches panel-relative vertical layout constants in InventoryPanel.ts */
+const PROCESS_ROW_TOP_PANEL_FRAC = 0.141875; // 0.142875 - 0.001 — down 0.1%
+const PROCESS_ROW_HEIGHT_PANEL_FRAC = (134 / WAREHOUSE_ART_H) * 0.5;
+/** Matches `PROCESS_ROW_HEIGHT_SCALE` in InventoryPanel.ts */
+const PROCESS_ROW_HEIGHT_SCALE = 1.1357955; // 1.08171 × 1.05
+const TAB_ROW_TOP_PANEL_FRAC = 0.213097;
+const ITEMS_LIST_TOP_PANEL_FRAC = 0.299458;
+const ITEMS_LIST_HEIGHT_PANEL_FRAC = GRID_SECTION_HEIGHT_FRAC;
+/** Matches `ITEMS_LIST_HEIGHT_SCALE` in InventoryPanel.ts */
+const ITEMS_LIST_HEIGHT_SCALE = 1.06555;
 const GRID_INSET_LEFT_FRAC = 88 / WAREHOUSE_ART_W;
 const GRID_INSET_RIGHT_FRAC = 1330 / WAREHOUSE_ART_W;
 const GRID_WIDTH_FRAC = GRID_INSET_RIGHT_FRAC - GRID_INSET_LEFT_FRAC;
@@ -20,22 +27,25 @@ const GRID_LEFT_FRAC = GRID_INSET_LEFT_FRAC;
 const ITEMS_LIST_WIDTH_SCALE = 1.029169; // 1.034341 × 0.995 — items list container width −0.5%
 /** Matches `ITEMS_LIST_OFFSET_*_PANEL_FRAC` in InventoryPanel.ts */
 const ITEMS_LIST_OFFSET_X_PANEL_FRAC = -0.005;
-const ITEMS_LIST_OFFSET_Y_PANEL_FRAC = -0.002;
 /** Matches `ITEM_SLOT_WIDTH_SCALE` in InventoryPanel.ts (renderList slot cards only). */
 const ITEM_SLOT_WIDTH_SCALE = 1.086585; // 1.083336 × 1.003 — slot card width +0.3%
+/** Matches `ITEM_SLOT_GAP_SCALE` in InventoryPanel.ts (renderList slot grid step). */
+const ITEM_SLOT_GAP_SCALE = 1.01;
 /** Matches `WAREHOUSE_INNER_OFFSET_*` in InventoryPanel.ts */
 const WAREHOUSE_INNER_OFFSET_X_PX = 0;
 const WAREHOUSE_INNER_OFFSET_Y_PX = -10;
 const WAREHOUSE_INNER_OFFSET_X_FRAC = 0;
 const WAREHOUSE_INNER_OFFSET_Y_FRAC = -0.01;
 /** Two visible rows inside beige inset on warehouse art. */
-const GRID_HEIGHT_FRAC = 0.33124; // 0.338 × 0.98 — height −2%
 const GRID_VIEWPORT_HEIGHT_EXTRA_ART_PX = 10;
 const WAREHOUSE_GRID_COLS = 6;
 const WAREHOUSE_GRID_ROWS = 2;
 const CELL_SLOT_SHRINK_W_ART_PX = 5;
 const CELL_SLOT_HEIGHT_EXTRA_ART_PX = 2;
-const GRID_TOP_OFFSET_FRAC = 66 / WAREHOUSE_ART_H;
+
+function panelYFromTop(panelTop: number, panelH: number, frac: number): number {
+  return panelTop + panelH * frac;
+}
 
 /** Dark-pill text areas (right of icon), measured from `warehouse.png`. */
 const BOTTOM_SECTION_BOTTOM_FRAC = 1 - BOTTOM_INSET_FRAC;
@@ -44,10 +54,16 @@ const BOTTOM_SECTION_TOP_FRAC = BOTTOM_SECTION_BOTTOM_FRAC - BOTTOM_SECTION_HEIG
 /** Matches sell footer row constants in InventoryPanel.ts */
 const SELL_FOOTER_ROW_WIDTH_FRAC = 0.9;
 const SELL_FOOTER_ROW_LEFT_FRAC = (1 - SELL_FOOTER_ROW_WIDTH_FRAC) / 2;
-const SELL_FOOTER_COL1_FRAC = 0.35;
+const SELL_FOOTER_COL1_FRAC = 0.375;
 const SELL_FOOTER_COL2_FRAC = 0.3;
-const SELL_FOOTER_COL3_FRAC = 0.35;
-const DETAIL_BOTTOM_FRAC = 0.05;
+const SELL_FOOTER_COL3_FRAC = 0.325;
+
+/** Matches footer col-local offsets in InventoryPanel.ts */
+const COL3_LEVEL_TEXT_Y_OFFSET_FRAC = -0.08;
+const COL3_COST_TEXT_Y_OFFSET_FRAC = -0.02;
+const COL3_COIN_TEXT_X_OFFSET_FRAC = -0.03;
+
+const DETAIL_BOTTOM_FRAC = 0.07;
 const DETAIL_HEIGHT_FRAC =
   BOTTOM_SECTION_BOTTOM_FRAC - 0.001 - (BOTTOM_SECTION_TOP_FRAC + 0.005);
 const SELL_FOOTER_ROW_Y1 = 1 - DETAIL_BOTTOM_FRAC;
@@ -162,6 +178,9 @@ interface WarehouseGridLayout {
   gridContentW: number;
   itemsListWidthScale: number;
   itemSlotWidthScale: number;
+  itemSlotGapScale: number;
+  slotPitchW: number;
+  slotPitchH: number;
   slotDisplayWidth: number;
   cellW: number;
   cellH: number;
@@ -203,8 +222,8 @@ interface WarehouseGridLayout {
   closeHit: { centerX: number; centerY: number; radius: number };
 }
 
-const CLOSE_RIGHT_FRAC = 0.05;
-const CLOSE_TOP_FRAC = 0.05;
+const CLOSE_RIGHT_FRAC = 0.015;
+const CLOSE_TOP_FRAC = 0.10;
 const CLOSE_BTN_RADIUS_ART_PX = 56;
 
 const UPGRADE_BASE_HIT_Y0 = 0.668;
@@ -229,24 +248,14 @@ const UPGRADE_COIN_SLOT_EXPAND_LEFT_PX = 5;
 const COST_SLOT_IDS = ['coinSlot', 'woodSlot', 'stoneSlot'] as const;
 const COST_POS_TOLERANCE_PX = 4;
 
-const CAPACITY_TRACK_SLOT_Y0_FRAC = 125 / WAREHOUSE_ART_H;
-const CAPACITY_TRACK_SLOT_H_FRAC = 134 / WAREHOUSE_ART_H;
-const CAPACITY_TRACK_X0_FRAC = 355 / WAREHOUSE_ART_W;
-/** Art slot width for `process-empty` (reference for fill ratio only). */
 const CAPACITY_TRACK_W_FRAC = 668 / WAREHOUSE_ART_W;
 /** Process bar outer region width as fraction of modal panel width. */
 const PROCESS_BAR_WIDTH_FRAC = 0.8;
 /** Inner `process-empty` track width as fraction of outer process bar width. */
 const PROCESS_INNER_WIDTH_FRAC = 0.7;
-/** Nudge process row vertically as fraction of panel height (negative = up). */
-const PROCESS_ROW_Y_OFFSET_PANEL_FRAC = -0.001;
-const CAPACITY_TRACK_H_FRAC = CAPACITY_TRACK_SLOT_H_FRAC * 0.5;
-const CAPACITY_TRACK_Y0_FRAC =
-  CAPACITY_TRACK_SLOT_Y0_FRAC + (CAPACITY_TRACK_SLOT_H_FRAC - CAPACITY_TRACK_H_FRAC) / 2;
 const CAPACITY_FILL_MAX_W_FRAC = 398 / WAREHOUSE_ART_W;
 const CAPACITY_FILL_MAX_TRACK_W_FRAC = CAPACITY_FILL_MAX_W_FRAC / CAPACITY_TRACK_W_FRAC;
-const CAPACITY_FILL_OFFSET_ART_PX = 42;
-const CAPACITY_FILL_OFFSET_X_PANEL_FRAC = 0.0075;
+const CAPACITY_FILL_LEFT_TRACK_FRAC = 0.08;
 const CAPACITY_FILL_OFFSET_Y_PANEL_FRAC = -0.0025;
 const CAPACITY_FILL_H_FRAC = (82 / WAREHOUSE_ART_H) * 0.5;
 const CAPACITY_TEXT_PILL_W_FRAC = 84 / WAREHOUSE_ART_W;
@@ -286,47 +295,17 @@ function capacityProcessBgRectPx(
   panelH: number,
   panelLeft: number,
   panelTop: number,
-  crop: WarehouseCoverCrop
+  _crop: WarehouseCoverCrop
 ): { left: number; top: number; width: number; height: number } {
-  const base = rectFromArtFrac(
-    CAPACITY_TRACK_X0_FRAC,
-    CAPACITY_TRACK_X0_FRAC + CAPACITY_TRACK_W_FRAC,
-    CAPACITY_TRACK_Y0_FRAC,
-    CAPACITY_TRACK_Y0_FRAC + CAPACITY_TRACK_H_FRAC,
-    panelLeft,
-    panelTop,
-    panelW,
-    panelH,
-    crop
-  );
+  const top = panelYFromTop(panelTop, panelH, PROCESS_ROW_TOP_PANEL_FRAC);
+  const height = panelH * PROCESS_ROW_HEIGHT_PANEL_FRAC * PROCESS_ROW_HEIGHT_SCALE;
   const width = panelW * PROCESS_BAR_WIDTH_FRAC;
-  const yOffset = panelH * PROCESS_ROW_Y_OFFSET_PANEL_FRAC;
   return {
     left: panelLeft + panelW * 0.5 - width * 0.5,
-    top: base.top + yOffset,
+    top,
     width,
-    height: base.height,
+    height,
   };
-}
-
-function capacityTrackAnchorRectPx(
-  panelW: number,
-  panelH: number,
-  panelLeft: number,
-  panelTop: number,
-  crop: WarehouseCoverCrop
-): { top: number; height: number } {
-  return rectFromArtFrac(
-    CAPACITY_TRACK_X0_FRAC,
-    CAPACITY_TRACK_X0_FRAC + CAPACITY_TRACK_W_FRAC,
-    CAPACITY_TRACK_Y0_FRAC,
-    CAPACITY_TRACK_Y0_FRAC + CAPACITY_TRACK_H_FRAC,
-    panelLeft,
-    panelTop,
-    panelW,
-    panelH,
-    crop
-  );
 }
 
 function capacityTrackRectPx(
@@ -357,13 +336,11 @@ function capacityFillRectPx(
   const fillHeight = artSpanH(82, panelLeft, panelTop, panelW, panelH, crop) * 0.5;
   const fillCenterY = track.top + track.height / 2 + panelH * CAPACITY_FILL_OFFSET_Y_PANEL_FRAC;
   const fillTop = fillCenterY - fillHeight / 2;
-  const fillLeftInset = artSpanW(CAPACITY_FILL_OFFSET_ART_PX, panelLeft, panelTop, panelW, panelH, crop);
+  const fillLeft = track.left + track.width * CAPACITY_FILL_LEFT_TRACK_FRAC;
   const fillMaxWidth = Math.max(
     0,
-    track.width * CAPACITY_FILL_MAX_TRACK_W_FRAC - fillLeftInset
+    track.width * (CAPACITY_FILL_MAX_TRACK_W_FRAC - CAPACITY_FILL_LEFT_TRACK_FRAC)
   );
-  const fillLeft =
-    track.left + fillLeftInset + panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
   return { left: fillLeft, top: fillTop, width: fillMaxWidth, height: fillHeight };
 }
 
@@ -399,7 +376,6 @@ const TAB_EXTRA_W_ART_PX = 68;
 const TAB_EXTRA_H_ART_PX = 13;
 /** Horizontal gap between adjacent category tab sprites (warehouse art px). */
 const TAB_GAP_ART_PX = 24;
-const CAPACITY_TAB_MIN_GAP_ART_PX = 8;
 const TAB_ROW_LEFT_ART_PX = 473 - 266 / 2;
 const TAB_ROW_RIGHT_ART_PX = 1352.5 + 263 / 2;
 const TAB_ROW_LEFT_FRAC = TAB_ROW_LEFT_ART_PX / WAREHOUSE_ART_W;
@@ -513,9 +489,51 @@ const WAREHOUSE_TAB_SPECS = [
   { id: 'tabMaterials', tabId: 'materials', centerY: 157 / WAREHOUSE_ART_H, artW: 263, artH: 136 },
 ] as const;
 
-const TAB_ROW_CENTER_Y_FRAC = HEADER_SECTION_TOP_FRAC + HEADER_SECTION_HEIGHT_FRAC * 0.325;
-/** Nudge tab row vertically as fraction of panel height (negative = up). */
-const TAB_ROW_OFFSET_Y_PANEL_FRAC = -0.01;
+function expectedTabListBgRect(
+  layout: WarehouseGridLayout,
+  panelLeft: number,
+  panelTop: number
+): { left: number; top: number; width: number; height: number } {
+  const crop = layout.warehouseCoverCrop;
+  const tabH = tabDisplaySizePx(
+    panelLeft,
+    panelTop,
+    layout.panelW,
+    layout.panelH,
+    WAREHOUSE_TAB_SPECS[0],
+    crop
+  ).h;
+  const centerY = panelYFromTop(panelTop, layout.panelH, TAB_ROW_TOP_PANEL_FRAC) + tabH / 2;
+  const width = tabRowGroupWidthPx(panelLeft, panelTop, layout.panelW, layout.panelH, crop);
+  const height = tabH;
+  const centerX = tabRowCenterXPx(panelLeft, panelTop, layout.panelW, layout.panelH, crop);
+  return {
+    left: centerX - width / 2,
+    top: centerY - height / 2,
+    width,
+    height,
+  };
+}
+
+function expectedTabRect(
+  layout: WarehouseGridLayout,
+  panelLeft: number,
+  panelTop: number,
+  index: number,
+  tab: (typeof WAREHOUSE_TAB_SPECS)[number]
+): { left: number; top: number; width: number; height: number } {
+  const crop = layout.warehouseCoverCrop;
+  const size = tabDisplaySizePx(panelLeft, panelTop, layout.panelW, layout.panelH, tab, crop);
+  const left = tabRowLeftPx(panelLeft, panelTop, layout.panelW, layout.panelH, index, crop);
+  const sharedCenterY =
+    panelYFromTop(panelTop, layout.panelH, TAB_ROW_TOP_PANEL_FRAC) + size.h / 2;
+  return {
+    left,
+    top: sharedCenterY - size.h / 2,
+    width: size.w,
+    height: size.h,
+  };
+}
 
 function tabDisplaySizePx(
   panelLeft: number,
@@ -599,66 +617,6 @@ function tabRowLeftPx(
       tabDisplaySizePx(panelLeft, panelTop, panelW, panelH, WAREHOUSE_TAB_SPECS[i], crop).w + gapPx;
   }
   return left;
-}
-
-function expectedTabListBgRect(
-  layout: WarehouseGridLayout,
-  panelLeft: number,
-  panelTop: number
-): { left: number; top: number; width: number; height: number } {
-  const crop = layout.warehouseCoverCrop;
-  const tabH = tabDisplaySizePx(
-    panelLeft,
-    panelTop,
-    layout.panelW,
-    layout.panelH,
-    WAREHOUSE_TAB_SPECS[0],
-    crop
-  ).h;
-  const anchor = capacityTrackAnchorRectPx(layout.panelW, layout.panelH, panelLeft, panelTop, crop);
-  const minCenterY =
-    anchor.top +
-    anchor.height +
-    artSpanH(CAPACITY_TAB_MIN_GAP_ART_PX, panelLeft, panelTop, layout.panelW, layout.panelH, crop) +
-    tabH / 2;
-  const artRowY = artFracToScreen(0, TAB_ROW_CENTER_Y_FRAC, panelLeft, panelTop, layout.panelW, layout.panelH, crop).y;
-  const centerY = Math.max(artRowY, minCenterY) + layout.panelH * TAB_ROW_OFFSET_Y_PANEL_FRAC;
-  const width = tabRowGroupWidthPx(panelLeft, panelTop, layout.panelW, layout.panelH, crop);
-  const height = tabH;
-  const centerX = tabRowCenterXPx(panelLeft, panelTop, layout.panelW, layout.panelH, crop);
-  return {
-    left: centerX - width / 2,
-    top: centerY - height / 2,
-    width,
-    height,
-  };
-}
-
-function expectedTabRect(
-  layout: WarehouseGridLayout,
-  panelLeft: number,
-  panelTop: number,
-  index: number,
-  tab: (typeof WAREHOUSE_TAB_SPECS)[number]
-): { left: number; top: number; width: number; height: number } {
-  const crop = layout.warehouseCoverCrop;
-  const size = tabDisplaySizePx(panelLeft, panelTop, layout.panelW, layout.panelH, tab, crop);
-  const left = tabRowLeftPx(panelLeft, panelTop, layout.panelW, layout.panelH, index, crop);
-  const anchor = capacityTrackAnchorRectPx(layout.panelW, layout.panelH, panelLeft, panelTop, crop);
-  const minCenterY =
-    anchor.top +
-    anchor.height +
-    artSpanH(CAPACITY_TAB_MIN_GAP_ART_PX, panelLeft, panelTop, layout.panelW, layout.panelH, crop) +
-    size.h / 2;
-  const artRowY = artFracToScreen(0, TAB_ROW_CENTER_Y_FRAC, panelLeft, panelTop, layout.panelW, layout.panelH, crop).y;
-  const sharedCenterY =
-    Math.max(artRowY, minCenterY) + layout.panelH * TAB_ROW_OFFSET_Y_PANEL_FRAC;
-  return {
-    left,
-    top: sharedCenterY - size.h / 2,
-    width: size.w,
-    height: size.h,
-  };
 }
 
 function buildExpectedHeaderCells(
@@ -773,8 +731,8 @@ test.describe('Warehouse grid layout', () => {
     const gridBand = rectFromArtFrac(
       GRID_LEFT_FRAC,
       GRID_LEFT_FRAC + GRID_WIDTH_FRAC,
-      GRID_TOP_FRAC,
-      GRID_TOP_FRAC + GRID_HEIGHT_FRAC,
+      0,
+      ITEMS_LIST_HEIGHT_PANEL_FRAC,
       panelLeft,
       panelTop,
       layout!.panelW,
@@ -783,9 +741,15 @@ test.describe('Warehouse grid layout', () => {
     );
     expect(layout!.itemsListWidthScale).toBe(ITEMS_LIST_WIDTH_SCALE);
     expect(layout!.itemSlotWidthScale).toBe(ITEM_SLOT_WIDTH_SCALE);
+    expect(layout!.itemSlotGapScale).toBe(ITEM_SLOT_GAP_SCALE);
+    expect(layout!.slotPitchW).toBeCloseTo(layout!.cellW * ITEM_SLOT_GAP_SCALE, 1);
+    expect(layout!.slotPitchH).toBeCloseTo(
+      (layout!.gridViewportH / WAREHOUSE_GRID_ROWS) * ITEM_SLOT_GAP_SCALE,
+      1
+    );
     expect(layout!.gridViewportW).toBeCloseTo(gridBand.width * ITEMS_LIST_WIDTH_SCALE, 1);
     expect(layout!.gridViewportH).toBeCloseTo(
-      gridBand.height +
+      layout!.panelH * ITEMS_LIST_HEIGHT_PANEL_FRAC * ITEMS_LIST_HEIGHT_SCALE +
         artSpanH(GRID_VIEWPORT_HEIGHT_EXTRA_ART_PX, panelLeft, panelTop, layout!.panelW, layout!.panelH, crop),
       1
     );
@@ -805,7 +769,7 @@ test.describe('Warehouse grid layout', () => {
     );
     expect(layout!.slotDisplayWidth).toBeCloseTo(layout!.cellW * ITEM_SLOT_WIDTH_SCALE, 1);
 
-    const totalGridWidth = layout!.cols * layout!.cellW;
+    const totalGridWidth = (layout!.cols - 1) * layout!.slotPitchW + layout!.cellW;
     expect(layout!.gridContentOffsetX).toBeCloseTo(
       (layout!.gridViewportW - totalGridWidth) / 2,
       1
@@ -815,15 +779,12 @@ test.describe('Warehouse grid layout', () => {
     expect(panelTop).toBeGreaterThanOrEqual(0);
     const gridBandCenterX = gridBand.left + gridBand.width / 2;
     const itemsListOffsetX = layout!.panelW * ITEMS_LIST_OFFSET_X_PANEL_FRAC;
-    const itemsListOffsetY = layout!.panelH * ITEMS_LIST_OFFSET_Y_PANEL_FRAC;
     expect(layout!.gridLeft).toBeCloseTo(
       gridBandCenterX - layout!.gridViewportW / 2 + itemsListOffsetX,
       1
     );
     expect(layout!.gridTop).toBeCloseTo(
-      gridBand.top +
-        artFracSpanH(GRID_TOP_OFFSET_FRAC, panelLeft, panelTop, layout!.panelW, layout!.panelH, crop) +
-        itemsListOffsetY,
+      panelYFromTop(panelTop, layout!.panelH, ITEMS_LIST_TOP_PANEL_FRAC),
       1
     );
 
@@ -907,10 +868,20 @@ test.describe('Warehouse grid layout', () => {
 
       const local = artRectToCol3Local(expected.x0, expected.x1, expected.y0, expected.y1);
       const expRect = sellFooterColCellRectPx(row, 3, local);
+      const col3 = sellFooterColRectPx(row, 3);
       let expLeft = expRect.left;
-      const expTop = expRect.top;
+      let expTop = expRect.top;
       let expW = expRect.width;
       const expH = expRect.height;
+      if (expected.id === 'levelBox' || expected.id === 'capacityBox') {
+        expTop += col3.height * COL3_LEVEL_TEXT_Y_OFFSET_FRAC;
+      } else if (
+        expected.id === 'coinSlot' ||
+        expected.id === 'woodSlot' ||
+        expected.id === 'stoneSlot'
+      ) {
+        expTop += col3.height * COL3_COST_TEXT_Y_OFFSET_FRAC;
+      }
       if (expected.id === 'coinSlot') {
         const expand = artSpanW(
           UPGRADE_COIN_SLOT_EXPAND_LEFT_PX,
@@ -950,6 +921,12 @@ test.describe('Warehouse grid layout', () => {
       COST_SLOT_IDS.map((id) => [id, slotRect(layout!, id)])
     ) as Record<(typeof COST_SLOT_IDS)[number], ReturnType<typeof slotRect>>;
 
+    const { left: panelLeft, top: panelTop } = panelOrigin(layout!);
+    const col3 = sellFooterColRectPx(
+      sellFooterRowRectPx(panelLeft, panelTop, layout!.panelW, layout!.panelH),
+      3
+    );
+
     for (const costText of layout!.upgradeCostTexts) {
       const own = slots[costText.slotId as (typeof COST_SLOT_IDS)[number]];
       expect(own, `missing slot ${costText.slotId}`).toBeDefined();
@@ -957,7 +934,11 @@ test.describe('Warehouse grid layout', () => {
         pointInRect(costText.x, costText.y, own),
         `${costText.id} at (${costText.x},${costText.y}) outside ${costText.slotId}`
       ).toBe(true);
-      expect(costText.x).toBeCloseTo(own.centerX, 0);
+      let expX = own.centerX;
+      if (costText.id === 'coin') {
+        expX += col3.width * COL3_COIN_TEXT_X_OFFSET_FRAC;
+      }
+      expect(costText.x).toBeCloseTo(expX, 0);
       expect(costText.y).toBeCloseTo(own.centerY, 0);
 
       for (const otherId of COST_SLOT_IDS) {
@@ -1272,11 +1253,9 @@ test.describe('Warehouse grid layout', () => {
     const trackCell = layout!.headerCells.find((c) => c.id === 'capacityTrack');
     expect(trackCell).toBeDefined();
     const { left: panelLeft, top: panelTop } = panelOrigin(layout!);
-    const expectedInset =
-      artSpanW(CAPACITY_FILL_OFFSET_ART_PX, panelLeft, panelTop, layout!.panelW, layout!.panelH, layout!.warehouseCoverCrop) +
-      layout!.panelW * CAPACITY_FILL_OFFSET_X_PANEL_FRAC;
-    expect(fillCell!.left - trackCell!.left).toBeGreaterThan(expectedInset - 2);
-    expect(fillCell!.left).toBeGreaterThan(trackCell!.left + 1);
+    const expectedFillLeft = trackCell!.left + trackCell!.width * CAPACITY_FILL_LEFT_TRACK_FRAC;
+    expect(fillCell!.left).toBeCloseTo(expectedFillLeft, 0);
+    expect(fillCell!.left).toBeGreaterThan(trackCell!.left + trackCell!.width * 0.05);
     expect(fillCell!.top).toBeGreaterThanOrEqual(trackCell!.top);
     expect(fillCell!.top + fillCell!.height).toBeLessThanOrEqual(trackCell!.top + trackCell!.height + 2);
 

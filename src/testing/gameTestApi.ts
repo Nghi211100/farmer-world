@@ -189,6 +189,15 @@ export interface FarmerWorldTestApi {
   } | null;
   clickWarehouseSellUse: () => void;
   isFarmSceneReady: () => boolean;
+  showMoveDestinationMarker: (gx: number, gy: number) => void;
+  getMoveDestinationMarkerState: () => {
+    visible: boolean;
+    gx: number;
+    gy: number;
+    depth: number;
+    displayWidth: number;
+    displayHeight: number;
+  } | null;
   openFarmActionPopup: (gx?: number, gy?: number) => void;
   isFarmActionPopupOpen: () => boolean;
   getFarmActionPopupLayout: () => FarmActionPopupLayoutMetrics | null;
@@ -576,6 +585,11 @@ export function installGameTestApi(game: Phaser.Game): void {
       getUiScene(game)?.inventoryPanel.simulateSellUseClick();
     },
     isFarmSceneReady: () => getFarmScene(game)?.isFarmPopupsReadyForTest() ?? false,
+    showMoveDestinationMarker: (gx, gy) => {
+      getFarmScene(game)?.showMoveDestinationMarkerForTest(gx, gy);
+    },
+    getMoveDestinationMarkerState: () =>
+      getFarmScene(game)?.getMoveDestinationMarkerStateForTest() ?? null,
     openFarmActionPopup: (gx = 7, gy = 9) => {
       getFarmScene(game)?.showFarmActionPopupForTest(gx, gy);
     },

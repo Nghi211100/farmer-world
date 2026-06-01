@@ -16,6 +16,8 @@ export const UI_BUILD_CANCEL_TEXTURE_KEY = 'ui_build_cancel';
 export const UI_OBJECT_MOVE_TEXTURE_KEY = 'ui_object_move';
 /** Object edit remove (see ui/remove.png). */
 export const UI_OBJECT_REMOVE_TEXTURE_KEY = 'ui_object_remove';
+/** Walk-to destination marker (see ui/coming.png). */
+export const UI_COMING_TEXTURE_KEY = 'ui_coming';
 
 /** Asset manifest: key -> relative path under src/assets */
 export interface AssetEntry {
@@ -369,6 +371,13 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     height: 82,
   },
   { key: 'harvest', path: 'ui/harvest.png', placeholderColor: 0xf39c12, width: 32, height: 32 },
+  {
+    key: UI_COMING_TEXTURE_KEY,
+    path: 'ui/coming.png',
+    placeholderColor: 0x27ae60,
+    width: 48,
+    height: 48,
+  },
   { key: 'ui_button', path: 'ui/button.png', placeholderColor: 0xe76f51, width: 150, height: 78 },
   {
     key: 'ui_plus_devide',

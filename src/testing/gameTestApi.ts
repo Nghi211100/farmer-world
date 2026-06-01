@@ -17,10 +17,14 @@ import { isWarehouseGridDebug, isShopGridDebug, setShopGridDebugForTest } from '
 export interface FarmerWorldTestApi {
   clickBag: () => void;
   clickShop: () => void;
+  clickBuild: () => void;
   closeModals: () => void;
   openWarehouse: () => void;
   isWarehouseOpen: () => boolean;
   isShopOpen: () => boolean;
+  isBuildOpen: () => boolean;
+  getBuildCardLabels: () => string[] | null;
+  setBuildTab: (tab: 'buildings' | 'decor') => void;
   getWarehouseTitle: () => string | null;
   getShopTitle: () => string | null;
   isShopPageLabelVisible: () => boolean | null;
@@ -302,6 +306,10 @@ export function installGameTestApi(game: Phaser.Game): void {
       const ui = getUiScene(game);
       ui?.events.emit('test-menu', 'shop');
     },
+    clickBuild: () => {
+      const ui = getUiScene(game);
+      ui?.events.emit('test-menu', 'build');
+    },
     closeModals: () => getUiScene(game)?.closeAllModals(),
     openWarehouse: () => {
       const ui = getUiScene(game);
@@ -310,6 +318,15 @@ export function installGameTestApi(game: Phaser.Game): void {
     },
     isWarehouseOpen: () => getUiScene(game)?.isWarehouseModalOpen() ?? false,
     isShopOpen: () => getUiScene(game)?.isShopModalOpen() ?? false,
+    isBuildOpen: () => getUiScene(game)?.isBuildModalOpen() ?? false,
+    getBuildCardLabels: () => {
+      const ui = getUiScene(game);
+      if (!ui?.isBuildModalOpen()) return null;
+      return ui.buildPanel.getVisibleCardLabels();
+    },
+    setBuildTab: (tab) => {
+      getUiScene(game)?.buildPanel.setActiveTabForTest(tab);
+    },
     getWarehouseTitle: () =>
       getUiScene(game)?.inventoryPanel.isVisible() ? 'Warehouse' : null,
     getShopTitle: () => (getUiScene(game)?.shopPanel.isVisible() ? 'SHOP' : null),

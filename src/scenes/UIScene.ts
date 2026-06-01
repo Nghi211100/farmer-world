@@ -7,6 +7,7 @@ import { InventoryPanel } from '../ui/InventoryPanel';
 import { PlantPanel } from '../ui/PlantPanel';
 import { SellPanel } from '../ui/SellPanel';
 import { ShopPanel } from '../ui/ShopPanel';
+import { sceneHitsInteractiveHud } from '../ui/hudPointer';
 import { TopHUD } from '../ui/TopHUD';
 import type { HUDResources } from '../ui/TopHUD';
 import { UpgradePanel } from '../ui/UpgradePanel';
@@ -145,6 +146,9 @@ export class UIScene extends Phaser.Scene {
     farm.events.on('open-upgrade', (building: BuildingData) => {
       if (this.gameRefs) this.upgradePanel.show(building, this.gameRefs.economy);
     });
+    farm.events.on('cancel-build-mode', () => {
+      this.buildPanel.hide();
+    });
 
     // FarmScene emits register-game in create() before this scene's listeners exist.
     farm.events.emit('ui-ready');
@@ -157,6 +161,7 @@ export class UIScene extends Phaser.Scene {
     this.rightMenu.resize(gameSize.width, gameSize.height);
     this.inventoryPanel.resize(gameSize.width, gameSize.height);
     this.shopPanel.resize(gameSize.width, gameSize.height);
+    this.buildPanel.resize(gameSize.width, gameSize.height);
   }
 
   /** Called when FarmScene (re)sends register-game after UIScene is listening. */
@@ -171,6 +176,15 @@ export class UIScene extends Phaser.Scene {
 
   isShopModalOpen(): boolean {
     return this.shopPanel.isVisible();
+  }
+
+  isBuildModalOpen(): boolean {
+    return this.buildPanel.isVisible();
+  }
+
+  /** True when pointer is over a visible interactive HUD control or modal. */
+  hitsInteractiveHud(pointer: Phaser.Input.Pointer): boolean {
+    return sceneHitsInteractiveHud(this, pointer);
   }
 
   closeAllModals(): void {

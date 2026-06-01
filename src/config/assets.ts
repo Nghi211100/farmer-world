@@ -8,6 +8,15 @@ export const UI_LOADING_BAR_FILL_TEXTURE_KEY = 'ui_loading_bar_fill';
 /** Stable texture key for shop detail stat line backgrounds (see ui/text-background.png). */
 export const UI_TEXT_BACKGROUND_TEXTURE_KEY = 'ui_text_background';
 
+/** Build placement confirm (see ui/check-icon.png). */
+export const UI_BUILD_CHECK_TEXTURE_KEY = 'ui_build_check';
+/** Build placement cancel (see ui/cancel-icon.png). */
+export const UI_BUILD_CANCEL_TEXTURE_KEY = 'ui_build_cancel';
+/** Object edit move (see ui/movement-icon.png). */
+export const UI_OBJECT_MOVE_TEXTURE_KEY = 'ui_object_move';
+/** Object edit remove (see ui/remove.png). */
+export const UI_OBJECT_REMOVE_TEXTURE_KEY = 'ui_object_remove';
+
 /** Asset manifest: key -> relative path under src/assets */
 export interface AssetEntry {
   key: string;
@@ -204,6 +213,7 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'energy', path: 'ui/energy.png', placeholderColor: 0xf1c40f, width: 24, height: 24 },
   { key: 'gem', path: 'ui/gem.png', placeholderColor: 0x9b59b6, width: 24, height: 24 },
   { key: 'seed', path: 'ui/seed.png', placeholderColor: 0x8d6e63, width: 28, height: 28 },
+  { key: 'ui_wood', path: 'ui/wood.png', placeholderColor: 0x8d6e63, width: 128, height: 128 },
   { key: 'seed_wheat', path: 'seeds/wheat_seed.png', placeholderColor: 0xc9a227, width: 32, height: 32 },
   { key: 'seed_corn', path: 'seeds/corn_seed.png', placeholderColor: 0xffeb3b, width: 32, height: 32 },
   { key: 'seed_carrot', path: 'seeds/carrot_seed.png', placeholderColor: 0xe67e22, width: 32, height: 32 },
@@ -309,6 +319,34 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     height: 136,
   },
   { key: 'ui_check', path: 'ui/check.png', placeholderColor: 0x27ae60, width: 48, height: 48 },
+  {
+    key: UI_BUILD_CHECK_TEXTURE_KEY,
+    path: 'ui/check-icon.png',
+    placeholderColor: 0x27ae60,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_BUILD_CANCEL_TEXTURE_KEY,
+    path: 'ui/cancel-icon.png',
+    placeholderColor: 0xc0392b,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_OBJECT_MOVE_TEXTURE_KEY,
+    path: 'ui/movement-icon.png',
+    placeholderColor: 0x4a90d9,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_OBJECT_REMOVE_TEXTURE_KEY,
+    path: 'ui/remove.png',
+    placeholderColor: 0xc0392b,
+    width: 48,
+    height: 48,
+  },
   {
     key: 'ui_tab_materials_active',
     path: 'ui/materials_active.png',

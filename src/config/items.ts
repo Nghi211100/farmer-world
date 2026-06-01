@@ -107,7 +107,7 @@ export const ITEM_ICON_KEYS: Record<string, string> = {
   [ITEM_IDS.JUICE]: 'juice',
   [ITEM_IDS.MILK]: 'milk',
   [ITEM_IDS.FLOUR]: 'flour',
-  [ITEM_IDS.WOOD]: 'seed',
+  [ITEM_IDS.WOOD]: 'ui_wood',
   [ITEM_IDS.STONE]: 'rock_01',
   [ITEM_IDS.ROPE]: 'seed',
   [ITEM_IDS.IRON]: 'seed',

@@ -4,6 +4,7 @@ import type { BuildingData, BuildingType } from '../config/gameConfig';
 import type { GridSystem } from './GridSystem';
 
 export type BuildItemType = BuildingType;
+export type BuildCategory = 'buildings' | 'decor';
 
 export interface BuildItemDef {
   type: BuildItemType;
@@ -11,17 +12,43 @@ export interface BuildItemDef {
   label: string;
   cost: number;
   footprint: { w: number; h: number };
+  category: BuildCategory;
+  /** When set, card is locked until player level reaches this value. */
+  requiredLevel?: number;
 }
 
 export const BUILD_ITEMS: BuildItemDef[] = [
-  { type: 'house', textureKey: 'house_lv1', label: 'House', cost: 50, footprint: { w: 1, h: 1 } },
-  { type: 'barn', textureKey: 'barn_lv1', label: 'Barn', cost: 80, footprint: { w: 1, h: 1 } },
-  { type: 'tree', textureKey: 'tree_01', label: 'Tree', cost: 10, footprint: { w: 1, h: 1 } },
+  {
+    type: 'house',
+    textureKey: 'house_lv1',
+    label: 'House',
+    cost: 50,
+    footprint: { w: 1, h: 1 },
+    category: 'buildings',
+  },
+  {
+    type: 'barn',
+    textureKey: 'barn_lv1',
+    label: 'Barn',
+    cost: 80,
+    footprint: { w: 1, h: 1 },
+    category: 'buildings',
+  },
+  {
+    type: 'tree',
+    textureKey: 'tree_01',
+    label: 'Tree',
+    cost: 10,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+  },
 ];
 
 export class BuildSystem {
   active = false;
   selectedItem: BuildItemDef | null = null;
+  /** Preview snapped to a tile; ghost no longer follows the pointer. */
+  previewLocked = false;
   ghostX = 0;
   ghostY = 0;
   private buildings: BuildingData[] = [];
@@ -36,16 +63,45 @@ export class BuildSystem {
   enterBuildMode(item: BuildItemDef): void {
     this.active = true;
     this.selectedItem = item;
+    this.previewLocked = false;
   }
 
   exitBuildMode(): void {
     this.active = false;
     this.selectedItem = null;
+    this.previewLocked = false;
   }
 
   updateGhost(gx: number, gy: number): void {
+    if (this.previewLocked) return;
     this.ghostX = gx;
     this.ghostY = gy;
+  }
+
+  lockPreviewAt(gx: number, gy: number): void {
+    this.ghostX = gx;
+    this.ghostY = gy;
+    this.previewLocked = true;
+  }
+
+  unlockPreview(): void {
+    this.previewLocked = false;
+  }
+
+  /** Right, down, left, up — first valid neighbor after a placement. */
+  findNextPlacementTile(fromGx: number, fromGy: number): { gx: number; gy: number } | null {
+    const offsets: ReadonlyArray<readonly [number, number]> = [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+      [0, -1],
+    ];
+    for (const [dx, dy] of offsets) {
+      const gx = fromGx + dx;
+      const gy = fromGy + dy;
+      if (this.canPlace(gx, gy)) return { gx, gy };
+    }
+    return null;
   }
 
   canPlace(gx: number, gy: number): boolean {
@@ -74,6 +130,37 @@ export class BuildSystem {
 
   findBuildingAt(gx: number, gy: number): BuildingData | null {
     return this.buildings.find((b) => b.gridX === gx && b.gridY === gy) ?? null;
+  }
+
+  /** Empty walkable tile suitable for placing or moving a structure (not water/path). */
+  canPlaceObjectAt(gx: number, gy: number): boolean {
+    if (!this.grid.inBounds(gx, gy)) return false;
+    const cell = this.grid.getCell(gx, gy);
+    if (!cell || !cell.walkable || cell.object) return false;
+    if (cell.type === 'water' || cell.type === 'path') return false;
+    if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    return true;
+  }
+
+  removeBuildingAt(gx: number, gy: number): boolean {
+    const idx = this.buildings.findIndex((b) => b.gridX === gx && b.gridY === gy);
+    if (idx < 0) return false;
+    this.buildings.splice(idx, 1);
+    this.grid.clearObject(gx, gy);
+    this.onChange?.();
+    return true;
+  }
+
+  moveBuildingTo(fromGx: number, fromGy: number, toGx: number, toGy: number): boolean {
+    const building = this.findBuildingAt(fromGx, fromGy);
+    if (!building || !this.canPlaceObjectAt(toGx, toGy)) return false;
+    if (fromGx === toGx && fromGy === toGy) return true;
+    this.grid.clearObject(fromGx, fromGy);
+    building.gridX = toGx;
+    building.gridY = toGy;
+    this.grid.setObject(toGx, toGy, building.textureKey);
+    this.onChange?.();
+    return true;
   }
 
   canUpgrade(building: BuildingData): boolean {

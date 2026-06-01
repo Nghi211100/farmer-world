@@ -24,7 +24,10 @@ import {
 import { CropSelectPopup } from '../ui/CropSelectPopup';
 import { FarmActionPopup, type FarmPopupAction } from '../ui/FarmActionPopup';
 import { ExpandLandDimOverlay } from '../ui/ExpandLandDimOverlay';
+import { BuildPlacementConfirm } from '../ui/BuildPlacementConfirm';
 import { LandUnlockConfirm } from '../ui/LandUnlockConfirm';
+import { ObjectEditPopup, type ObjectEditAction } from '../ui/ObjectEditPopup';
+import { ObjectEditSystem } from '../systems/ObjectEditSystem';
 import { BuildingSprite, renderBuildings } from '../entities/Building';
 import { cropKey, CropSprite, syncCropSprites } from '../entities/Crop';
 import { renderMapDecorations } from '../entities/Decoration';
@@ -45,6 +48,7 @@ import {
   FARM_NORTH_EDGE_GROUND_SCALE,
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
+  NATURE_DISPLAY_SCALE,
   tileCenterFromTop,
 } from '../utils/iso';
 import {
@@ -63,11 +67,11 @@ import type { BuildItemDef } from '../systems/BuildSystem';
 import type { BuildingData } from '../config/gameConfig';
 import {
   bottomHudBandHeight,
-  bottomHudBandTop,
   expandSelectHintToastFontSize,
   rightHudBandWidth,
   topHudBandHeight,
 } from '../ui/hudLayout';
+import type { UIScene } from './UIScene';
 import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
 import {
@@ -93,6 +97,7 @@ export class FarmScene extends Phaser.Scene {
   grid!: GridSystem;
   farming!: FarmingSystem;
   buildSystem!: BuildSystem;
+  objectEditSystem!: ObjectEditSystem;
   inventory!: InventorySystem;
   economy!: EconomySystem;
   energySystem!: EnergySystem;
@@ -111,6 +116,8 @@ export class FarmScene extends Phaser.Scene {
   private farmPopupsReady = false;
   private cropSelectPopup!: CropSelectPopup;
   private landUnlockConfirm!: LandUnlockConfirm;
+  private buildPlacementConfirm!: BuildPlacementConfirm;
+  private objectEditPopup!: ObjectEditPopup;
   private pendingExpandTile?: { x: number; y: number };
   private toolBar?: ToolBar;
 
@@ -153,6 +160,7 @@ export class FarmScene extends Phaser.Scene {
     this.grid = new GridSystem();
     this.farming = new FarmingSystem(this.grid);
     this.buildSystem = new BuildSystem(this.grid);
+    this.objectEditSystem = new ObjectEditSystem(this.grid, this.buildSystem);
     this.inventory = new InventorySystem();
     this.economy = new EconomySystem(DEFAULT_COINS);
     this.energySystem = new EnergySystem(DEFAULT_ENERGY);
@@ -832,21 +840,8 @@ export class FarmScene extends Phaser.Scene {
     return rightHudBandWidth(this.scale.width, this.scale.height);
   }
 
-  /** Screen Y at which the bottom HUD bar begins (leave taps for UIScene). */
-  private bottomHudBandTopY(): number {
-    return bottomHudBandTop(this.scale.width, this.scale.height);
-  }
-
-  private rightHudBandLeftX(): number {
-    return this.scale.width - this.rightHudBand();
-  }
-
-  private isPointerInBottomHud(pointer: Phaser.Input.Pointer): boolean {
-    return pointer.y >= this.bottomHudBandTopY();
-  }
-
-  private isPointerInRightHud(pointer: Phaser.Input.Pointer): boolean {
-    return pointer.x >= this.rightHudBandLeftX();
+  private getUIScene(): UIScene | undefined {
+    return this.scene.get('UIScene') as UIScene | undefined;
   }
 
   private beginPointerGesture(pointer: Phaser.Input.Pointer): void {
@@ -905,7 +900,18 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.buildSystem.active && this.buildSystem.selectedItem) {
-      this.handleBuildPlace(x, y);
+      if (this.buildPlacementConfirm?.hitsPointer(pointer)) {
+        return;
+      }
+      this.handleBuildPreviewTap(x, y);
+      return;
+    }
+
+    if (this.objectEditSystem.active) {
+      if (this.buildPlacementConfirm?.hitsPointer(pointer)) {
+        return;
+      }
+      this.handleObjectMovePreviewTap(x, y);
       return;
     }
 
@@ -917,11 +923,10 @@ export class FarmScene extends Phaser.Scene {
     }
 
     const cell = this.grid.getCell(x, y);
-    const building = this.buildSystem.findBuildingAt(x, y);
 
-    if (building && this.farmMode === 'normal') {
+    if (this.farmMode === 'normal' && this.objectEditSystem.findEditableAt(x, y)) {
       this.dismissFarmPopups();
-      this.events.emit('open-upgrade', building);
+      this.showObjectEditPopup(x, y);
       return;
     }
 
@@ -952,10 +957,19 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
-      if (this.isPointerInBottomHud(pointer) || this.isPointerInRightHud(pointer)) {
-        if (this.farmActionPopup.isVisible() || this.cropSelectPopup.isVisible()) {
+      const ui = this.getUIScene();
+      if (ui?.hitsInteractiveHud(pointer)) {
+        if (
+        this.farmActionPopup.isVisible() ||
+        this.cropSelectPopup.isVisible() ||
+        this.objectEditPopup?.isVisible()
+      ) {
           this.dismissFarmPopups();
         }
+        return;
+      }
+
+      if (this.handleObjectEditPointer(pointer)) {
         return;
       }
 
@@ -974,6 +988,10 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
+      if (this.handleBuildConfirmPointer(pointer)) {
+        return;
+      }
+
       if (this.handleFarmPopupPointer(pointer)) {
         return;
       }
@@ -983,9 +1001,15 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.buildSystem.active) {
+      if (this.buildSystem.active && !this.buildSystem.previewLocked) {
         const { x, y } = this.screenPointToGrid(pointer);
         this.buildSystem.updateGhost(x, y);
+        this.updateGhostSprite();
+      }
+
+      if (this.objectEditSystem.active && !this.objectEditSystem.previewLocked) {
+        const { x, y } = this.screenPointToGrid(pointer);
+        this.objectEditSystem.updateGhost(x, y);
         this.updateGhostSprite();
       }
 
@@ -1047,20 +1071,173 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
-  private handleBuildPlace(gx: number, gy: number): void {
-    if (!this.buildSystem.canPlace(gx, gy) || !this.buildSystem.selectedItem) return;
-    const cost = this.buildSystem.selectedItem.cost;
-    if (!this.economy.spend(cost)) {
-      this.showToast(`Need ${cost} coins`);
+  private handleBuildPreviewTap(gx: number, gy: number): void {
+    if (!this.buildSystem.selectedItem) return;
+    if (!this.buildSystem.canPlace(gx, gy)) {
+      this.showToast("Can't build here");
       return;
     }
-    const placed = this.buildSystem.place(gx, gy);
+    this.buildSystem.lockPreviewAt(gx, gy);
+    this.updateGhostSprite();
+    this.showBuildPlacementConfirm();
+  }
+
+  private showBuildPlacementConfirm(): void {
+    const { ghostX, ghostY } = this.buildSystem;
+    const item = this.buildSystem.selectedItem;
+    if (!item) return;
+    const canPlace = this.buildSystem.canPlace(ghostX, ghostY);
+    const canAfford = this.economy.getCoins() >= item.cost;
+    this.buildPlacementConfirm.show(
+      ghostX,
+      ghostY,
+      canPlace && canAfford,
+      () => this.confirmBuildPlacement(),
+      () => this.cancelBuildMode()
+    );
+  }
+
+  private confirmBuildPlacement(): void {
+    const { ghostX, ghostY } = this.buildSystem;
+    const item = this.buildSystem.selectedItem;
+    if (!item || !this.buildSystem.canPlace(ghostX, ghostY)) {
+      this.showToast("Can't build here");
+      this.showBuildPlacementConfirm();
+      return;
+    }
+    const cost = item.cost;
+    if (!this.economy.spend(cost)) {
+      this.showToast(`Need ${cost} coins`);
+      this.showBuildPlacementConfirm();
+      return;
+    }
+    const placedGx = ghostX;
+    const placedGy = ghostY;
+    const placed = this.buildSystem.place(placedGx, placedGy);
     if (placed) {
       this.emitHud();
       this.scheduleSave();
+      this.advanceBuildPreviewAfterPlace(placedGx, placedGy);
     } else {
       this.economy.earn(cost);
+      this.showBuildPlacementConfirm();
     }
+  }
+
+  /** Stay in build mode; lock preview on adjacent valid tile or unlock ghost. */
+  private advanceBuildPreviewAfterPlace(placedGx: number, placedGy: number): void {
+    const next = this.buildSystem.findNextPlacementTile(placedGx, placedGy);
+    if (next) {
+      this.buildSystem.lockPreviewAt(next.gx, next.gy);
+      this.updateGhostSprite();
+      this.showBuildPlacementConfirm();
+      return;
+    }
+    this.buildSystem.unlockPreview();
+    this.buildPlacementConfirm.hide();
+    this.updateGhostSprite();
+  }
+
+  private cancelBuildMode(): void {
+    this.finishBuildMode();
+    this.events.emit('cancel-build-mode');
+  }
+
+  private finishBuildMode(): void {
+    this.buildPlacementConfirm.hide();
+    this.ghostSprite?.setVisible(false);
+    this.setFarmMode('normal');
+  }
+
+  private showObjectEditPopup(gx: number, gy: number): void {
+    this.objectEditPopup.show(gx, gy);
+  }
+
+  private executeObjectEditAction(action: ObjectEditAction, gx: number, gy: number): void {
+    if (action === 'remove') {
+      if (this.objectEditSystem.removeAt(gx, gy)) {
+        this.refreshMapDecorations();
+        this.scheduleSave();
+        this.showToast('Removed');
+      }
+      return;
+    }
+    const session = this.objectEditSystem.beginMove(gx, gy);
+    if (!session) return;
+    this.setObjectOriginHidden(session.originGx, session.originGy, true);
+    this.updateGhostSprite();
+    this.events.emit('mode-hint', { text: 'Tap a tile, then ✓ to place', prominent: false });
+  }
+
+  private finishObjectEditInteraction(): void {
+    if (this.objectEditSystem.active) return;
+  }
+
+  private handleObjectMovePreviewTap(gx: number, gy: number): void {
+    if (!this.objectEditSystem.canPlaceAt(gx, gy)) {
+      this.showToast("Can't place here");
+      return;
+    }
+    this.objectEditSystem.lockPreviewAt(gx, gy);
+    this.updateGhostSprite();
+    this.showObjectMoveConfirm();
+  }
+
+  private showObjectMoveConfirm(): void {
+    const { ghostX, ghostY } = this.objectEditSystem;
+    const canPlace = this.objectEditSystem.canPlaceAt(ghostX, ghostY);
+    this.buildPlacementConfirm.show(
+      ghostX,
+      ghostY,
+      canPlace,
+      () => this.confirmObjectMove(),
+      () => this.cancelObjectMoveMode()
+    );
+  }
+
+  private confirmObjectMove(): void {
+    const { ghostX, ghostY } = this.objectEditSystem;
+    if (!this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
+      this.showToast("Can't place here");
+      this.showObjectMoveConfirm();
+      return;
+    }
+    this.refreshMapDecorations();
+    this.objectEditSystem.endMove();
+    this.buildPlacementConfirm.hide();
+    this.ghostSprite?.setVisible(false);
+    this.events.emit('mode-hint', { text: '', prominent: false });
+    this.scheduleSave();
+    this.showToast('Moved');
+  }
+
+  private cancelObjectMoveMode(clearHint = true): void {
+    const session = this.objectEditSystem.getSession();
+    if (session) {
+      this.setObjectOriginHidden(session.originGx, session.originGy, false);
+    }
+    this.objectEditSystem.cancelMove();
+    this.buildPlacementConfirm.hide();
+    this.ghostSprite?.setVisible(false);
+    if (clearHint && this.farmMode === 'normal') {
+      this.events.emit('mode-hint', { text: '', prominent: false });
+    }
+  }
+
+  private setObjectOriginHidden(gx: number, gy: number, hidden: boolean): void {
+    const k = `${gx},${gy}`;
+    const buildingSpr = this.buildingSprites.get(k);
+    if (buildingSpr) {
+      buildingSpr.sprite.setVisible(!hidden);
+      return;
+    }
+    const deco = this.decorations.find((d) => d.gridX === gx && d.gridY === gy);
+    deco?.sprite.setVisible(!hidden);
+  }
+
+  private refreshMapDecorations(): void {
+    for (const d of this.decorations) d.sprite.destroy();
+    this.decorations = renderMapDecorations(this, this.grid);
   }
 
   private isExpandPurchaseTarget(gx: number, gy: number): boolean {
@@ -1156,6 +1333,12 @@ export class FarmScene extends Phaser.Scene {
       this.tryPlant(this.pendingFarmTile.x, this.pendingFarmTile.y, seedId);
     });
     this.landUnlockConfirm = new LandUnlockConfirm(this);
+    this.buildPlacementConfirm = new BuildPlacementConfirm(this, this.grid);
+    this.objectEditPopup = new ObjectEditPopup(this, this.grid);
+    this.objectEditPopup.setOnAction((action, gx, gy) =>
+      this.executeObjectEditAction(action, gx, gy)
+    );
+    this.objectEditPopup.setOnDismiss(() => this.finishObjectEditInteraction());
     this.expandDimOverlay = new ExpandLandDimOverlay(this, this.grid, (gx, gy) =>
       this.isExpandPurchaseTarget(gx, gy)
     );
@@ -1328,29 +1511,40 @@ export class FarmScene extends Phaser.Scene {
   private dismissFarmPopups(): void {
     this.farmActionPopup.hide();
     this.cropSelectPopup.hide();
+    this.objectEditPopup?.hide(false);
+    if (this.objectEditSystem.active) {
+      this.cancelObjectMoveMode(false);
+    }
     this.finishFarmInteraction();
+    this.finishObjectEditInteraction();
   }
 
   /**
    * Consume pointer when a farm popup is open so the same tap does not walk/dig/open another tile.
    * Popup chrome is handled by its own listeners; backdrop/outside only dismisses.
    */
-  /** Bottom bar + hint band — never steal clicks from UIScene HUD. */
-  private isPointerOnHud(pointer: Phaser.Input.Pointer): boolean {
-    return pointer.y >= this.scale.height - 80;
-  }
-
   private handleLandUnlockPointer(pointer: Phaser.Input.Pointer): boolean {
     if (!this.landUnlockConfirm?.isVisible()) return false;
     return this.landUnlockConfirm.handlePointerDown(pointer);
   }
 
+  private handleBuildConfirmPointer(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.buildPlacementConfirm?.isVisible()) return false;
+    return this.buildPlacementConfirm.handlePointerDown(pointer);
+  }
+
+  private handleObjectEditPointer(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.objectEditPopup?.isVisible()) return false;
+    if (this.objectEditPopup.hitsPointer(pointer)) {
+      return this.objectEditPopup.handlePointerDown(pointer);
+    }
+    this.objectEditPopup.hide();
+    pointer.event?.stopPropagation();
+    return true;
+  }
+
   private handleFarmPopupPointer(pointer: Phaser.Input.Pointer): boolean {
     if (!this.farmActionPopup.isVisible() && !this.cropSelectPopup.isVisible()) {
-      return false;
-    }
-
-    if (this.isPointerOnHud(pointer)) {
       return false;
     }
 
@@ -1714,8 +1908,13 @@ export class FarmScene extends Phaser.Scene {
     const enteringExpand = mode === 'expand' && this.farmMode !== 'expand';
     this.farmMode = mode;
     if (mode !== 'build') {
+      this.buildPlacementConfirm?.hide();
       this.buildSystem.exitBuildMode();
       this.ghostSprite?.setVisible(false);
+    }
+    if (mode !== 'normal') {
+      this.cancelObjectMoveMode();
+      this.objectEditPopup?.hide(false);
     }
     if (mode !== 'expand') {
       this.landUnlockConfirm?.hide();
@@ -1730,7 +1929,7 @@ export class FarmScene extends Phaser.Scene {
         ? getCropDef(this.inventory.cropKindFromSeedId(this.selectedSeedId)!).name
         : 'a crop';
     const hints: Record<Exclude<FarmMode, 'normal'>, string> = {
-      build: 'Tap to place building',
+      build: 'Tap a tile, then tap ✓ to build',
       expand: LAND_EXPAND_STRINGS.selectHint,
       plant: this.selectedSeedId
         ? `Seed tool: tap dug soil to plant ${seedHint}`
@@ -1826,22 +2025,59 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private updateGhostSprite(): void {
-    const { ghostX, ghostY } = this.buildSystem;
+    const moveActive = this.objectEditSystem.active;
+    const buildActive = this.buildSystem.active;
+    if (!buildActive && !moveActive) {
+      this.ghostSprite?.setVisible(false);
+      return;
+    }
+
+    const ghostX = moveActive ? this.objectEditSystem.ghostX : this.buildSystem.ghostX;
+    const ghostY = moveActive ? this.objectEditSystem.ghostY : this.buildSystem.ghostY;
     const foot = this.grid.gridToTileBottom(ghostX, ghostY);
-    const key = this.buildSystem.selectedItem?.textureKey ?? 'house_lv1';
-    const canPlace = this.buildSystem.canPlace(ghostX, ghostY);
+    const key = moveActive
+      ? this.objectEditSystem.ghostTextureKey()
+      : (this.buildSystem.selectedItem?.textureKey ?? 'house_lv1');
+    const canPlace = moveActive
+      ? this.objectEditSystem.canPlaceAt(ghostX, ghostY)
+      : this.buildSystem.canPlace(ghostX, ghostY);
+    const isNatural = moveActive && this.objectEditSystem.isNaturalTexture(key);
 
     if (!this.ghostSprite) {
       this.ghostSprite = this.add.sprite(foot.x, foot.y, key);
       this.ghostSprite.setOrigin(0.5, 1);
     }
     this.ghostSprite.setTexture(key);
-    fitSpriteDisplay(this.ghostSprite, DISPLAY_SIZE.tileW * 1.4, DISPLAY_SIZE.buildingH);
+    if (isNatural) {
+      const tree = key.startsWith('tree');
+      fitSpriteDisplay(
+        this.ghostSprite,
+        DISPLAY_SIZE.tileW * (tree ? 1.2 : 0.9) * NATURE_DISPLAY_SCALE,
+        (tree ? DISPLAY_SIZE.treeH : DISPLAY_SIZE.rockH) * NATURE_DISPLAY_SCALE
+      );
+      this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'objects') + 50);
+    } else {
+      fitSpriteDisplay(this.ghostSprite, DISPLAY_SIZE.tileW * 1.4, DISPLAY_SIZE.buildingH);
+      this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
+    }
     this.ghostSprite.setPosition(foot.x, foot.y);
     this.ghostSprite.setAlpha(0.55);
     this.ghostSprite.setTint(canPlace ? 0x88ff88 : 0xff8888);
-    this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
-    this.ghostSprite.setVisible(this.buildSystem.active);
+    this.ghostSprite.setVisible(true);
+
+    if (this.buildPlacementConfirm?.isVisible()) {
+      this.buildPlacementConfirm.refreshLayout();
+      if (moveActive) {
+        this.buildPlacementConfirm.setConfirmEnabled(canPlace);
+      } else {
+        const item = this.buildSystem.selectedItem;
+        if (item) {
+          const canAfford = this.economy.getCoins() >= item.cost;
+          const canPlaceBuild = this.buildSystem.canPlace(ghostX, ghostY);
+          this.buildPlacementConfirm.setConfirmEnabled(canPlaceBuild && canAfford);
+        }
+      }
+    }
   }
 
   shutdown(): void {

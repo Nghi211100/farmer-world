@@ -310,6 +310,20 @@ export class GridSystem {
     if (objectId) this.cells[gy][gx].walkable = false;
   }
 
+  /** Removes a placed object and restores walkability for grass / unlocked soil. */
+  clearObject(gx: number, gy: number): void {
+    if (!this.inBounds(gx, gy)) return;
+    const cell = this.cells[gy][gx];
+    delete cell.object;
+    if (cell.type === 'water') {
+      cell.walkable = false;
+    } else if (cell.type === 'soil') {
+      cell.walkable = !!cell.unlocked;
+    } else {
+      cell.walkable = true;
+    }
+  }
+
   /** Top vertex of the tile diamond */
   gridToScreen(gx: number, gy: number): { x: number; y: number } {
     return cartToIso(gx, gy, this.originX, this.originY);

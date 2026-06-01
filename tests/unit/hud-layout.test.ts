@@ -3,6 +3,10 @@ import {
   computeBottomMenuLayout,
   computeLeftMenuLayout,
   computeRightMenuLayout,
+  computeTopHudSlots,
+  TOP_SLOT_VALUE_FONT_WIDTH_FRAC,
+  TOP_SLOT_VW_FRAC,
+  topSlotValueFontSizePx,
   HUD_BAG_BOTTOM_VH_FRAC,
   HUD_BAG_LEFT_VW_FRAC,
   HUD_RIGHT_MENU_ICON_SIZE_MULTIPLIER,
@@ -13,6 +17,29 @@ import {
   hudRightShopIconWidthPx,
 } from '../../src/ui/hudLayout';
 import { setHudSafeAreaInsets } from '../../src/safeArea';
+
+describe('computeTopHudSlots', () => {
+  it('sets value font size to 5% of slot width', () => {
+    setHudSafeAreaInsets({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(TOP_SLOT_VALUE_FONT_WIDTH_FRAC).toBe(0.05);
+
+    const laptopW = 1920;
+    const slotW = Math.max(1, Math.floor(laptopW * TOP_SLOT_VW_FRAC));
+    expect(topSlotValueFontSizePx(laptopW)).toBe(
+      Math.round(slotW * TOP_SLOT_VALUE_FONT_WIDTH_FRAC)
+    );
+    expect(computeTopHudSlots(laptopW, 1080).fontSizePx).toBe(
+      `${topSlotValueFontSizePx(laptopW)}px`
+    );
+
+    const phoneW = 390;
+    const phoneSlotW = Math.max(1, Math.floor(phoneW * TOP_SLOT_VW_FRAC));
+    expect(topSlotValueFontSizePx(phoneW)).toBe(
+      Math.round(phoneSlotW * TOP_SLOT_VALUE_FONT_WIDTH_FRAC)
+    );
+    expect(computeTopHudSlots(phoneW, 844).fontSizePx).toBe('5px');
+  });
+});
 
 describe('computeLeftMenuLayout', () => {
   it('places bag left edge at 1.5% viewport width with no safe area', () => {

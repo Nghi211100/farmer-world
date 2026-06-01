@@ -1521,7 +1521,6 @@ export class InventoryPanel {
     this.cellW = pitchCellW - this.artSpanW(CELL_SLOT_SHRINK_W_ART_PX);
     this.cellH = pitchCellH + this.artSpanH(CELL_SLOT_HEIGHT_EXTRA_ART_PX);
     const slotPitchW = this.cellW * ITEM_SLOT_GAP_SCALE;
-    const slotPitchH = this.pitchCellH * ITEM_SLOT_GAP_SCALE;
     const totalGridWidth = (WAREHOUSE_GRID_COLS - 1) * slotPitchW + this.cellW;
     this.gridContentOffsetX = (this.gridViewportW - totalGridWidth) / 2;
 
@@ -1863,7 +1862,7 @@ export class InventoryPanel {
     let rect = this.sellFooterColCellRectPx(1, cell);
     const col1 = this.sellFooterColRectPx(1);
     rect = this.shiftFooterRectPx(rect, 0, col1.height * COL1_COLUMN_Y_OFFSET_FRAC);
-    if (cell.id === 'name' && COL1_NAME_Y_OFFSET_FRAC !== 0) {
+    if (cell.id === 'name') {
       rect = this.shiftFooterRectPx(rect, 0, col1.height * COL1_NAME_Y_OFFSET_FRAC);
     }
     if (

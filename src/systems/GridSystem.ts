@@ -124,11 +124,12 @@ export class GridSystem {
     corners: [number, number][],
     out: { minX: number; minY: number; maxX: number; maxY: number }
   ): void {
+    const hw = this.tileWidth / 2;
     for (const [gx, gy] of corners) {
       const top = this.gridToScreen(gx, gy);
       const bottom = tileBottomFromTop(top);
-      out.minX = Math.min(out.minX, top.x);
-      out.maxX = Math.max(out.maxX, top.x);
+      out.minX = Math.min(out.minX, top.x - hw);
+      out.maxX = Math.max(out.maxX, top.x + hw);
       out.minY = Math.min(out.minY, top.y);
       out.maxY = Math.max(out.maxY, bottom.y);
     }

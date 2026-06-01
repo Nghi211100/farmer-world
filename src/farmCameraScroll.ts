@@ -79,3 +79,28 @@ export function clampScrollToFarmPlayable(
     scrollY: nextY,
   };
 }
+
+/**
+ * Initial camera scroll: center the farm patch on the target screen point.
+ * When an axis is oversize, center the footprint inside the playable band instead
+ * of clamping to the nearest edge.
+ */
+export function computeCenteredFarmCameraScroll(
+  anchor: { x: number; y: number },
+  targetCenter: { x: number; y: number },
+  farm: FarmFootprintBounds,
+  playable: PlayableBandRect,
+  zoom: number
+): { scrollX: number; scrollY: number } {
+  const idealScrollX = anchor.x - targetCenter.x / zoom;
+  const idealScrollY = anchor.y - targetCenter.y / zoom;
+  const limits = computeFarmCameraScrollLimits(farm, playable, zoom);
+  return {
+    scrollX: limits.x.oversize
+      ? (limits.x.minScroll + limits.x.maxScroll) / 2
+      : idealScrollX,
+    scrollY: limits.y.oversize
+      ? (limits.y.minScroll + limits.y.maxScroll) / 2
+      : idealScrollY,
+  };
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampScrollToFarmPlayable,
+  computeCenteredFarmCameraScroll,
   computeFarmCameraScrollLimits,
   type FarmFootprintBounds,
 } from '../../src/farmCameraScroll';
@@ -101,11 +102,12 @@ describe('clampScrollToFarmPlayable', () => {
 
   it('keeps centered scroll inside the X interval after a small pan', () => {
     const limits = computeFarmCameraScrollLimits(phoneFootprint, phonePlayable, 1.7);
-    const centered = clampScrollToFarmPlayable(80, 128, limits);
-    const nudged = clampScrollToFarmPlayable(95, 145, limits);
-    expect(centered.scrollX).toBeCloseTo(80, 5);
+    const centeredX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    const centered = clampScrollToFarmPlayable(centeredX, 128, limits);
+    const nudged = clampScrollToFarmPlayable(centeredX + 15, 145, limits);
+    expect(centered.scrollX).toBeCloseTo(centeredX, 5);
     expect(centered.scrollY).toBeCloseTo(128, 5);
-    expect(nudged.scrollX).toBeCloseTo(95, 5);
+    expect(nudged.scrollX).toBeCloseTo(centeredX + 15, 5);
     expect(nudged.scrollY).toBeCloseTo(145, 5);
   });
 
@@ -131,5 +133,26 @@ describe('clampScrollToFarmPlayable', () => {
     expect(high.scrollX).toBeCloseTo(limits.x.maxScroll, 5);
     expect(low.scrollY).toBe(900);
     expect(high.scrollY).toBe(-200);
+  });
+});
+
+describe('computeCenteredFarmCameraScroll', () => {
+  it('uses footprint midpoint on oversize X and ideal scroll on in-band Y', () => {
+    const zoom = 1.7;
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, phonePlayable, zoom);
+    const targetCenter = { x: 155, y: 414 };
+    const anchor = { x: 330, y: 366 };
+    const scroll = computeCenteredFarmCameraScroll(
+      anchor,
+      targetCenter,
+      phoneFootprint,
+      phonePlayable,
+      zoom
+    );
+
+    expect(limits.x.oversize).toBe(true);
+    expect(limits.y.oversize).toBe(false);
+    expect(scroll.scrollX).toBeCloseTo((limits.x.minScroll + limits.x.maxScroll) / 2, 5);
+    expect(scroll.scrollY).toBeCloseTo(anchor.y - targetCenter.y / zoom, 5);
   });
 });

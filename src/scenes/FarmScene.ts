@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { applyViewportCoverBackground } from '../backgroundLayout';
 import {
+  computeFarmIslandScreenBounds,
   computeFarmIslandWorldDepth,
   FARM_ISLAND_SCALE_BOOST,
   isFarmNorthEdgeCell,
@@ -71,7 +72,10 @@ import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
 import {
   clampScrollToFarmPlayable,
+  computeCenteredFarmCameraScroll,
   computeFarmCameraScrollLimits,
+  type FarmFootprintBounds,
+  type FarmCameraScrollLimits,
   type PlayableBandRect,
 } from '../farmCameraScroll';
 
@@ -85,8 +89,6 @@ const FARM_FIT_PAD_X = 10;
 const FARM_FIT_PAD_Y = 10;
 /** Zoom past strict fit so FARM_SOIL_BOUNDS fills the viewport (less outer water at edges). */
 const FARM_INITIAL_ZOOM_BOOST = 1.08;
-/** Nudge camera to keep north path/soil apex inside the playable band. */
-const FARM_CAMERA_NORTH_BIAS_PX = 44;
 export class FarmScene extends Phaser.Scene {
   grid!: GridSystem;
   farming!: FarmingSystem;
@@ -608,14 +610,23 @@ export class FarmScene extends Phaser.Scene {
   private setupCamera(): void {
     this.cameraScrollTouchedByUser = false;
     this.focusCameraOnFarmSoil({ recenterCamera: true });
-    this.time.delayedCall(0, () => this.focusCameraOnFarmSoil({ recenterCamera: true }));
+    this.time.delayedCall(0, () => {
+      if (!this.cameraScrollTouchedByUser) {
+        this.focusCameraOnFarmSoil({ recenterCamera: true });
+      }
+    });
   }
 
   /**
    * Re-layout grid + camera after HUD/safe-area/viewport are stable (first load, ui-ready, resize).
    */
   private focusCameraOnFarmSoil(options?: { recenterCamera?: boolean }): void {
-    const { width: w, height: h } = this.getLayoutViewportSize();
+    if (this.pointerGestureActive || this.isDragging) {
+      return;
+    }
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const w = Math.round(viewW);
+    const h = Math.round(viewH);
     if (w <= 1 || h <= 1) return;
     const cam = this.cameras.main;
     const preserveView =
@@ -691,24 +702,16 @@ export class FarmScene extends Phaser.Scene {
       MAX_CAMERA_ZOOM
     );
 
-    const idealScroll = (z: number): { x: number; y: number } => ({
-      x: anchor.x - targetCenterX / z,
-      y: anchor.y - targetCenterY / z,
-    });
-
     cam.setZoom(zoom);
-    const scroll = idealScroll(zoom);
-    cam.scrollX = scroll.x;
-    cam.scrollY = scroll.y;
-
-    cam.scrollY -= FARM_CAMERA_NORTH_BIAS_PX / zoom;
-    this.clampMainCameraScroll(farm, {
-      playableLeft,
-      playableTop,
-      playableRight,
-      playableBottom,
-      zoom,
-    });
+    const scroll = computeCenteredFarmCameraScroll(
+      anchor,
+      { x: targetCenterX, y: targetCenterY },
+      this.getFarmCameraScrollBounds(),
+      { playableLeft, playableTop, playableRight, playableBottom },
+      zoom
+    );
+    cam.scrollX = scroll.scrollX;
+    cam.scrollY = scroll.scrollY;
   }
 
   private getMainCameraPlayableBand(viewW: number, viewH: number): PlayableBandRect {
@@ -734,12 +737,31 @@ export class FarmScene extends Phaser.Scene {
 
   private clampMainCameraScrollToPlayable(): void {
     const cam = this.cameras.main;
-    const farm = this.grid.getFarmFootprintScreenBounds();
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    this.clampMainCameraScroll(farm, {
+    this.clampMainCameraScroll(this.getFarmCameraScrollBounds(), {
       ...this.getMainCameraPlayableBand(viewW, viewH),
       zoom: cam.zoom,
     });
+  }
+
+  /**
+   * Pan clamp target: island.png screen AABB (falls back to soil footprint before island loads).
+   * Tile-only footprint is much smaller than the island art, which caused overly tight pan limits.
+   */
+  private getFarmCameraScrollBounds(): FarmFootprintBounds {
+    const image = this.farmIslandImage;
+    if (image) {
+      const frame = image.frame;
+      const texW = frame.cutWidth || frame.width;
+      const texH = frame.cutHeight || frame.height;
+      return computeFarmIslandScreenBounds(
+        this.grid.getFarmSoilScreenRhombus(),
+        texW,
+        texH,
+        { scaleBoost: FARM_ISLAND_SCALE_BOOST }
+      );
+    }
+    return this.grid.getFarmFootprintScreenBounds();
   }
 
   private setupToolBar(): void {
@@ -749,19 +771,26 @@ export class FarmScene extends Phaser.Scene {
     this.toolBar.setOnChange((tool) => this.setSelectedTool(tool));
   }
 
-  private handleResize(gameSize: Phaser.Structs.Size): void {
-    this.toolBar?.resize(gameSize.width, gameSize.height);
-    this.landUnlockConfirm?.resize();
-    this.syncMainCameraViewport();
-    this.layoutBackground();
+  private scheduleResizeCameraLayout(): void {
     if (this.resizeLayoutTimer !== undefined) {
       clearTimeout(this.resizeLayoutTimer);
     }
     this.resizeLayoutTimer = setTimeout(() => {
       this.resizeLayoutTimer = undefined;
-      if (this.pointerGestureActive || this.isDragging) return;
+      if (this.pointerGestureActive || this.isDragging) {
+        this.scheduleResizeCameraLayout();
+        return;
+      }
       this.focusCameraOnFarmSoil();
     }, 100);
+  }
+
+  private handleResize(gameSize: Phaser.Structs.Size): void {
+    this.toolBar?.resize(gameSize.width, gameSize.height);
+    this.landUnlockConfirm?.resize();
+    this.syncMainCameraViewport();
+    this.layoutBackground();
+    this.scheduleResizeCameraLayout();
   }
 
   private repositionWorld(): void {
@@ -862,6 +891,7 @@ export class FarmScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
     cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+    this.clampMainCameraScrollToPlayable();
   }
 
   /**
@@ -896,7 +926,6 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
-      this.handleLockedFarmSoilTap(x, y);
       return;
     }
 
@@ -1266,6 +1295,17 @@ export class FarmScene extends Phaser.Scene {
     };
   }
 
+  getFarmCameraScrollLimitsForTest(): FarmCameraScrollLimits | null {
+    if (!this.grid) return null;
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    return computeFarmCameraScrollLimits(
+      this.getFarmCameraScrollBounds(),
+      this.getMainCameraPlayableBand(viewW, viewH),
+      cam.zoom
+    );
+  }
+
   /** Clears pending tile state after popups close / plant completes. */
   private finishFarmInteraction(): void {
     if (this.farmActionPopup.isVisible() || this.cropSelectPopup.isVisible()) {
@@ -1337,21 +1377,6 @@ export class FarmScene extends Phaser.Scene {
     return this.grid.isLockedSoil(gx, gy);
   }
 
-  private handleLockedFarmSoilTap(gx: number, gy: number): void {
-    this.dismissFarmPopups();
-    this.player.clearOnReach();
-    this.pendingFarmTile = undefined;
-
-    const walkTarget = this.findWalkTargetForFarmTile(gx, gy);
-    if (!walkTarget) {
-      this.showToast('Cannot reach this plot');
-      return;
-    }
-
-    this.player.moveTo(walkTarget.x, walkTarget.y, this.grid);
-    this.showToast('Buy land to unlock');
-  }
-
   private isFarmInteractableTile(
     gx: number,
     gy: number,
@@ -1419,32 +1444,6 @@ export class FarmScene extends Phaser.Scene {
     cell: NonNullable<ReturnType<GridSystem['getCell']>>
   ): void {
     if (cell.type !== 'soil' || !this.grid.isFarmUnlocked(gx, gy)) return;
-
-    if (
-      this.selectedTool === FarmTool.SEED &&
-      this.selectedSeedId &&
-      !this.farming.isGrowing(gx, gy) &&
-      this.farming.canPlant(gx, gy)
-    ) {
-      this.pendingFarmTile = { x: gx, y: gy };
-      const player = this.player.getGridPosition();
-      const runPlant = () => {
-        if (!this.pendingFarmTile) return;
-        this.tryPlant(this.pendingFarmTile.x, this.pendingFarmTile.y, this.selectedSeedId!);
-      };
-      if (this.isOnTile(player.x, player.y, gx, gy)) {
-        runPlant();
-        return;
-      }
-      const walkTarget = this.findWalkTargetForFarmTile(gx, gy);
-      if (!walkTarget) {
-        this.showToast('Cannot reach this plot');
-        this.finishFarmInteraction();
-        return;
-      }
-      this.player.moveTo(walkTarget.x, walkTarget.y, this.grid, runPlant);
-      return;
-    }
 
     this.pendingFarmTile = { x: gx, y: gy };
     const player = this.player.getGridPosition();

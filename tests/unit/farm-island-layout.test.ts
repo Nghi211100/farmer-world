@@ -3,6 +3,7 @@ import {
   FARM_ISLAND_OFFSET_X_FRAC,
   FARM_ISLAND_OFFSET_Y_FRAC,
   FARM_ISLAND_SCALE_BOOST,
+  computeFarmIslandScreenBounds,
   layoutFarmIslandImage,
   type FarmSoilScreenRhombus,
 } from '../../src/farmIslandLayout';
@@ -34,6 +35,13 @@ describe('farmIslandLayout', () => {
     expect(displayW).toBeGreaterThanOrEqual(targetW);
     expect(displayH).toBeGreaterThanOrEqual(targetH);
     expect(displayW / displayH).toBeCloseTo(texW / texH, 5);
+  });
+
+  it('computeFarmIslandScreenBounds spans wider than soil rhombus', () => {
+    const rhombus = unitRhombus();
+    const bounds = computeFarmIslandScreenBounds(rhombus, 512, 512);
+    const rhombusW = rhombus.east.x - rhombus.west.x;
+    expect(bounds.maxX - bounds.minX).toBeGreaterThan(rhombusW * 2);
   });
 
   it('layoutFarmIslandImage centers on rhombus and sets uniform display size', () => {

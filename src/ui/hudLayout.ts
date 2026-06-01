@@ -7,12 +7,9 @@ export const HUD_REFERENCE_VH = 1080;
 export const HUD_REFERENCE_VMIN = Math.min(HUD_REFERENCE_VW, HUD_REFERENCE_VH);
 
 /** Design-time top resource bar (art px at reference vmin). */
-const TOP_BAR_H_ART = 55.44; // 50.4 × 1.10 (+10% height)
 const TOP_PAD_ART = 10;
 const TOP_EDGE_PAD_ART = 12;
 const TOP_SLOT_GAP_ART = 8;
-const TOP_SLOT_MAX_W_ART = 399; // 363 × 1.10 (+10% width)
-const TOP_VALUE_FONT_ART = 15;
 /** Farm playable inset below resource boxes (legacy band was 56 vs pad+bar 58). */
 const TOP_BAND_EXTRA_ART = -2;
 
@@ -50,8 +47,24 @@ export const RIGHT_MENU_ICON_COUNT = 3;
 
 export const TOP_SLOT_COUNT = 3;
 
-/** Max single slot width as fraction of viewport width (399 / 1920). */
-export const TOP_SLOT_MAX_W_FRAC = TOP_SLOT_MAX_W_ART / HUD_REFERENCE_VW;
+/** Top resource bar slot width (coin / gem / energy) as fraction of viewport width. */
+export const TOP_SLOT_VW_FRAC = 0.25;
+/** Top resource slot height as fraction of slot width (height = width × frac). */
+export const TOP_SLOT_HEIGHT_WIDTH_FRAC = 0.17;
+/** Coin / gem / energy value text size as fraction of slot width. */
+export const TOP_SLOT_VALUE_FONT_WIDTH_FRAC = 0.05;
+
+function topSlotDimensions(viewportW: number): { width: number; height: number } {
+  const width = Math.max(1, Math.floor(viewportW * TOP_SLOT_VW_FRAC));
+  const height = Math.max(1, Math.round(width * TOP_SLOT_HEIGHT_WIDTH_FRAC));
+  return { width, height };
+}
+
+/** Value label font size (px) for top resource slots: `slotWidth × TOP_SLOT_VALUE_FONT_WIDTH_FRAC`. */
+export function topSlotValueFontSizePx(viewportW: number): number {
+  const { width: slotW } = topSlotDimensions(viewportW);
+  return Math.max(1, Math.round(slotW * TOP_SLOT_VALUE_FONT_WIDTH_FRAC));
+}
 
 /** Bottom nav icon centers along X (fractions of viewport width). */
 export const BOTTOM_MENU_X_FRACS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
@@ -154,37 +167,30 @@ export function computeTopHudSlots(
   viewportW: number,
   viewportH: number
 ): { slots: HudSlotRect[]; fontSizePx: string } {
-  const barH = hudSpan(TOP_BAR_H_ART, viewportW, viewportH);
+  const { width: slotW, height: slotH } = topSlotDimensions(viewportW);
   const topPad = hudSpan(TOP_PAD_ART, viewportW, viewportH);
   const edgePad = hudSpan(TOP_EDGE_PAD_ART, viewportW, viewportH);
   const slotGap = hudSpan(TOP_SLOT_GAP_ART, viewportW, viewportH);
-  const maxSlotW = Math.min(
-    hudSpan(TOP_SLOT_MAX_W_ART, viewportW, viewportH),
-    Math.floor(viewportW * TOP_SLOT_MAX_W_FRAC)
-  );
-  const centerY = topPad + barH / 2;
-  const totalGap = slotGap * (TOP_SLOT_COUNT - 1);
-  const usable = Math.max(0, viewportW - edgePad * 2 - totalGap);
-  const slotW = Math.min(maxSlotW, Math.floor(usable / TOP_SLOT_COUNT));
+  const centerY = topPad + slotH / 2;
 
   const slots: HudSlotRect[] = [];
   for (let i = 0; i < TOP_SLOT_COUNT; i++) {
     const centerX = edgePad + slotW / 2 + i * (slotW + slotGap);
-    slots.push({ centerX, centerY, width: slotW, height: barH });
+    slots.push({ centerX, centerY, width: slotW, height: slotH });
   }
 
-  const fontSizePx = scaledFontSizePx(TOP_VALUE_FONT_ART, hudScale(viewportW, viewportH));
+  const fontSizePx = `${topSlotValueFontSizePx(viewportW)}px`;
   return { slots, fontSizePx };
 }
 
 /** Playable-area inset: safe area + top pad + bar + small margin (FarmScene / ToolBar). */
 export function topHudBandHeight(viewportW: number, viewportH: number): number {
-  const barH = hudSpan(TOP_BAR_H_ART, viewportW, viewportH);
+  const { height: slotH } = topSlotDimensions(viewportW);
   const topPad = hudSpan(TOP_PAD_ART, viewportW, viewportH);
   return (
     getHudSafeAreaInsets().top +
     topPad +
-    barH +
+    slotH +
     hudSpan(TOP_BAND_EXTRA_ART, viewportW, viewportH)
   );
 }

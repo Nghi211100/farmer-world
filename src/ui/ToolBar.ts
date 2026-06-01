@@ -3,9 +3,7 @@ import { FarmTool } from '../config/gameConfig';
 import { HUD_MENU_DEPTH } from './BottomMenu';
 import { hudSpan, topHudBandHeight } from './hudLayout';
 
-const TOOL_MODAL_BG_KEY = 'ui_tool_modal';
-const TOOL_MODAL_ART_W = 1536;
-const TOOL_MODAL_ART_H = 1024;
+const TOOL_BAR_ASPECT = 0.22;
 
 const TOOL_DEFS: { tool: FarmTool; texture: string; label: string }[] = [
   { tool: FarmTool.HOE, texture: 'shovel', label: 'Hoe' },
@@ -44,18 +42,12 @@ export class ToolBar {
     this.buttons.clear();
 
     const barW = Math.min(this.viewW * 0.88, 480);
-    const barH = Math.round(barW * (TOOL_MODAL_ART_H / TOOL_MODAL_ART_W) * 0.22);
+    const barH = Math.round(barW * TOOL_BAR_ASPECT);
     const cx = this.viewW / 2;
     const topBand = topHudBandHeight(this.viewW, this.viewH);
     const y = topBand + hudSpan(20, this.viewW, this.viewH) + barH / 2;
 
     const children: Phaser.GameObjects.GameObject[] = [];
-
-    if (this.scene.textures.exists(TOOL_MODAL_BG_KEY)) {
-      const bg = this.scene.add.image(cx, y, TOOL_MODAL_BG_KEY).setScrollFactor(0);
-      bg.setDisplaySize(barW, barH);
-      children.push(bg);
-    }
 
     const spacing = barW / (TOOL_DEFS.length + 1);
 

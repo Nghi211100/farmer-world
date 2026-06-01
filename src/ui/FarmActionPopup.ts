@@ -1,18 +1,12 @@
 import Phaser from 'phaser';
 import type { GridSystem } from '../systems/GridSystem';
 import { farmMainCameraZoom, placePopupAboveTile } from '../utils/popupPosition';
-import { applyImageArtRegionStretch } from './ShopPanel';
 import {
-  TOOL_MODAL_ART_H,
-  TOOL_MODAL_ART_W,
   TOOL_MODAL_VISUAL_SCALE,
   toolModalFrameDisplaySize,
   toolModalPanelRects,
   toolModalPanelSize,
-  toolModalTextureCrop,
 } from './toolModalLayout';
-
-const TOOL_MODAL_BG_KEY = 'ui_tool_modal';
 
 export type FarmPopupAction = 'plant' | 'water' | 'harvest' | 'dig';
 
@@ -109,28 +103,26 @@ export class FarmActionPopup {
 
   getVisualMetricsForTest(): FarmActionPopupVisualMetrics | null {
     if (!this.visible || !this.lastLayout) return null;
-    const bg = this.container.list.find(
-      (obj): obj is Phaser.GameObjects.Image => obj instanceof Phaser.GameObjects.Image
-    );
-    const bounds = bg?.getBounds();
+    const scaleX = this.container.scaleX;
+    const scaleY = this.container.scaleY;
     return {
       logicalPanelW: this.lastLayout.panelW,
       logicalPanelH: this.lastLayout.panelH,
-      bgDisplayW: bg?.displayWidth ?? 0,
-      bgDisplayH: bg?.displayHeight ?? 0,
-      bgBoundsW: bounds?.width ?? 0,
-      bgBoundsH: bounds?.height ?? 0,
+      bgDisplayW: this.lastLayout.bgW,
+      bgDisplayH: this.lastLayout.bgH,
+      bgBoundsW: this.lastLayout.bgW * scaleX,
+      bgBoundsH: this.lastLayout.bgH * scaleY,
       containerScaleX: this.container.scaleX,
       containerScaleY: this.container.scaleY,
       cameraZoom: farmMainCameraZoom(this.scene),
       viewportW: this.scene.scale.width,
       viewportH: this.scene.scale.height,
-      textureW: bg?.frame.width ?? 0,
-      textureH: bg?.frame.height ?? 0,
-      cropX: bg?.frame.cutX ?? 0,
-      cropY: bg?.frame.cutY ?? 0,
-      cropW: bg?.frame.cutWidth ?? 0,
-      cropH: bg?.frame.cutHeight ?? 0,
+      textureW: 0,
+      textureH: 0,
+      cropX: 0,
+      cropY: 0,
+      cropW: 0,
+      cropH: 0,
     };
   }
 
@@ -186,27 +178,7 @@ export class FarmActionPopup {
       y: (screenY - cy) / TOOL_MODAL_VISUAL_SCALE,
     });
 
-    if (this.scene.textures.exists(TOOL_MODAL_BG_KEY)) {
-      const tex = this.scene.textures.get(TOOL_MODAL_BG_KEY).get();
-      const texW = tex.width || TOOL_MODAL_ART_W;
-      const texH = tex.height || TOOL_MODAL_ART_H;
-      const textureCrop = toolModalTextureCrop(texW, texH);
-      const bg = this.scene.add
-        .image(0, 0, TOOL_MODAL_BG_KEY)
-        .setOrigin(0.5, 0.5)
-        .setScrollFactor(0);
-      applyImageArtRegionStretch(
-        bg,
-        textureCrop.x,
-        textureCrop.y,
-        textureCrop.width,
-        textureCrop.height,
-        bgW,
-        bgH
-      );
-      this.container.add(bg);
-      this.container.setSize(bgW, bgH);
-    }
+    this.container.setSize(bgW, bgH);
 
     BUTTONS.forEach((btn, i) => {
       const screenX = slotLeft + colW * (i + 0.5);

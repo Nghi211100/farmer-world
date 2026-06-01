@@ -6,7 +6,6 @@ import {
   TOOL_MODAL_FRAME_WIDTH_PX,
   TOOL_MODAL_FRAME_COMPACT_HEIGHT_PX,
   toolModalFrameFullCrop,
-  toolModalTextureCrop,
   TOOL_MODAL_ICON_DISPLAY_SIZE_REF_PX,
   TOOL_MODAL_ICON_GAP_REF_PX,
   TOOL_MODAL_ICON_HIT_SIZE_REF_PX,
@@ -17,6 +16,7 @@ import {
   TOOL_MODAL_PANEL_MAX_WIDTH_PX,
   TOOL_MODAL_PANEL_MIN_WIDTH_PX,
   TOOL_MODAL_PANEL_SHIFT_Y_REF_PX,
+  TOOL_MODAL_PANEL_SHIFT_Y_VIEWPORT_FRAC,
   TOOL_MODAL_PANEL_WIDTH_FRAC,
   TOOL_MODAL_SLOT_BAND_EXTRA_HEIGHT_REF_PX,
   TOOL_MODAL_SLOT_BAND_EXTRA_WIDTH_REF_PX,
@@ -167,8 +167,6 @@ test.describe('Farm action popup layout', () => {
   test('texture crop uses full PNG; inner frame crop stays in bounds', () => {
     expect(TOOL_MODAL_ART_W).toBe(1370);
     expect(TOOL_MODAL_ART_H).toBe(686);
-    const textureCrop = toolModalTextureCrop();
-    expect(textureCrop).toEqual({ x: 0, y: 0, width: 1370, height: 686 });
     const innerCrop = toolModalFrameFullCrop();
     expect(innerCrop.x + innerCrop.width).toBeLessThanOrEqual(TOOL_MODAL_ART_W);
     expect(innerCrop.y + innerCrop.height).toBeLessThanOrEqual(TOOL_MODAL_ART_H);
@@ -186,6 +184,7 @@ test.describe('Farm action popup layout', () => {
     expect(TOOL_MODAL_PANEL_MIN_WIDTH_PX).toBe(148);
     expect(TOOL_MODAL_LAYOUT_REF_WIDTH_PX).toBe(250);
     expect(TOOL_MODAL_PANEL_SHIFT_Y_REF_PX).toBe(-10);
+    expect(TOOL_MODAL_PANEL_SHIFT_Y_VIEWPORT_FRAC).toBe(0.05);
     expect(TOOL_MODAL_ICON_LAYOUT_SCALE_BIAS).toBeCloseTo(0.92, 2);
     expect(TOOL_MODAL_ICON_GAP_REF_PX).toBe(4);
     expect(TOOL_MODAL_SLOT_COLS_TIGHTEN_REF_PX).toBe(4);
@@ -207,6 +206,10 @@ test.describe('Farm action popup layout', () => {
     expect(phone.panelH).toBe(34);
     expect(phone.panelW / 390).toBeCloseTo(TOOL_MODAL_PANEL_WIDTH_FRAC, 2);
     expect(phone.panelH / phone.panelW).toBeCloseTo(TOOL_MODAL_PANEL_DISPLAY_ASPECT, 2);
+    expect(phone.panelShiftY).toBe(
+      Math.round(TOOL_MODAL_PANEL_SHIFT_Y_REF_PX * phone.scale) +
+        Math.round(844 * TOOL_MODAL_PANEL_SHIFT_Y_VIEWPORT_FRAC)
+    );
 
     const laptop720 = toolModalPanelSize(1280, 720);
     expect(laptop720.panelW).toBe(TOOL_MODAL_PANEL_MAX_WIDTH_PX);
@@ -243,12 +246,10 @@ test.describe('Farm action popup — phone viewport', () => {
       window.__FARMER_WORLD_TEST__?.getFarmActionPopupVisual()
     );
     expect(visual).not.toBeNull();
-    expect(visual!.textureW).toBe(1370);
-    expect(visual!.textureH).toBe(686);
-    expect(visual!.cropX).toBe(0);
-    expect(visual!.cropY).toBe(0);
-    expect(visual!.cropW).toBe(1370);
-    expect(visual!.cropH).toBe(686);
+    expect(visual!.textureW).toBe(0);
+    expect(visual!.textureH).toBe(0);
+    expect(visual!.cropW).toBe(0);
+    expect(visual!.cropH).toBe(0);
     expect(visual!.containerScaleX).toBeCloseTo(TOOL_MODAL_VISUAL_SCALE, 3);
     expect(visual!.bgBoundsW).toBeCloseTo(layout!.panelW * TOOL_MODAL_VISUAL_SCALE, 1);
     expect(visual!.bgBoundsH).toBeCloseTo(layout!.panelH * TOOL_MODAL_VISUAL_SCALE, 1);
@@ -279,9 +280,9 @@ test.describe('Farm action popup — laptop viewport', () => {
     expect(visual).not.toBeNull();
     expect(layout!.panelW).toBe(TOOL_MODAL_PANEL_MAX_WIDTH_PX);
     expect(layout!.panelH).toBe(70);
-    expect(visual!.textureW).toBe(1370);
-    expect(visual!.cropW).toBe(1370);
-    expect(visual!.cropH).toBe(686);
+    expect(visual!.textureW).toBe(0);
+    expect(visual!.cropW).toBe(0);
+    expect(visual!.cropH).toBe(0);
     expect(visual!.bgBoundsW).toBeCloseTo(layout!.panelW * TOOL_MODAL_VISUAL_SCALE, 1);
     expect(visual!.bgBoundsW / visual!.viewportW).toBeCloseTo(
       (layout!.panelW * TOOL_MODAL_VISUAL_SCALE) / 1280,

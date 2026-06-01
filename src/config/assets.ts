@@ -1,5 +1,9 @@
-/** Stable texture key for splash screen (see ui/loading.png). */
-export const UI_LOADING_TEXTURE_KEY = 'ui_loading';
+/** Splash background (see ui/loading-bg.png), loaded in BootScene. */
+export const UI_LOADING_BG_TEXTURE_KEY = 'ui_loading_bg';
+/** Loading progress bar track (see ui/loading-empty.png). */
+export const UI_LOADING_BAR_EMPTY_TEXTURE_KEY = 'ui_loading_bar_empty';
+/** Loading progress bar fill (see ui/loading-percent.png). */
+export const UI_LOADING_BAR_FILL_TEXTURE_KEY = 'ui_loading_bar_fill';
 
 /** Stable texture key for shop detail stat line backgrounds (see ui/text-background.png). */
 export const UI_TEXT_BACKGROUND_TEXTURE_KEY = 'ui_text_background';
@@ -182,13 +186,6 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'farmer_walk_right_2', path: 'characters/farmer_walk_right_2.png', placeholderColor: 0x2980b9, width: 32, height: 48 },
   { key: 'farmer_walk_back_1', path: 'characters/farmer_walk_back_1.png', placeholderColor: 0x2980b9, width: 32, height: 48 },
   { key: 'farmer_walk_back_2', path: 'characters/farmer_walk_back_2.png', placeholderColor: 0x2980b9, width: 32, height: 48 },
-  {
-    key: UI_LOADING_TEXTURE_KEY,
-    path: 'ui/loading.png',
-    placeholderColor: 0x87ceeb,
-    width: 1672,
-    height: 941,
-  },
   {
     key: 'ui_background',
     path: 'ui/background.png',

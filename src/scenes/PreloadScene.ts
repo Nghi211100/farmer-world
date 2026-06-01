@@ -1,18 +1,34 @@
 import Phaser from 'phaser';
 import { applyViewportCoverBackground } from '../backgroundLayout';
-import { ASSET_MANIFEST, UI_LOADING_TEXTURE_KEY } from '../config/assets';
+import {
+  ASSET_MANIFEST,
+  UI_LOADING_BAR_EMPTY_TEXTURE_KEY,
+  UI_LOADING_BAR_FILL_TEXTURE_KEY,
+  UI_LOADING_BG_TEXTURE_KEY,
+} from '../config/assets';
 import { getAssetPathToUrlMap } from '../utils/assetUrls';
 import { createPlaceholderTexture } from '../utils/placeholders';
 
-/** Baked progress bar band on ui/loading.png (1672×941 art px). */
 const LOADING_BAR_CENTER_Y_FRAC = 0.88;
 const LOADING_BAR_WIDTH_FRAC = 0.52;
-const LOADING_BAR_HEIGHT_ART = 14;
+const LOADING_BAR_MAX_WIDTH_PX = 520;
+/** Fill (loading-percent) size as a fraction of the track (loading-empty). */
+const LOADING_BAR_FILL_WIDTH_FRAC = 0.86;
+const LOADING_BAR_FILL_HEIGHT_FRAC = 0.6;
+/** Horizontal offset left as a fraction of track width (barW). */
+const LOADING_BAR_FILL_LEFT_SHIFT_FRAC = 0.022;
 
 export class PreloadScene extends Phaser.Scene {
   private loadedKeys = new Set<string>();
   private splash?: Phaser.GameObjects.Image;
-  private progressFill?: Phaser.GameObjects.Rectangle;
+  private progressTrack?: Phaser.GameObjects.Image;
+  private progressFill?: Phaser.GameObjects.Image;
+  private fallbackTrack?: Phaser.GameObjects.Rectangle;
+  private fallbackFill?: Phaser.GameObjects.Rectangle;
+  private barW = 0;
+  private barH = 0;
+  private barInnerW = 0;
+  private barInnerH = 0;
 
   constructor() {
     super({ key: 'PreloadScene' });
@@ -22,32 +38,59 @@ export class PreloadScene extends Phaser.Scene {
     const viewW = this.scale.width;
     const viewH = this.scale.height;
 
-    if (this.textures.exists(UI_LOADING_TEXTURE_KEY)) {
+    if (this.textures.exists(UI_LOADING_BG_TEXTURE_KEY)) {
       this.splash = this.add
-        .image(viewW / 2, viewH / 2, UI_LOADING_TEXTURE_KEY)
+        .image(viewW / 2, viewH / 2, UI_LOADING_BG_TEXTURE_KEY)
         .setOrigin(0.5, 0.5)
         .setDepth(-10);
       applyViewportCoverBackground(this.splash, viewW, viewH);
     }
 
-    const barW = Math.min(Math.round(viewW * LOADING_BAR_WIDTH_FRAC), 520);
-    const barH = Math.max(8, Math.round((LOADING_BAR_HEIGHT_ART / 941) * viewH));
+    this.barW = Math.min(Math.round(viewW * LOADING_BAR_WIDTH_FRAC), LOADING_BAR_MAX_WIDTH_PX);
     const barY = viewH * LOADING_BAR_CENTER_Y_FRAC;
-    const track = this.add
-      .rectangle(viewW / 2, barY, barW, barH, 0x000000, 0.35)
-      .setOrigin(0.5, 0.5)
-      .setDepth(10);
-    this.progressFill = this.add
-      .rectangle(viewW / 2 - barW / 2, barY, 0, barH - 2, 0x7dce7d)
-      .setOrigin(0, 0.5)
-      .setDepth(11);
-    track.setAlpha(this.splash ? 0 : 1);
-    if (this.splash) {
-      this.progressFill.setAlpha(0.85);
+
+    const hasBarArt =
+      this.textures.exists(UI_LOADING_BAR_EMPTY_TEXTURE_KEY) &&
+      this.textures.exists(UI_LOADING_BAR_FILL_TEXTURE_KEY);
+
+    if (hasBarArt) {
+      const emptyFrame = this.textures.get(UI_LOADING_BAR_EMPTY_TEXTURE_KEY).get();
+      const texW = emptyFrame.width;
+      const texH = emptyFrame.height;
+      this.barH = texW > 0 ? Math.max(8, Math.round(this.barW * (texH / texW))) : 14;
+      this.barInnerW = this.barW * LOADING_BAR_FILL_WIDTH_FRAC;
+      this.barInnerH = this.barH * LOADING_BAR_FILL_HEIGHT_FRAC;
+
+      this.progressTrack = this.add
+        .image(viewW / 2, barY, UI_LOADING_BAR_EMPTY_TEXTURE_KEY)
+        .setOrigin(0.5, 0.5)
+        .setDepth(10);
+      this.progressTrack.setDisplaySize(this.barW, this.barH);
+
+      const fillX = viewW / 2 - this.barInnerW / 2 - this.barW * LOADING_BAR_FILL_LEFT_SHIFT_FRAC;
+      this.progressFill = this.add
+        .image(fillX, barY, UI_LOADING_BAR_FILL_TEXTURE_KEY)
+        .setOrigin(0, 0.5)
+        .setDepth(11);
+      this.setProgressFillWidth(0);
+    } else {
+      this.barH = Math.max(8, Math.round(viewH * (14 / 941)));
+      this.fallbackTrack = this.add
+        .rectangle(viewW / 2, barY, this.barW, this.barH, 0x000000, 0.35)
+        .setOrigin(0.5, 0.5)
+        .setDepth(10);
+      this.fallbackFill = this.add
+        .rectangle(viewW / 2 - this.barW / 2, barY, 0, this.barH - 2, 0x7dce7d)
+        .setOrigin(0, 0.5)
+        .setDepth(11);
+      this.fallbackTrack.setAlpha(this.splash ? 0 : 1);
+      if (this.splash) {
+        this.fallbackFill.setAlpha(0.85);
+      }
     }
 
     this.load.on('progress', (v: number) => {
-      if (this.progressFill) this.progressFill.width = Math.max(0, barW * v - 2);
+      this.setLoadProgress(v);
     });
 
     this.load.on('filecomplete', (key: string) => {
@@ -78,6 +121,24 @@ export class PreloadScene extends Phaser.Scene {
     }
   }
 
+  private setLoadProgress(v: number): void {
+    const clamped = Phaser.Math.Clamp(v, 0, 1);
+    if (this.progressFill) {
+      this.setProgressFillWidth(clamped);
+      return;
+    }
+    if (this.fallbackFill) {
+      this.fallbackFill.width = Math.max(0, this.barW * clamped - 2);
+    }
+  }
+
+  private setProgressFillWidth(ratio: number): void {
+    if (!this.progressFill) return;
+    const fillW = Math.max(0, this.barInnerW * ratio);
+    this.progressFill.setDisplaySize(fillW, this.barInnerH);
+    this.progressFill.setVisible(fillW > 0.5);
+  }
+
   create(): void {
     for (const entry of ASSET_MANIFEST) {
       if (!this.textures.exists(entry.key)) {
@@ -86,7 +147,10 @@ export class PreloadScene extends Phaser.Scene {
     }
 
     this.splash?.destroy();
+    this.progressTrack?.destroy();
     this.progressFill?.destroy();
+    this.fallbackTrack?.destroy();
+    this.fallbackFill?.destroy();
 
     this.scene.start('FarmScene');
     this.scene.launch('UIScene');

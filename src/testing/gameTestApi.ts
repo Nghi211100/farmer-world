@@ -222,6 +222,10 @@ export interface FarmerWorldTestApi {
     errorX: number;
     errorY: number;
   } | null;
+  getFarmCameraScrollLimits: () => {
+    x: { minScroll: number; maxScroll: number; oversize: boolean };
+    y: { minScroll: number; maxScroll: number; oversize: boolean };
+  } | null;
   panFarmCamera: (dxScreen: number, dyScreen: number) => void;
   setFarmCameraZoom: (zoom: number, anchorScreenX?: number, anchorScreenY?: number) => void;
   simulateFarmCameraResizeLayout: () => void;
@@ -573,6 +577,8 @@ export function installGameTestApi(game: Phaser.Game): void {
     refocusFarmCamera: () => getFarmScene(game)?.refocusFarmCameraForTest() ?? null,
     getFarmCameraCenterMetrics: () =>
       getFarmScene(game)?.getFarmCameraCenterMetricsForTest() ?? null,
+    getFarmCameraScrollLimits: () =>
+      getFarmScene(game)?.getFarmCameraScrollLimitsForTest() ?? null,
     panFarmCamera: (dxScreen, dyScreen) => {
       getFarmScene(game)?.panFarmCameraForTest(dxScreen, dyScreen);
     },

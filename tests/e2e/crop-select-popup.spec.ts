@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test';
 import {
   TOOL_MODAL_ART_H,
   TOOL_MODAL_ART_W,
-  toolModalTextureCrop,
   TOOL_MODAL_PANEL_MAX_WIDTH_PX,
   toolModalPanelSize,
   toolModalScaledLayout,
@@ -105,11 +104,9 @@ async function waitForGame(page: import('@playwright/test').Page): Promise<void>
 }
 
 test.describe('Crop select popup layout', () => {
-  test('texture crop uses full PNG art', () => {
+  test('tool modal art dimensions unchanged', () => {
     expect(TOOL_MODAL_ART_W).toBe(1370);
     expect(TOOL_MODAL_ART_H).toBe(686);
-    const textureCrop = toolModalTextureCrop();
-    expect(textureCrop).toEqual({ x: 0, y: 0, width: 1370, height: 686 });
   });
 
   test('five seed slots align inside tool-modal panel', async ({ page }) => {
@@ -164,12 +161,10 @@ test.describe('Crop select popup — phone viewport', () => {
     expect(visual).not.toBeNull();
     expect(layout!.panelW).toBe(156);
     expect(layout!.panelH).toBe(34);
-    expect(visual!.textureW).toBe(1370);
-    expect(visual!.textureH).toBe(686);
-    expect(visual!.cropX).toBe(0);
-    expect(visual!.cropY).toBe(0);
-    expect(visual!.cropW).toBe(1370);
-    expect(visual!.cropH).toBe(686);
+    expect(visual!.textureW).toBe(0);
+    expect(visual!.textureH).toBe(0);
+    expect(visual!.cropW).toBe(0);
+    expect(visual!.cropH).toBe(0);
     expect(visual!.containerScaleX).toBeCloseTo(TOOL_MODAL_VISUAL_SCALE, 3);
     expect(visual!.bgBoundsW).toBeCloseTo(layout!.panelW * TOOL_MODAL_VISUAL_SCALE, 1);
     expect(visual!.bgBoundsH).toBeCloseTo(layout!.panelH * TOOL_MODAL_VISUAL_SCALE, 1);
@@ -195,7 +190,8 @@ test.describe('Crop select popup — laptop viewport', () => {
     expect(layout).not.toBeNull();
     expect(visual).not.toBeNull();
     expect(layout!.panelW).toBe(TOOL_MODAL_PANEL_MAX_WIDTH_PX);
-    expect(visual!.cropW).toBe(1370);
+    expect(visual!.textureW).toBe(0);
+    expect(visual!.cropW).toBe(0);
     expect(visual!.bgBoundsW).toBeCloseTo(layout!.panelW * TOOL_MODAL_VISUAL_SCALE, 1);
   });
 });

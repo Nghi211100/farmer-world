@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { FARM_SOIL_BOUNDS } from './config/gameConfig';
 import { computeCoverDisplaySize } from './backgroundLayout';
+import type { FarmFootprintBounds } from './farmCameraScroll';
 
 /**
  * Uniform scale past the farm soil screen rhombus (1 = flush with soil diamond).
@@ -133,6 +134,39 @@ export type FarmIslandLayoutOptions = {
   offsetXFrac?: number;
   offsetYFrac?: number;
 };
+
+/**
+ * World-space AABB of the cover-fit farm island image (matches {@link layoutFarmIslandImage}).
+ * Used for camera pan limits so the full island art stays reachable.
+ */
+export function computeFarmIslandScreenBounds(
+  rhombus: FarmSoilScreenRhombus,
+  texW: number,
+  texH: number,
+  options: FarmIslandLayoutOptions = {}
+): FarmFootprintBounds {
+  const scaleBoost = options.scaleBoost ?? FARM_ISLAND_SCALE_BOOST;
+  const offsetXFrac = options.offsetXFrac ?? FARM_ISLAND_OFFSET_X_FRAC;
+  const offsetYFrac = options.offsetYFrac ?? FARM_ISLAND_OFFSET_Y_FRAC;
+
+  const spanW = Math.max(1, rhombus.east.x - rhombus.west.x);
+  const spanH = Math.max(1, rhombus.south.y - rhombus.north.y);
+  const targetW = spanW * scaleBoost;
+  const targetH = spanH * scaleBoost;
+  const { displayW, displayH } = computeCoverDisplaySize(texW, texH, targetW, targetH);
+
+  const cx = rhombus.center.x + spanW * offsetXFrac;
+  const cy = rhombus.center.y + spanH * offsetYFrac;
+  const halfW = displayW / 2;
+  const halfH = displayH / 2;
+
+  return {
+    minX: cx - halfW,
+    minY: cy - halfH,
+    maxX: cx + halfW,
+    maxY: cy + halfH,
+  };
+}
 
 /**
  * Cover-fit island.png to the farm soil iso diamond (rhombus) with uniform scale only.

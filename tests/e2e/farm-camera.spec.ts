@@ -86,6 +86,27 @@ test.describe('Farm camera pan and zoom', () => {
     expect(afterResize.scrollY).toBeCloseTo(zoomed.scrollY, 1);
   });
 
+  test('pan can reach both horizontal scroll extremes', async ({ page }) => {
+    await waitForFarmTestApi(page);
+
+    const limits = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.getFarmCameraScrollLimits());
+    expect(limits).not.toBeNull();
+    expect(limits!.x.oversize).toBe(true);
+
+    const center = await getCameraMetrics(page);
+    const halfRangeWorld = (limits!.x.maxScroll - limits!.x.minScroll) / 2;
+    const panPixels = halfRangeWorld * center.zoom + 40;
+
+    await page.evaluate((dx) => window.__FARMER_WORLD_TEST__?.panFarmCamera(dx, 0), panPixels);
+    const atMin = await getCameraMetrics(page);
+    expect(atMin.scrollX).toBeCloseTo(limits!.x.minScroll, 0);
+
+    await page.evaluate((dx) => window.__FARMER_WORLD_TEST__?.panFarmCamera(dx, 0), -panPixels * 2);
+    const atMax = await getCameraMetrics(page);
+    expect(atMax.scrollX).toBeCloseTo(limits!.x.maxScroll, 0);
+    expect(atMax.scrollX - atMin.scrollX).toBeGreaterThan(center.zoom * 200);
+  });
+
   test('canvas drag pan does not snap back to initial center', async ({ page }) => {
     await waitForFarmTestApi(page);
 

@@ -62,6 +62,9 @@ export const TOOL_MODAL_LAYOUT_REF_WIDTH_PX = 250;
 /** Shift panel/bg upward on screen at reference width (negative Y in Phaser). */
 export const TOOL_MODAL_PANEL_SHIFT_Y_REF_PX = -10;
 
+/** Extra downward shift as a fraction of viewport height (positive Y in Phaser). */
+export const TOOL_MODAL_PANEL_SHIFT_Y_VIEWPORT_FRAC = 0.05;
+
 export interface ToolModalPanelSize {
   panelW: number;
   panelH: number;
@@ -85,7 +88,9 @@ export function toolModalPanelSize(viewportW: number, viewportH: number): ToolMo
     )
   );
   const scale = panelW / TOOL_MODAL_LAYOUT_REF_WIDTH_PX;
-  const panelShiftY = Math.round(TOOL_MODAL_PANEL_SHIFT_Y_REF_PX * scale);
+  const panelShiftY =
+    Math.round(TOOL_MODAL_PANEL_SHIFT_Y_REF_PX * scale) +
+    Math.round(viewportH * TOOL_MODAL_PANEL_SHIFT_Y_VIEWPORT_FRAC);
   return { panelW, panelH, scale, panelShiftY };
 }
 

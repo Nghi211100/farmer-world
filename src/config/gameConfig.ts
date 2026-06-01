@@ -195,12 +195,11 @@ export function isFarmGridDebug(): boolean {
 }
 
 /**
- * Persistent top tool strip (wooden modal with hoe/seed/water/harvest).
- * Off in normal play — tools are chosen from the per-tile farm action popup.
- * Enable with `?debugToolBar=1` (or global `?debug=1`).
+ * Persistent top tool strip (hoe/seed/water/harvest) — dev-only.
+ * Off in normal play; tools are chosen from the farm action popup on tile click.
+ * Enable only with `?debugToolBar=1` (not tied to global `?debug=1`).
  */
 export function isPersistentToolBarEnabled(): boolean {
-  if (isDebugMode()) return true;
   if (typeof window === 'undefined') return false;
   try {
     const params = new URLSearchParams(window.location.search);

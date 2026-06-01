@@ -25,8 +25,12 @@
         background: #1b2e16;
         touch-action: none;
       }
+      #game-container {
+        position: relative;
+      }
       #game-container canvas {
         display: block;
+        margin: 0 auto;
         /* Pixel-art: avoid browser smoothing when canvas CSS size ≠ backing store */
         image-rendering: pixelated;
         image-rendering: crisp-edges;

@@ -6,7 +6,7 @@ export function getDisplayPixelRatio(): number {
   return Math.min(window.devicePixelRatio || 1, MAX_DISPLAY_PIXEL_RATIO);
 }
 
-/** @deprecated Hi-DPI uses Scale.RESIZE; kept for tests/tools that still reference it. */
+/** Logical CSS viewport × capped DPR — used for canvas backing-store size in main.ts. */
 export function getPhysicalGameSize(): {
   width: number;
   height: number;
@@ -25,7 +25,7 @@ export function getPhysicalGameSize(): {
   };
 }
 
-/** @deprecated Use Scale.RESIZE instead of manual zoom. */
+/** CSS display size = canvas size × this zoom (Phaser Scale.NONE + physical resize). */
 export function getScaleZoomForPixelRatio(pixelRatio: number): number {
   return pixelRatio > 0 ? 1 / pixelRatio : 1;
 }

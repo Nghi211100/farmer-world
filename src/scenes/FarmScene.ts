@@ -8,7 +8,6 @@ import {
   layoutFarmIslandImage,
 } from '../farmIslandLayout';
 import { getCropDef } from '../config/CropConfig';
-import { UI_COMING_TEXTURE_KEY } from '../config/assets';
 import {
   DEFAULT_COINS,
   DEFAULT_ENERGY,
@@ -49,7 +48,6 @@ import {
   FARM_NORTH_EDGE_GROUND_SCALE,
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
-  MOVE_DESTINATION_MARKER_MAX_PX,
   NATURE_DISPLAY_SCALE,
   tileCenterFromTop,
 } from '../utils/iso';
@@ -133,9 +131,6 @@ export class FarmScene extends Phaser.Scene {
   private cropSprites = new Map<string, CropSprite>();
   private buildingSprites = new Map<string, BuildingSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
-  private moveDestinationMarker?: Phaser.GameObjects.Image;
-  private moveDestinationGx = -1;
-  private moveDestinationGy = -1;
   private expandDimOverlay?: ExpandLandDimOverlay;
   private decorations: ReturnType<typeof renderMapDecorations> = [];
   private backgroundImage?: Phaser.GameObjects.Image;
@@ -825,17 +820,6 @@ export class FarmScene extends Phaser.Scene {
     this.player.sprite.setDepth(
       this.grid.getDepth(Math.round(spawn.x), Math.round(spawn.y), 'entities')
     );
-    if (this.moveDestinationMarker?.visible && this.moveDestinationGx >= 0) {
-      const pin = this.grid.gridToMoveDestinationMarker(
-        this.moveDestinationGx,
-        this.moveDestinationGy
-      );
-      this.moveDestinationMarker.setPosition(pin.x, pin.y);
-      this.applyMoveDestinationMarkerPresentation(
-        this.moveDestinationGx,
-        this.moveDestinationGy
-      );
-    }
     syncCropSprites(this, this.grid, this.farming, this.cropSprites);
     renderBuildings(this, this.grid, this.buildSystem.getBuildings(), this.buildingSprites);
     this.renderTileDebugOutlines();
@@ -947,8 +931,6 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
-      this.dismissFarmPopups();
-      this.handleLockedFarmSoilTap(x, y);
       return;
     }
 
@@ -963,9 +945,7 @@ export class FarmScene extends Phaser.Scene {
     this.pendingFarmTile = undefined;
 
     if (this.grid.isWalkable(x, y)) {
-      this.commandPlayerWalkTo(x, y);
-    } else {
-      this.hideMoveDestinationMarker();
+      this.player.moveTo(x, y, this.grid);
     }
   }
 
@@ -1608,70 +1588,6 @@ export class FarmScene extends Phaser.Scene {
   }
 
   /**
-   * Walk command with destination marker; hides marker on arrival or failed move.
-   * @param markerGx - Grid cell for coming.png (defaults to walk destination)
-   * @param markerGy - Grid cell for coming.png (defaults to walk destination)
-   */
-  private commandPlayerWalkTo(
-    gx: number,
-    gy: number,
-    onReach?: () => void,
-    markerGx?: number,
-    markerGy?: number
-  ): boolean {
-    const moved = this.player.moveTo(gx, gy, this.grid, () => {
-      this.hideMoveDestinationMarker();
-      onReach?.();
-    });
-    if (moved) {
-      this.showMoveDestinationMarker(markerGx ?? gx, markerGy ?? gy);
-    } else {
-      this.hideMoveDestinationMarker();
-    }
-    return moved;
-  }
-
-  private moveDestinationMarkerDepth(gx: number, gy: number): number {
-    return this.grid.getDepth(gx, gy, 'crops') + 28;
-  }
-
-  private applyMoveDestinationMarkerPresentation(gx: number, gy: number): void {
-    const marker = this.moveDestinationMarker;
-    if (!marker) return;
-    fitSpriteDisplay(
-      marker,
-      MOVE_DESTINATION_MARKER_MAX_PX,
-      MOVE_DESTINATION_MARKER_MAX_PX
-    );
-    marker.setOrigin(0.5, 1);
-    marker.setAlpha(1);
-    marker.setDepth(this.moveDestinationMarkerDepth(gx, gy));
-    this.children.bringToTop(marker);
-  }
-
-  private showMoveDestinationMarker(gx: number, gy: number): void {
-    if (!this.textures.exists(UI_COMING_TEXTURE_KEY)) return;
-
-    const pin = this.grid.gridToMoveDestinationMarker(gx, gy);
-    if (!this.moveDestinationMarker) {
-      this.moveDestinationMarker = this.add.image(pin.x, pin.y, UI_COMING_TEXTURE_KEY);
-      this.moveDestinationMarker.setScrollFactor(1);
-    } else {
-      this.moveDestinationMarker.setPosition(pin.x, pin.y);
-      this.moveDestinationMarker.setVisible(true);
-    }
-    this.applyMoveDestinationMarkerPresentation(gx, gy);
-    this.moveDestinationGx = gx;
-    this.moveDestinationGy = gy;
-  }
-
-  private hideMoveDestinationMarker(): void {
-    this.moveDestinationMarker?.setVisible(false);
-    this.moveDestinationGx = -1;
-    this.moveDestinationGy = -1;
-  }
-
-  /**
    * Walk destination for a farm tile tap: the clicked cell when walkable,
    * otherwise the nearest walkable neighbor (blocked by object/building).
    */
@@ -1716,29 +1632,12 @@ export class FarmScene extends Phaser.Scene {
     };
   }
 
-  /** Walk to locked soil with destination marker only — no tool popup or land purchase UI. */
-  private handleLockedFarmSoilTap(gx: number, gy: number): void {
-    this.player.clearOnReach();
-    this.pendingFarmTile = undefined;
-
-    const walkTarget = this.findWalkTargetForFarmTile(gx, gy);
-    if (!walkTarget) {
-      this.hideMoveDestinationMarker();
-      return;
-    }
-
-    this.commandPlayerWalkTo(walkTarget.x, walkTarget.y, undefined, gx, gy);
-  }
-
   private handleFarmTileTap(
     gx: number,
     gy: number,
     cell: NonNullable<ReturnType<GridSystem['getCell']>>
   ): void {
-    const isUnlockedSoil = cell.type === 'soil' && this.grid.isFarmUnlocked(gx, gy);
-    const isGrassCrop =
-      cell.type === 'grass' && this.farming.hasCropRecord(gx, gy) && this.grid.isFarmUnlocked(gx, gy);
-    if (!isUnlockedSoil && !isGrassCrop) return;
+    if (cell.type !== 'soil' || !this.grid.isFarmUnlocked(gx, gy)) return;
 
     this.pendingFarmTile = { x: gx, y: gy };
     const player = this.player.getGridPosition();
@@ -1755,16 +1654,10 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
 
-    this.commandPlayerWalkTo(
-      walkTarget.x,
-      walkTarget.y,
-      () => {
-        if (!this.pendingFarmTile) return;
-        this.showFarmActionPopup(this.pendingFarmTile.x, this.pendingFarmTile.y);
-      },
-      gx,
-      gy
-    );
+    this.player.moveTo(walkTarget.x, walkTarget.y, this.grid, () => {
+      if (!this.pendingFarmTile) return;
+      this.showFarmActionPopup(this.pendingFarmTile.x, this.pendingFarmTile.y);
+    });
   }
 
   private showFarmActionPopup(gx: number, gy: number): void {
@@ -1776,31 +1669,6 @@ export class FarmScene extends Phaser.Scene {
     }
     this.farmActionPopup.show(gx, gy, options);
     this.syncToolBarVisibility();
-  }
-
-  /** E2e/dev: destination pin on a farm tile (walk flow uses the same helper). */
-  showMoveDestinationMarkerForTest(gx: number, gy: number): void {
-    this.showMoveDestinationMarker(gx, gy);
-  }
-
-  getMoveDestinationMarkerStateForTest(): {
-    visible: boolean;
-    gx: number;
-    gy: number;
-    depth: number;
-    displayWidth: number;
-    displayHeight: number;
-  } | null {
-    const marker = this.moveDestinationMarker;
-    if (!marker) return null;
-    return {
-      visible: marker.visible,
-      gx: this.moveDestinationGx,
-      gy: this.moveDestinationGy,
-      depth: marker.depth,
-      displayWidth: marker.displayWidth,
-      displayHeight: marker.displayHeight,
-    };
   }
 
   /** E2e: open land-tile tool modal without walking (layout smoke; skips economy checks). */

@@ -28,11 +28,11 @@ describe('EconomySystem.getLandCost', () => {
 describe('EconomySystem crop sell prices', () => {
   it('returns rebalanced harvest sell prices from ECONOMY.sell', () => {
     const economy = new EconomySystem(0);
-    expect(economy.getSellPrice(ITEM_IDS.WHEAT)).toBe(45);
-    expect(economy.getSellPrice(ITEM_IDS.CORN)).toBe(70);
-    expect(economy.getSellPrice(ITEM_IDS.CARROT)).toBe(85);
-    expect(economy.getSellPrice(ITEM_IDS.TOMATO)).toBe(105);
-    expect(economy.getSellPrice(ITEM_IDS.PUMPKIN)).toBe(175);
+    expect(economy.getSellPrice(ITEM_IDS.WHEAT)).toBe(9);
+    expect(economy.getSellPrice(ITEM_IDS.CORN)).toBe(14);
+    expect(economy.getSellPrice(ITEM_IDS.CARROT)).toBe(17);
+    expect(economy.getSellPrice(ITEM_IDS.TOMATO)).toBe(21);
+    expect(economy.getSellPrice(ITEM_IDS.PUMPKIN)).toBe(35);
   });
 
   it('getResourceSellPrice matches harvest item ids', () => {

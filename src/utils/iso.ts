@@ -45,29 +45,6 @@ export const WATER_TOP_BORDER_MEO_SCALE = 1.3;
 export const WATER_BOTTOM_BORDER_SIZE_SCALE = WATER_TOP_BORDER_SIZE_SCALE;
 export const WATER_BOTTOM_BORDER_MEO_SCALE = WATER_TOP_BORDER_MEO_SCALE;
 
-/** Walk-to / farm-tap destination pin (ui/coming.png is high-res; always scale down). */
-export const MOVE_DESTINATION_MARKER_MAX_PX = TILE_WIDTH * 0.55;
-
-/**
- * Fraction from diamond bottom toward center for walk destination pin anchor (origin 0.5, 1).
- * 0 = feet at bottom vertex; 1 = feet at geometric center.
- */
-export const MOVE_DESTINATION_MARKER_TILE_LIFT = 0.3;
-
-/** Pin anchor between tile bottom and center (see {@link MOVE_DESTINATION_MARKER_TILE_LIFT}). */
-export function moveDestinationMarkerPositionFromTop(top: { x: number; y: number }): {
-  x: number;
-  y: number;
-} {
-  const bottom = tileBottomFromTop(top);
-  const center = tileCenterFromTop(top);
-  const t = MOVE_DESTINATION_MARKER_TILE_LIFT;
-  return {
-    x: bottom.x + (center.x - bottom.x) * t,
-    y: bottom.y + (center.y - bottom.y) * t,
-  };
-}
-
 /** Target on-screen sizes (tiles/crops use exact diamond footprint; others may aspect-fit) */
 export const DISPLAY_SIZE = {
   tileW: TILE_WIDTH,

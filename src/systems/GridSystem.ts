@@ -16,7 +16,6 @@ import {
 import {
   cartToIso,
   isoDepth,
-  moveDestinationMarkerPositionFromTop,
   pickIsoTileAt,
   tileBottomFromTop,
   tileCenterFromGrid,
@@ -343,11 +342,6 @@ export class GridSystem {
   /** Diamond bottom vertex (crops, decorations, buildings — not player) */
   gridToTileBottom(gx: number, gy: number): { x: number; y: number } {
     return tileBottomFromTop(this.gridToScreen(gx, gy));
-  }
-
-  /** Walk destination pin: lerp(bottom, center, {@link MOVE_DESTINATION_MARKER_TILE_LIFT}) */
-  gridToMoveDestinationMarker(gx: number, gy: number): { x: number; y: number } {
-    return moveDestinationMarkerPositionFromTop(this.gridToScreen(gx, gy));
   }
 
   /** World-space pick using isometric diamond hit test (matches top-vertex tile sprites). */

@@ -136,11 +136,11 @@ export const FOOD_BUY_PRICES: Record<string, number> = {
 
 /** Resource sell prices (coins per unit) */
 export const RESOURCE_SELL_PRICES: Record<string, number> = {
-  [ITEM_IDS.WHEAT]: 45,
-  [ITEM_IDS.CORN]: 70,
-  [ITEM_IDS.CARROT]: 85,
-  [ITEM_IDS.TOMATO]: 105,
-  [ITEM_IDS.PUMPKIN]: 175,
+  [ITEM_IDS.WHEAT]: 9,
+  [ITEM_IDS.CORN]: 14,
+  [ITEM_IDS.CARROT]: 17,
+  [ITEM_IDS.TOMATO]: 21,
+  [ITEM_IDS.PUMPKIN]: 35,
 };
 
 /** Energy restored when consuming food from inventory */

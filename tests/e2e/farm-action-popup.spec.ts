@@ -289,22 +289,4 @@ test.describe('Farm action popup — laptop viewport', () => {
       2
     );
   });
-
-  test('walk destination marker scales on unlocked farm soil', async ({ page }) => {
-    await waitForGame(page);
-
-    const marker = await page.evaluate(() => {
-      window.__FARMER_WORLD_TEST__?.showMoveDestinationMarker(7, 9);
-      return window.__FARMER_WORLD_TEST__?.getMoveDestinationMarkerState();
-    });
-
-    expect(marker).not.toBeNull();
-    expect(marker!.visible).toBe(true);
-    expect(marker!.gx).toBe(7);
-    expect(marker!.gy).toBe(9);
-    expect(marker!.displayWidth).toBeGreaterThan(20);
-    expect(marker!.displayWidth).toBeLessThan(80);
-    expect(marker!.displayHeight).toBeGreaterThan(20);
-    expect(marker!.displayHeight).toBeLessThan(80);
-  });
 });

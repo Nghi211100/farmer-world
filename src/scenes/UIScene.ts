@@ -15,12 +15,14 @@ import type { EconomySystem } from '../systems/EconomySystem';
 import type { EnergySystem } from '../systems/EnergySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { BuildingData } from '../config/gameConfig';
+import type { AnimalType } from '../config/LivestockConfig';
 
 interface GameRefs {
   inventory: InventorySystem;
   economy: EconomySystem;
   energy: EnergySystem;
   getHud: () => HUDResources;
+  canPurchaseLivestock?: (animalType: AnimalType) => { ok: boolean; message: string };
 }
 
 export class UIScene extends Phaser.Scene {
@@ -61,7 +63,14 @@ export class UIScene extends Phaser.Scene {
     this.events.on('test-menu', (action: MenuAction) => this.handleMenu(action));
 
     this.buildPanel.setOnSelect((item) => {
-      this.scene.get('FarmScene').events.emit('build-select', item);
+      const farm = this.scene.get('FarmScene');
+      if ('kind' in item && item.kind === 'upgrade') {
+        farm.events.emit('livestock-pen-upgrade');
+      } else if ('placeTarget' in item) {
+        farm.events.emit('livestock-pen-place', item);
+      } else {
+        farm.events.emit('build-select', item);
+      }
       this.buildPanel.hide();
     });
 
@@ -76,7 +85,10 @@ export class UIScene extends Phaser.Scene {
 
     const requestSave = () => farm.events.emit('request-save');
 
-    this.shopPanel.setOnBuy(() => {
+    this.shopPanel.setOnBuy((result) => {
+      if (result.livestockAnimal) {
+        farm.events.emit('shop-livestock-stock', result.livestockAnimal);
+      }
       refreshHud();
       requestSave();
     });
@@ -167,6 +179,9 @@ export class UIScene extends Phaser.Scene {
   /** Called when FarmScene (re)sends register-game after UIScene is listening. */
   bindGameRefs(refs: GameRefs): void {
     this.gameRefs = refs;
+    if (refs.canPurchaseLivestock) {
+      this.shopPanel.setLivestockPurchaseGate(refs.canPurchaseLivestock);
+    }
     this.topHUD.update(refs.getHud());
   }
 

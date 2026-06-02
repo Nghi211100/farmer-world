@@ -153,6 +153,132 @@ export function tileBottomFromTop(top: { x: number; y: number }): { x: number; y
   return { x: top.x, y: top.y + TILE_HEIGHT };
 }
 
+/** Screen AABB of an N×M block of iso tiles (anchor = top-left grid cell). */
+export interface IsoFootprintScreenBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+  centerX: number;
+  bottomY: number;
+}
+
+/** N/E/S/W apexes of an N×M iso tile block (outer rhombus, not axis-aligned AABB). */
+export type IsoScreenRhombus = {
+  north: { x: number; y: number };
+  east: { x: number; y: number };
+  south: { x: number; y: number };
+  west: { x: number; y: number };
+  center: { x: number; y: number };
+};
+
+/** Outer iso rhombus for a rectangular grid footprint (anchor = top-left cell). */
+export function isoRectFootprintScreenRhombus(
+  anchorGx: number,
+  anchorGy: number,
+  tilesW: number,
+  tilesH: number,
+  originX = 0,
+  originY = 0
+): IsoScreenRhombus {
+  const gx0 = anchorGx;
+  const gy0 = anchorGy;
+  const gx1 = anchorGx + tilesW - 1;
+  const gy1 = anchorGy + tilesH - 1;
+  const northTop = cartToIso(gx0, gy0, originX, originY);
+  const eastTop = cartToIso(gx1, gy0, originX, originY);
+  const southTop = cartToIso(gx1, gy1, originX, originY);
+  const westTop = cartToIso(gx0, gy1, originX, originY);
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  return {
+    north: { x: northTop.x, y: northTop.y },
+    east: { x: eastTop.x + hw, y: eastTop.y + hh },
+    south: tileBottomFromTop(southTop),
+    west: { x: westTop.x - hw, y: westTop.y + hh },
+    center: tileCenterFromGrid(
+      anchorGx + (tilesW - 1) / 2,
+      anchorGy + (tilesH - 1) / 2,
+      originX,
+      originY
+    ),
+  };
+}
+
+export function isoRectFootprintScreenBounds(
+  anchorGx: number,
+  anchorGy: number,
+  tilesW: number,
+  tilesH: number,
+  originX = 0,
+  originY = 0
+): IsoFootprintScreenBounds {
+  const corners: [number, number][] = [
+    [anchorGx, anchorGy],
+    [anchorGx + tilesW - 1, anchorGy],
+    [anchorGx, anchorGy + tilesH - 1],
+    [anchorGx + tilesW - 1, anchorGy + tilesH - 1],
+  ];
+  const hw = TILE_WIDTH / 2;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [gx, gy] of corners) {
+    const top = cartToIso(gx, gy, originX, originY);
+    const bottom = tileBottomFromTop(top);
+    minX = Math.min(minX, top.x - hw);
+    maxX = Math.max(maxX, top.x + hw);
+    minY = Math.min(minY, top.y);
+    maxY = Math.max(maxY, bottom.y);
+  }
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+    centerX: (minX + maxX) / 2,
+    bottomY: maxY,
+  };
+}
+
+export type IsoFootprintFitMode = 'contain' | 'cover';
+
+/**
+ * Uniform scale into iso footprint AABB. **contain** (default for pens) keeps art inside the
+ * magenta debug footprint like map tiles in cells. Origin: bottom-center on footprint bottom.
+ */
+export function fitSpriteToIsoFootprint(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  footprintWidth: number,
+  footprintHeight: number,
+  mode: IsoFootprintFitMode = 'contain'
+): void {
+  const fw = sprite.frame.width;
+  const fh = sprite.frame.height;
+  if (fw <= 0 || fh <= 0) return;
+  const scale = computeSpriteFitScale(fw, fh, footprintWidth, footprintHeight, mode);
+  sprite.setDisplaySize(fw * scale, fh * scale);
+}
+
+/** Uniform scale for maxW×maxH. contain = inside; cover = fill (touch both edges). */
+export function computeSpriteFitScale(
+  frameW: number,
+  frameH: number,
+  maxW: number,
+  maxH: number,
+  mode: IsoFootprintFitMode = 'contain'
+): number {
+  if (frameW <= 0 || frameH <= 0) return 1;
+  const scaleW = maxW / frameW;
+  const scaleH = maxH / frameH;
+  return mode === 'cover' ? Math.max(scaleW, scaleH) : Math.min(scaleW, scaleH);
+}
+
 /** Trace a 2:1 diamond path from its top vertex */
 function traceIsoDiamondPath(graphics: Phaser.GameObjects.Graphics, topX: number, topY: number): void {
   const hw = TILE_WIDTH / 2;
@@ -178,6 +304,36 @@ export function fillIsoTileDiamond(
   graphics.fillPath();
 }
 
+/** Magenta dashed outlines for livestock pen footprint cells (distinct from soil/map debug). */
+export const ISO_PEN_FOOTPRINT_DEBUG_COLOR = 0xff44cc;
+
+function strokeDashedLine(
+  graphics: Phaser.GameObjects.Graphics,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  dash = 6,
+  gap = 4
+): void {
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  if (len <= 0) return;
+  const steps = Math.max(1, Math.floor(len / (dash + gap)));
+  for (let i = 0; i < steps; i++) {
+    const t0 = (i * (dash + gap)) / len;
+    const t1 = Math.min(1, (i * (dash + gap) + dash) / len);
+    if (t1 <= t0) continue;
+    graphics.strokeLineShape(
+      new Phaser.Geom.Line(
+        x1 + (x2 - x1) * t0,
+        y1 + (y2 - y1) * t0,
+        x1 + (x2 - x1) * t1,
+        y1 + (y2 - y1) * t1
+      )
+    );
+  }
+}
+
 /** Draw a 2:1 diamond outline for debug verification (all tiles) */
 export function drawIsoTileDebug(
   graphics: Phaser.GameObjects.Graphics,
@@ -189,6 +345,55 @@ export function drawIsoTileDebug(
   graphics.lineStyle(1, color, alpha);
   traceIsoDiamondPath(graphics, topX, topY);
   graphics.strokePath();
+}
+
+/** Dashed outline along an iso tile-block rhombus (farm soil / path ring debug). */
+export function drawIsoRhombusDebugDashed(
+  graphics: Phaser.GameObjects.Graphics,
+  rhombus: IsoScreenRhombus,
+  color: number,
+  alpha = 0.95,
+  dash = 8,
+  gap = 5,
+  lineWidth = 2
+): void {
+  const pts: [number, number][] = [
+    [rhombus.north.x, rhombus.north.y],
+    [rhombus.east.x, rhombus.east.y],
+    [rhombus.south.x, rhombus.south.y],
+    [rhombus.west.x, rhombus.west.y],
+    [rhombus.north.x, rhombus.north.y],
+  ];
+  graphics.lineStyle(lineWidth, color, alpha);
+  for (let i = 0; i < 4; i++) {
+    strokeDashedLine(graphics, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], dash, gap);
+  }
+}
+
+/** Dashed iso diamond for livestock pen footprint debug (`?debugGrid=1`). */
+export function drawIsoTileDebugDashed(
+  graphics: Phaser.GameObjects.Graphics,
+  topX: number,
+  topY: number,
+  color = ISO_PEN_FOOTPRINT_DEBUG_COLOR,
+  alpha = 0.95,
+  dash = 6,
+  gap = 4,
+  lineWidth = 1.5
+): void {
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  const pts: [number, number][] = [
+    [topX, topY],
+    [topX + hw, topY + hh],
+    [topX, topY + TILE_HEIGHT],
+    [topX - hw, topY + hh],
+    [topX, topY],
+  ];
+  graphics.lineStyle(lineWidth, color, alpha);
+  for (let i = 0; i < 4; i++) {
+    strokeDashedLine(graphics, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], dash, gap);
+  }
 }
 
 /** Red semi-transparent fill + stroke for last pointer pick (click debug) */

@@ -69,7 +69,7 @@ export function placePopupAboveTile(
   const bottomInset = opts.bottomInset ?? HUD_BOTTOM;
   const gapPx = opts.aboveOffsetPx ?? 12;
 
-  const top = grid.gridToScreen(gx, gy);
+  const top = grid.gridToMapScreen(gx, gy);
   const anchorY = opts.anchorTop ? top.y : top.y + TILE_HEIGHT / 2;
   const { x: tileX, y: tileY } = worldToUiScreen(cam, top.x, anchorY);
 

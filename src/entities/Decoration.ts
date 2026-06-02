@@ -17,7 +17,7 @@ export class Decoration {
   ) {
     this.gridX = gx;
     this.gridY = gy;
-    const foot = grid.gridToTileBottom(gx, gy);
+    const foot = grid.gridToMapTileBottom(gx, gy);
     this.sprite = scene.add.sprite(foot.x, foot.y, textureKey);
     this.sprite.setOrigin(0.5, 1);
     const isTree = textureKey.startsWith('tree');
@@ -38,9 +38,13 @@ export function renderMapDecorations(
   for (let y = 0; y < grid.size; y++) {
     for (let x = 0; x < grid.size; x++) {
       const cell = grid.getCell(x, y);
-      if (cell?.object && !cell.object.includes('house') && !cell.object.includes('barn')) {
-        decorations.push(new Decoration(scene, grid, x, y, cell.object));
-      }
+      const objectId = cell?.object;
+      if (!objectId) continue;
+      // Buildings and pen occupancy markers are not map decor (no texture / rendered elsewhere).
+      if (objectId.includes('house') || objectId.includes('barn')) continue;
+      if (objectId.startsWith('livestock_pen_')) continue;
+      if (!scene.textures.exists(objectId)) continue;
+      decorations.push(new Decoration(scene, grid, x, y, objectId));
     }
   }
   return decorations;

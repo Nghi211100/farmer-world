@@ -1,10 +1,17 @@
 import type { BuildingData } from '../config/gameConfig';
+import {
+  getLivestockPenTextureKeyForPen,
+  type LivestockPenData,
+} from '../config/LivestockConfig';
+import { penFootprintTiles } from '../config/livestockAssets';
 import type { BuildSystem } from './BuildSystem';
 import type { GridSystem } from './GridSystem';
+import type { LivestockSystem } from './LivestockSystem';
 
 export type EditableObject =
   | { kind: 'building'; building: BuildingData }
-  | { kind: 'natural'; textureKey: string };
+  | { kind: 'natural'; textureKey: string }
+  | { kind: 'pen'; pen: LivestockPenData };
 
 export type MoveSession = {
   originGx: number;
@@ -12,7 +19,7 @@ export type MoveSession = {
   payload: EditableObject;
 };
 
-/** Move/remove editing for placed buildings and map naturals (trees, rocks, bushes). */
+/** Move/remove editing for buildings, map naturals, and livestock pens. */
 export class ObjectEditSystem {
   active = false;
   previewLocked = false;
@@ -22,10 +29,13 @@ export class ObjectEditSystem {
 
   constructor(
     private grid: GridSystem,
-    private build: BuildSystem
+    private build: BuildSystem,
+    private livestock?: LivestockSystem
   ) {}
 
   findEditableAt(gx: number, gy: number): EditableObject | null {
+    const pen = this.livestock?.getPenAt(gx, gy);
+    if (pen) return { kind: 'pen', pen };
     const building = this.build.findBuildingAt(gx, gy);
     if (building) return { kind: 'building', building };
     const cell = this.grid.getCell(gx, gy);
@@ -37,14 +47,18 @@ export class ObjectEditSystem {
 
   canPlaceAt(gx: number, gy: number): boolean {
     if (!this.session) return false;
-    const { originGx, originGy } = this.session;
+    const { originGx, originGy, payload } = this.session;
     if (gx === originGx && gy === originGy) return true;
+    if (payload.kind === 'pen') {
+      return this.livestock?.canMovePenTo(payload.pen, gx, gy) ?? false;
+    }
     return this.build.canPlaceObjectAt(gx, gy);
   }
 
   removeAt(gx: number, gy: number): boolean {
     const obj = this.findEditableAt(gx, gy);
     if (!obj) return false;
+    if (obj.kind === 'pen') return false;
     if (obj.kind === 'building') {
       return this.build.removeBuildingAt(gx, gy);
     }
@@ -54,12 +68,16 @@ export class ObjectEditSystem {
 
   beginMove(gx: number, gy: number): MoveSession | null {
     const payload = this.findEditableAt(gx, gy);
-    if (!payload) return null;
-    this.session = { originGx: gx, originGy: gy, payload };
+    if (!payload || payload.kind === 'pen' && payload.pen.state === 'producing') {
+      return null;
+    }
+    const anchorGx = payload.kind === 'pen' ? payload.pen.gridX : gx;
+    const anchorGy = payload.kind === 'pen' ? payload.pen.gridY : gy;
+    this.session = { originGx: anchorGx, originGy: anchorGy, payload };
     this.active = true;
     this.previewLocked = false;
-    this.ghostX = gx;
-    this.ghostY = gy;
+    this.ghostX = anchorGx;
+    this.ghostY = anchorGy;
     return this.session;
   }
 
@@ -88,6 +106,8 @@ export class ObjectEditSystem {
     const { originGx, originGy, payload } = this.session;
     if (payload.kind === 'building') {
       if (!this.build.moveBuildingTo(originGx, originGy, gx, gy)) return false;
+    } else if (payload.kind === 'pen') {
+      if (!this.livestock?.movePenTo(payload.pen, gx, gy)) return false;
     } else if (gx !== originGx || gy !== originGy) {
       this.grid.clearObject(originGx, originGy);
       this.grid.setObject(gx, gy, payload.textureKey);
@@ -109,12 +129,30 @@ export class ObjectEditSystem {
   ghostTextureKey(): string {
     const session = this.session;
     if (!session) return 'tree_01';
-    return session.payload.kind === 'building'
-      ? session.payload.building.textureKey
-      : session.payload.textureKey;
+    if (session.payload.kind === 'building') {
+      return session.payload.building.textureKey;
+    }
+    if (session.payload.kind === 'pen') {
+      const { pen } = session.payload;
+      return getLivestockPenTextureKeyForPen(pen, pen.level ?? 1);
+    }
+    return session.payload.textureKey;
+  }
+
+  ghostFootprintScale(): number {
+    const session = this.session;
+    if (session?.payload.kind === 'pen') {
+      const size = penFootprintTiles(session.payload.pen.level ?? 1).w;
+      return 0.85 + size * 0.35;
+    }
+    return 1;
   }
 
   isNaturalTexture(textureKey: string): boolean {
     return !textureKey.includes('house') && !textureKey.includes('barn');
+  }
+
+  isPenSession(): boolean {
+    return this.session?.payload.kind === 'pen';
   }
 }

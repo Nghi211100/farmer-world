@@ -1,0 +1,43 @@
+{
+  "targetFraction": 0.03,
+  "tolerancePx": 1,
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "baseline": {
+    "screenshot": "artifacts/left-shift-verify/baseline-debugGrid.png",
+    "metrics": {
+      "panBoundsWidth": 2229,
+      "zoom": 1.7,
+      "expectedPx": 113.67899999999999,
+      "actualPx": -1221.1949999999993,
+      "deltaPx": -1334.8739999999993,
+      "mapCenterScreenX": 2416.141999999999,
+      "footprintCenterScreenX": 1194.9469999999997,
+      "soilFootprintAlignError": 0,
+      "centerAlignErrorPx": 0,
+      "maxTileOutsideAabbPx": 0,
+      "maxSpriteDriftPx": 0
+    }
+  },
+  "current": {
+    "screenshot": "artifacts/left-shift-verify/current-debugGrid.png",
+    "metrics": {
+      "panBoundsWidth": 2229,
+      "zoom": 1.7,
+      "expectedPx": 113.67899999999999,
+      "actualPx": 113.67899999999986,
+      "deltaPx": -1.2789769243681803e-13,
+      "mapCenterScreenX": 1081.2679999999998,
+      "footprintCenterScreenX": 1194.9469999999997,
+      "soilFootprintAlignError": 0,
+      "centerAlignErrorPx": 0,
+      "maxTileOutsideAabbPx": 0,
+      "maxSpriteDriftPx": 0
+    },
+    "pass": true,
+    "soilAlignmentIntact": true
+  },
+  "generatedAt": "2026-06-02T09:39:27.171Z"
+}

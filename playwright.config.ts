@@ -16,5 +16,18 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium-desktop',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } },
+    },
+    {
+      name: 'chromium-phone-portrait',
+      use: { ...devices['Pixel 5'], viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: 'chromium-phone-landscape',
+      use: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, isMobile: true },
+    },
+  ],
 });

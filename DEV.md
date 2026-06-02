@@ -80,6 +80,53 @@ Clears `.capacitor-live-url` automatically.
 | `npm run build:apk:standalone` | Bundle assets, no dev server |
 | `npm run install:apk:live` | Install `app-debug.apk` |
 
+## Farm camera pan bounds vs debug overlays
+
+### What you can drag (pan limits)
+
+Camera drag/zoom clamp uses **`getFarmCameraScrollBounds()`** in `FarmScene` (passed to `computeFarmCameraScrollLimits` / `clampMainCameraScroll`):
+
+| Source | World rect | When |
+|--------|------------|------|
+| **Pan bounds** | `computeFarmIslandScreenBounds(soil rhombus, island.png size, scale boost)` | After `farm_island` image is laid out (normal play) |
+| **Pan bounds (fallback)** | `GridSystem.getFarmFootprintScreenBounds()` | Before island layout / no image |
+| **Not used for pan** | `getMapScreenBounds()` | Full 20×20 logical map — larger than pan bounds; includes outer grass/water |
+| **Not used for pan** | `getFarmFootprintScreenBounds()` alone | Soil + path **tile** ring — smaller than island art; only matches pan bounds when island is absent |
+
+Scroll math (`farmCameraScroll.ts`): keep the pan-bounds AABB inside the HUD **playable band** (`computePlayableFarmViewportLayout`). When island×zoom is wider/taller than the band, `oversize` is true and scroll is clamped between `minScroll` / `maxScroll` on that axis.
+
+Optional camera HUD text: `?debugCamera=1` (scroll/zoom lines, screen-fixed).
+
+### Farm debug grid (`?debugGrid=1` or `?debug=1`)
+
+All **world-space** layers use `scrollFactor(1)` and move with the camera. **Screen-fixed** HUD guides do not.
+
+| Overlay | Color | Space | Meaning |
+|---------|-------|-------|---------|
+| **map 20×20** | Blue grid + thick border + dashed edge + corner ticks | World | `GridSystem.getMapScreenBounds()` — every logical cell; label `WORLD ENDS` on outer edge |
+| **pan bounds** | Orange grid + thick border | World | `getFarmCameraScrollBounds()` — **camera scroll clamp** (island.png AABB when loaded) |
+| **footprint** | Cyan outline only | World | `getFarmFootprintScreenBounds()` — tile soil + path ring inside the island |
+| **background-only (4th zone)** | Screen-fixed hint (bottom-right) | Screen | Viewport shows world outside map and/or outside pan — `ui_background` only (`scrollFactor` 0); **no tile grid** |
+| **viewport / playable HUD** | Blue / yellow outlines | Screen-fixed | Device viewport and HUD clamp band — **not** pan bounds; no tile grid |
+| **Iso diamonds** | Green / faint blue | World | Per-cell iso outlines on the full map |
+
+Redrawn on resize (`handleResize`) and whenever the world is repositioned (`repositionWorld` → `syncFarmDebugOverlays`). The background-only HUD hint updates every frame while `?debugGrid=1`.
+
+Example: `http://localhost:5173/?debugGrid=1`
+
+**Seeing the pan grid:** drag until the island reaches the HUD playable edge; orange **pan bounds** lines extend with the island AABB (wider than the cyan footprint).
+
+### Vùng thứ 4 (không có lưới) — `?debugGrid=1`
+
+Khi **đảo đã load**, pan bounds (cam đảo, ~2229×2229) **bao trọn** map logic 20×20 (~1280×640). Kéo tới mép pan → góc viewport có thể thấy **mây/trời** ngoài viền cam/vàng: đó là **vùng ngoài pan bounds**, đồng thời **ngoài map** — không phải ô cỏ/nước, không có lưới xanh. Chỉ còn `ui_background` (cố định màn hình).
+
+| Vùng | Có lưới? | Ý nghĩa |
+|------|----------|---------|
+| **4a** — trong map, ngoài pan | Lưới xanh (nếu nhìn thấy map) | Chỉ khi pan bounds **nhỏ hơn** map (fallback footprint trước khi có đảo) |
+| **4b** — ngoài map | Không | **Background-only** — thế giới game kết thúc ở viền xanh `WORLD ENDS` |
+
+Pan tới mép → nhãn HUD góc dưới phải: `background-only zone visible (outside map + outside pan bounds)`.
+
 ## Shop modal debug grid
 
 Use query flags to draw shop modal overlays on `shopModalContainer`:

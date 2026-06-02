@@ -18,9 +18,9 @@ const unitRhombus = (): FarmSoilScreenRhombus => ({
 });
 
 describe('farmIslandLayout', () => {
-  it('default offsets are 6% right and 33% down of rhombus spans from center', () => {
-    expect(FARM_ISLAND_OFFSET_X_FRAC).toBe(0.06);
-    expect(FARM_ISLAND_OFFSET_Y_FRAC).toBe(0.33);
+  it('island art is centered on soil rhombus (no extra HUD offset)', () => {
+    expect(FARM_ISLAND_OFFSET_X_FRAC).toBe(0);
+    expect(FARM_ISLAND_OFFSET_Y_FRAC).toBe(0);
     expect(FARM_ISLAND_SCALE_BOOST).toBe(4.345);
   });
 
@@ -66,10 +66,7 @@ describe('farmIslandLayout', () => {
     layoutFarmIslandImage(image, rhombus, texW, texH, { scaleBoost: boost });
 
     expect(image.setOrigin).toHaveBeenCalledWith(0.5, 0.5);
-    expect(image.setPosition).toHaveBeenCalledWith(
-      rhombus.center.x + spanW * FARM_ISLAND_OFFSET_X_FRAC,
-      rhombus.center.y + spanH * FARM_ISLAND_OFFSET_Y_FRAC
-    );
+    expect(image.setPosition).toHaveBeenCalledWith(rhombus.center.x, rhombus.center.y);
     expect(image.setScrollFactor).toHaveBeenCalledWith(1);
     expect(image.setDisplaySize).toHaveBeenCalledWith(expected.displayW, expected.displayH);
   });

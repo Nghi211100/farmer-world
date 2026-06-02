@@ -1,5 +1,21 @@
 import Phaser from 'phaser';
 import { BUILD_ITEMS, type BuildItemDef } from '../systems/BuildSystem';
+import {
+  LIVESTOCK_PEN_PLACE_ITEMS,
+  LIVESTOCK_UPGRADE_ITEM,
+  type LivestockPenPlaceItemDef,
+} from '../systems/LivestockSystem';
+
+export type LivestockUpgradeItemDef = typeof LIVESTOCK_UPGRADE_ITEM;
+export type BuildPanelItem = BuildItemDef | LivestockPenPlaceItemDef | LivestockUpgradeItemDef;
+
+function isLivestockPenPlaceItem(item: BuildPanelItem): item is LivestockPenPlaceItemDef {
+  return 'placeTarget' in item;
+}
+
+export function isLivestockUpgradeItem(item: BuildPanelItem): item is LivestockUpgradeItemDef {
+  return 'kind' in item && item.kind === 'upgrade';
+}
 import { HUD_MODAL_DEPTH } from './BottomMenu';
 import {
   BUILD_TABS,
@@ -50,7 +66,7 @@ interface BuildCardNodes {
   lockOverlay: Phaser.GameObjects.Rectangle;
   lockedText: Phaser.GameObjects.Text;
   hit: Phaser.GameObjects.Rectangle;
-  item: BuildItemDef;
+  item: BuildPanelItem;
 }
 
 function drawRoundedPanel(
@@ -102,7 +118,7 @@ export class BuildPanel {
   private playerLevel = 99;
   private viewportW: number;
   private viewportH: number;
-  private onSelect?: (item: BuildItemDef) => void;
+  private onSelect?: (item: BuildPanelItem) => void;
 
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.viewportW = width;
@@ -218,7 +234,7 @@ export class BuildPanel {
     if (this.visible) this.refreshCardLockStates();
   }
 
-  setOnSelect(cb: (item: BuildItemDef) => void): void {
+  setOnSelect(cb: (item: BuildPanelItem) => void): void {
     this.onSelect = cb;
   }
 
@@ -434,7 +450,8 @@ export class BuildPanel {
     this.updateCardVisibility();
   }
 
-  private itemsForActiveTab(): BuildItemDef[] {
+  private itemsForActiveTab(): BuildPanelItem[] {
+    if (this.activeTab === 'livestock') return [...LIVESTOCK_PEN_PLACE_ITEMS, LIVESTOCK_UPGRADE_ITEM];
     return BUILD_ITEMS.filter((item) => item.category === this.activeTab);
   }
 
@@ -507,7 +524,8 @@ export class BuildPanel {
     this.refreshCardLockStates();
   }
 
-  private isItemLocked(item: BuildItemDef): boolean {
+  private isItemLocked(item: BuildPanelItem): boolean {
+    if (isLivestockPenPlaceItem(item) || isLivestockUpgradeItem(item)) return false;
     const req = item.requiredLevel;
     return req !== undefined && this.playerLevel < req;
   }
@@ -516,7 +534,12 @@ export class BuildPanel {
     for (const { root, item, lockOverlay, lockedText } of this.cardNodes) {
       const locked = this.isItemLocked(item);
       lockOverlay.setVisible(locked);
-      if (locked && item.requiredLevel !== undefined) {
+      if (
+        locked &&
+        !isLivestockPenPlaceItem(item) &&
+        !isLivestockUpgradeItem(item) &&
+        item.requiredLevel !== undefined
+      ) {
         lockedText.setText(`Required\nlevel ${item.requiredLevel}`);
         lockedText.setVisible(true);
       } else {

@@ -24,7 +24,7 @@ export interface FarmerWorldTestApi {
   isShopOpen: () => boolean;
   isBuildOpen: () => boolean;
   getBuildCardLabels: () => string[] | null;
-  setBuildTab: (tab: 'buildings' | 'decor') => void;
+  setBuildTab: (tab: 'buildings' | 'decor' | 'livestock') => void;
   getWarehouseTitle: () => string | null;
   getShopTitle: () => string | null;
   isShopPageLabelVisible: () => boolean | null;
@@ -225,6 +225,28 @@ export interface FarmerWorldTestApi {
     targetCenterY: number;
     errorX: number;
     errorY: number;
+    geomCenterX: number;
+    geomCenterY: number;
+    geomErrorX: number;
+    geomErrorY: number;
+    panBoundsCenterX: number;
+    panBoundsCenterY: number;
+    panBoundsWidth: number;
+    panBoundsErrorX: number;
+    panBoundsErrorY: number;
+    mapTopScreenY: number;
+    mapTopTargetScreenY: number;
+    mapTopErrorY: number;
+    panBoundsTopScreenY: number;
+    mapTopAbovePanPx: number;
+    playableLeft: number;
+    playableRight: number;
+    playableTop: number;
+    playableBottom: number;
+    marginLeft: number;
+    marginRight: number;
+    marginTop: number;
+    marginBottom: number;
   } | null;
   getFarmCameraScrollLimits: () => {
     x: { minScroll: number; maxScroll: number; oversize: boolean };
@@ -233,6 +255,13 @@ export interface FarmerWorldTestApi {
   panFarmCamera: (dxScreen: number, dyScreen: number) => void;
   setFarmCameraZoom: (zoom: number, anchorScreenX?: number, anchorScreenY?: number) => void;
   simulateFarmCameraResizeLayout: () => void;
+  getSoilFootprintAlignMetrics: () => {
+    soilGridRange: { minX: number; maxX: number; minY: number; maxY: number };
+    centerAlignErrorPx: number;
+    maxTileOutsideAabbPx: number;
+    maxSpriteDriftPx: number;
+    soilFootprintAlignError: number;
+  } | null;
   getFarmViewportDebugMetrics: () => {
     scaleW: number;
     scaleH: number;
@@ -259,6 +288,8 @@ export interface FarmerWorldTestApi {
   } | null;
   /** Dev: force neglect-dry on a tilled plot (gx, gy) for soil moisture visuals. */
   forceSoilIdleDryAt: (gx: number, gy: number) => boolean;
+  /** Dev/e2e: override full map-layer X offset (world units). */
+  setMapTopPanOffsetX: (offsetX: number) => void;
 }
 
 declare global {
@@ -605,8 +636,13 @@ export function installGameTestApi(game: Phaser.Game): void {
     simulateFarmCameraResizeLayout: () => {
       getFarmScene(game)?.simulateFarmCameraResizeLayoutForTest();
     },
+    getSoilFootprintAlignMetrics: () =>
+      getFarmScene(game)?.getSoilFootprintAlignMetricsForTest() ?? null,
     getFarmViewportDebugMetrics: () =>
       getFarmScene(game)?.getFarmViewportDebugMetricsForTest() ?? null,
+    setMapTopPanOffsetX: (offsetX: number) => {
+      getFarmScene(game)?.setMapTopPanOffsetXForTest(offsetX);
+    },
     forceSoilIdleDryAt: (gx: number, gy: number) =>
       getFarmScene(game)?.forceSoilIdleDryForTest(gx, gy) ?? false,
   };

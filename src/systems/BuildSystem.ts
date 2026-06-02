@@ -53,8 +53,14 @@ export class BuildSystem {
   ghostY = 0;
   private buildings: BuildingData[] = [];
   private onChange?: () => void;
+  private placementBlocked?: (gx: number, gy: number) => boolean;
 
   constructor(private grid: GridSystem) {}
+
+  /** Extra collision (e.g. livestock pens). */
+  setPlacementBlocked(fn: (gx: number, gy: number) => boolean): void {
+    this.placementBlocked = fn;
+  }
 
   setOnChange(cb: () => void): void {
     this.onChange = cb;
@@ -110,6 +116,7 @@ export class BuildSystem {
     if (!cell || !cell.walkable || cell.object) return false;
     if (cell.type === 'water' || cell.type === 'path') return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    if (this.placementBlocked?.(gx, gy)) return false;
     return true;
   }
 

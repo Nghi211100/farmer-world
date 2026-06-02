@@ -48,29 +48,32 @@ export class ObjectEditPopup {
     this.onDismiss = cb;
   }
 
-  show(gx: number, gy: number): void {
+  show(gx: number, gy: number, options?: { hideRemove?: boolean }): void {
     this.hide(false);
     this.tileGx = gx;
     this.tileGy = gy;
 
-    const halfGap = BTN_GAP / 2;
-    const moveBtn = this.createButton(
-      -BTN_SIZE / 2 - halfGap,
-      UI_OBJECT_MOVE_TEXTURE_KEY,
-      () => {
-        this.fireAction('move');
-      }
-    );
-    const removeBtn = this.createButton(
-      BTN_SIZE / 2 + halfGap,
-      UI_OBJECT_REMOVE_TEXTURE_KEY,
-      () => {
-        this.fireAction('remove');
-      }
-    );
+    const moveBtn = this.createButton(0, UI_OBJECT_MOVE_TEXTURE_KEY, () => {
+      this.fireAction('move');
+    });
+    this.hitTargets = [moveBtn.hit, moveBtn.root];
+    const children: Phaser.GameObjects.GameObject[] = [moveBtn.hit, moveBtn.root];
 
-    this.hitTargets = [moveBtn.hit, moveBtn.root, removeBtn.hit, removeBtn.root];
-    this.container.add([moveBtn.hit, moveBtn.root, removeBtn.hit, removeBtn.root]);
+    if (!options?.hideRemove) {
+      const halfGap = BTN_GAP / 2;
+      moveBtn.root.setX(-BTN_SIZE / 2 - halfGap);
+      const removeBtn = this.createButton(
+        BTN_SIZE / 2 + halfGap,
+        UI_OBJECT_REMOVE_TEXTURE_KEY,
+        () => {
+          this.fireAction('remove');
+        }
+      );
+      this.hitTargets.push(removeBtn.hit, removeBtn.root);
+      children.push(removeBtn.hit, removeBtn.root);
+    }
+
+    this.container.add(children);
 
     this.layout();
     this.container.setVisible(true);

@@ -1,5 +1,6 @@
-import { ECONOMY, type CropKind } from '../config/gameConfig';
+import { ECONOMY, landUnlockCostForPurchaseIndex, type CropKind } from '../config/gameConfig';
 import { getCropDef } from '../config/CropConfig';
+import { getShopLivestockPrice } from '../config/shopLivestock';
 
 export class EconomySystem {
   private coins: number;
@@ -48,9 +49,9 @@ export class EconomySystem {
     return ECONOMY.food[itemId] ?? 0;
   }
 
-  /** Seed or food shop buy price */
+  /** Seed, food, or livestock shop buy price */
   getShopPrice(itemId: string): number {
-    return this.getSeedPrice(itemId) || this.getFoodPrice(itemId);
+    return this.getSeedPrice(itemId) || this.getFoodPrice(itemId) || getShopLivestockPrice(itemId);
   }
 
   getSellPrice(itemId: string): number {
@@ -64,8 +65,7 @@ export class EconomySystem {
   }
 
   getLandCost(): number {
-    const { baseCost, costMultiplier } = ECONOMY.land;
-    return Math.floor(baseCost * Math.pow(costMultiplier, this.landPurchases));
+    return landUnlockCostForPurchaseIndex(this.landPurchases);
   }
 
   purchaseLand(): number | null {

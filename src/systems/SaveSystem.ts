@@ -11,6 +11,7 @@ import {
   type CropTileData,
 } from '../config/gameConfig';
 import type { BuildingData } from '../config/gameConfig';
+import type { LivestockPenData } from '../config/LivestockConfig';
 import type { GridSystem } from './GridSystem';
 import type { FarmingSystem } from './FarmingSystem';
 import { SaveMigrationHelper } from './FarmingSystem';
@@ -34,7 +35,8 @@ export class SaveSystem {
     farming: FarmingSystem,
     buildings: BuildingData[],
     inventory: InventorySystem,
-    grid: GridSystem
+    grid: GridSystem,
+    livestock: LivestockPenData[] = []
   ): void {
     farming.tickAll(Date.now());
     const wh = inventory.getWarehouseExport();
@@ -49,6 +51,7 @@ export class SaveSystem {
       seeds: wh.seeds,
       crops: farming.exportCrops(),
       buildings,
+      livestock,
       landPurchases: state.landPurchases,
       selectedSeed: state.selectedSeed,
       selectedTool: state.selectedTool,
@@ -194,6 +197,7 @@ export class SaveSystem {
         ...b,
         level: b.level ?? 1,
       })),
+      livestock: data.livestock ?? [],
       warehouse: data.warehouse ?? {},
       seeds: data.seeds ?? {},
       warehouseLevel: data.warehouseLevel ?? 1,

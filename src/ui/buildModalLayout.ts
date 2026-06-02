@@ -7,11 +7,12 @@ export const BUILD_MODAL_COMPACT_MAX_HEIGHT = 120;
 /** Item cards visible in the horizontal scroll viewport at once. */
 export const BUILD_MODAL_VISIBLE_CARD_SLOTS = 5;
 
-export type BuildTabId = 'buildings' | 'decor';
+export type BuildTabId = 'buildings' | 'decor' | 'livestock';
 
 export const BUILD_TABS: ReadonlyArray<{ id: BuildTabId; label: string }> = [
   { id: 'buildings', label: 'Buildings' },
   { id: 'decor', label: 'Decor' },
+  { id: 'livestock', label: 'Chăn nuôi' },
 ];
 
 export interface BuildModalLayout {

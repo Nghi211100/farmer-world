@@ -1,4 +1,5 @@
 import type { CropId } from './CropConfig';
+import type { LivestockPenData } from './LivestockConfig';
 
 /** Max internal game resolution; canvas FIT-scales down on larger viewports (letterbox in CSS). */
 export const MAX_GAME_WIDTH = 1492;
@@ -9,7 +10,18 @@ export const GRID_SIZE = 20;
 export const INITIAL_UNLOCKED_FARM_TILES = 10;
 /** Starting economy for a brand-new save (no existing localStorage save). */
 export const DEFAULT_COINS = 500;
+/** Cost of the first purchasable soil tile (prior purchases = 0). */
 export const LAND_UNLOCK_COST = 2000;
+
+/**
+ * Land unlock cost for the next purchase after `priorPurchases` completed buys.
+ * Geometric progression: round(base × multiplier^priorPurchases) → 2000, 3000, 4500, …
+ */
+export function landUnlockCostForPurchaseIndex(priorPurchases: number): number {
+  const { baseCost, costMultiplier } = ECONOMY.land;
+  const n = Math.max(0, priorPurchases);
+  return Math.round(baseCost * costMultiplier ** n);
+}
 
 export function canAffordLandUnlock(coins: number, cost: number): boolean {
   return coins >= cost;
@@ -179,8 +191,9 @@ export function isDebugMode(): boolean {
 }
 
 /**
- * Farm map iso tile outlines for border/water debugging.
- * Off by default; enable with `?debugGrid=1` (or global `?debug=1`).
+ * Farm debug overlays. Off by default; enable with `?debugGrid=1` (or global `?debug=1`).
+ * - World-space full map grid + iso tile outlines (GRID_SIZE²; grass/water/moat included)
+ * - Screen-fixed viewport HUD outlines ({@link computePlayableFarmViewportLayout})
  */
 export function isFarmGridDebug(): boolean {
   if (isDebugMode()) return true;
@@ -282,7 +295,13 @@ export {
   isShopBuyable,
 } from './items';
 export type { ItemId } from './items';
-import { ITEM_IDS, FOOD_BUY_PRICES, RESOURCE_SELL_PRICES, SEED_BUY_PRICES } from './items';
+import {
+  ITEM_IDS,
+  FOOD_BUY_PRICES,
+  LIVESTOCK_SELL_PRICES,
+  RESOURCE_SELL_PRICES,
+  SEED_BUY_PRICES,
+} from './items';
 
 /** Warehouse capacity = total item count across all stacks (not unique types). */
 export const WAREHOUSE = {
@@ -325,7 +344,8 @@ export const ECONOMY = {
   sell: RESOURCE_SELL_PRICES,
   land: {
     baseCost: 2000,
-    costMultiplier: 1.22,
+    /** Per prior purchase multiplier (2nd unlock = round(2000 × 1.5) = 3000). */
+    costMultiplier: 1.5,
   },
   buildingUpgrade: {
     house: [0, 75, 200],
@@ -333,6 +353,7 @@ export const ECONOMY = {
     tree: [0, 0, 0],
   } as Record<BuildingType, [number, number, number]>,
   maxBuildingLevel: 3,
+  livestock: LIVESTOCK_SELL_PRICES,
 };
 
 export const SEED_TO_CROP: Record<string, CropKind> = {
@@ -366,6 +387,8 @@ export interface GameSaveData {
   inventory?: Record<string, number>;
   crops: Record<string, CropTileData>;
   buildings: BuildingData[];
+  /** Livestock pens (optional — absent on older saves). */
+  livestock?: LivestockPenData[];
   landPurchases: number;
   selectedSeed?: string;
   selectedTool?: FarmTool;

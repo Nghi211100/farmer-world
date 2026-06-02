@@ -28,6 +28,29 @@ export type FarmCameraScrollLimits = {
   y: FarmScrollAxisLimits;
 };
 
+/** Geometric center of a farm/island screen AABB (world space, pre-scroll). */
+export function farmFootprintCenter(farm: FarmFootprintBounds): { x: number; y: number } {
+  return {
+    x: (farm.minX + farm.maxX) / 2,
+    y: (farm.minY + farm.maxY) / 2,
+  };
+}
+
+/** Visible gaps between farm footprint screen AABB and playable band edges (pixels). */
+export function computeFarmPlayableScreenMargins(
+  farm: FarmFootprintBounds,
+  playable: PlayableBandRect,
+  scrollX: number,
+  scrollY: number,
+  zoom: number
+): { left: number; right: number; top: number; bottom: number } {
+  const left = (farm.minX - scrollX) * zoom - playable.playableLeft;
+  const right = playable.playableRight - (farm.maxX - scrollX) * zoom;
+  const top = (farm.minY - scrollY) * zoom - playable.playableTop;
+  const bottom = playable.playableBottom - (farm.maxY - scrollY) * zoom;
+  return { left, right, top, bottom };
+}
+
 /**
  * Scroll limits so the farm footprint stays inside the HUD playable band.
  * screen = (world − scroll) × zoom ⇒ scroll = world − screen/zoom.
@@ -81,26 +104,51 @@ export function clampScrollToFarmPlayable(
 }
 
 /**
- * Initial camera scroll: center the farm patch on the target screen point.
- * When an axis is oversize, center the footprint inside the playable band instead
- * of clamping to the nearest edge.
+ * Initial camera scroll: place the farm footprint center on the HUD target.
+ * When an axis is oversize (e.g. MIN_CAMERA_ZOOM), center the footprint AABB on
+ * `targetCenter` using the same playable band as {@link computeFarmCameraScrollLimits}
+ * ({@link getPlayableBandPanBoundsCenter} + matching shifted playable band for clamp limits).
  */
 export function computeCenteredFarmCameraScroll(
-  anchor: { x: number; y: number },
+  _anchor: { x: number; y: number },
   targetCenter: { x: number; y: number },
   farm: FarmFootprintBounds,
   playable: PlayableBandRect,
   zoom: number
 ): { scrollX: number; scrollY: number } {
-  const idealScrollX = anchor.x - targetCenter.x / zoom;
-  const idealScrollY = anchor.y - targetCenter.y / zoom;
   const limits = computeFarmCameraScrollLimits(farm, playable, zoom);
+  const boundsCenter = farmFootprintCenter(farm);
+  const idealScrollX = boundsCenter.x - targetCenter.x / zoom;
+  const idealScrollY = boundsCenter.y - targetCenter.y / zoom;
   return {
     scrollX: limits.x.oversize
-      ? (limits.x.minScroll + limits.x.maxScroll) / 2
+      ? Math.min(Math.max(idealScrollX, limits.x.minScroll), limits.x.maxScroll)
       : idealScrollX,
     scrollY: limits.y.oversize
-      ? (limits.y.minScroll + limits.y.maxScroll) / 2
+      ? Math.min(Math.max(idealScrollY, limits.y.minScroll), limits.y.maxScroll)
       : idealScrollY,
   };
+}
+
+/**
+ * Scroll so the full-map top edge hits `mapTopTargetScreenY` on screen while the island
+ * anchor stays on the pan-bounds X target. Y is driven by map top (not island center) so
+ * visible map top ({@link GridSystem.getMapScreenBounds}); footprint uses the same map layer.
+ */
+export function computeFarmCameraScrollForMapTopAndPanCenter(
+  mapMinY: number,
+  islandAnchor: { x: number; y: number },
+  farm: FarmFootprintBounds,
+  playable: PlayableBandRect,
+  mapTopTargetScreenY: number,
+  panTargetCenter: { x: number; y: number },
+  zoom: number
+): { scrollX: number; scrollY: number } {
+  const limits = computeFarmCameraScrollLimits(farm, playable, zoom);
+  const idealScrollX = islandAnchor.x - panTargetCenter.x / zoom;
+  const scrollY = mapMinY - mapTopTargetScreenY / zoom;
+  const scrollX = limits.x.oversize
+    ? Math.min(Math.max(idealScrollX, limits.x.minScroll), limits.x.maxScroll)
+    : idealScrollX;
+  return { scrollX, scrollY };
 }

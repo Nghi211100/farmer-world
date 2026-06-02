@@ -11,6 +11,15 @@ import {
   ITEM_IDS,
   ITEM_LABELS,
 } from '../config/items';
+import type { AnimalType } from '../config/LivestockConfig';
+import {
+  getShopLivestockAnimalType,
+  getShopLivestockIconKey,
+  getShopLivestockLabel,
+  isShopLivestockId,
+  isShopLivestockPurchasable,
+  SHOP_LIVESTOCK_CATALOG,
+} from '../config/shopLivestock';
 import type { EconomySystem } from '../systems/EconomySystem';
 import type { InventorySystem } from '../systems/InventorySystem';
 import type { HUDResources } from './TopHUD';
@@ -62,6 +71,8 @@ import {
 export interface ShopBuyResult {
   success: boolean;
   message: string;
+  /** Set when buying from Animals tab (not added to warehouse). */
+  livestockAnimal?: AnimalType;
 }
 
 /** Native size of `ui/shop-modal.png` — layout fractions tuned to this art. */
@@ -481,21 +492,46 @@ export type ShopCategoryId =
 const SHOP_CATEGORIES: { id: ShopCategoryId; locked: boolean }[] = [
   { id: 'all', locked: false },
   { id: 'seeds', locked: false },
-  { id: 'animals', locked: true },
+  { id: 'animals', locked: false },
   { id: 'decorations', locked: false },
   { id: 'foods', locked: false },
   { id: 'resources', locked: false },
 ];
 
 function catalogIdsForCategory(cat: ShopCategoryId): string[] {
-  return SHOP_CATALOG.filter(({ id }) => {
-    if (!isShopBuyable(id)) return false;
+  const standard = SHOP_CATALOG.filter(({ id }) => {
+    if (!isShopBuyable(id) || isShopLivestockId(id)) return false;
     if (cat === 'all') return true;
     if (cat === 'seeds') return isSeedItem(id);
     if (cat === 'foods') return isFoodItem(id);
     if (cat === 'resources') return id === ITEM_IDS.FLOUR;
     return false;
   }).map(({ id }) => id);
+
+  if (cat === 'animals') {
+    return SHOP_LIVESTOCK_CATALOG.filter(({ id }) => isShopLivestockPurchasable(id)).map(
+      ({ id }) => id
+    );
+  }
+  if (cat === 'all') {
+    return [
+      ...standard,
+      ...SHOP_LIVESTOCK_CATALOG.filter(({ id }) => isShopLivestockPurchasable(id)).map(
+        ({ id }) => id
+      ),
+    ];
+  }
+  return standard;
+}
+
+function shopItemLabel(itemId: string): string {
+  if (isShopLivestockId(itemId)) return getShopLivestockLabel(itemId);
+  return ITEM_LABELS[itemId] ?? itemId;
+}
+
+function shopItemIconKey(itemId: string): string {
+  if (isShopLivestockId(itemId)) return getShopLivestockIconKey(itemId);
+  return ITEM_ICON_KEYS[itemId] ?? 'seed';
 }
 
 interface CategoryTabUi {
@@ -654,6 +690,9 @@ export class ShopPanel {
   private typographyScale = 1;
 
   private onBuy?: (result: ShopBuyResult) => void;
+  private livestockPurchaseGate?: (
+    animalType: AnimalType
+  ) => { ok: boolean; message: string };
 
   private get gridPageSize(): number {
     return GRID_COLS * this.gridRows;
@@ -2077,7 +2116,7 @@ export class ShopPanel {
       const centerX = col * this.cellW + this.cellW / 2;
       const centerY = this.gridSlotCenterY(row);
 
-      const iconKey = ITEM_ICON_KEYS[itemId] ?? 'seed';
+      const iconKey = shopItemIconKey(itemId);
       const tex = this.texOrFallback(iconKey, 'seed');
       const icon = this.scene.add
         .image(centerX, centerY - this.cellH * 0.12, tex)
@@ -2137,10 +2176,10 @@ export class ShopPanel {
 
     const itemId = this.selectedId;
     const unit = this.economy.getShopPrice(itemId);
-    const iconKey = ITEM_ICON_KEYS[itemId] ?? 'seed';
+    const iconKey = shopItemIconKey(itemId);
     const tex = this.texOrFallback(iconKey, 'seed');
 
-    this.detailTitle.setText(ITEM_LABELS[itemId] ?? itemId);
+    this.detailTitle.setText(shopItemLabel(itemId));
     this.detailIcon.setTexture(tex);
     this.detailIcon.setVisible(true);
 
@@ -2163,6 +2202,7 @@ export class ShopPanel {
 
   /** Max purchasable qty from coins + warehouse space (min 1 when any purchase is possible). */
   private getMaxBuyQuantity(itemId: string): number {
+    if (isShopLivestockId(itemId)) return 1;
     if (!this.economy) return 1;
     const unit = this.economy.getShopPrice(itemId);
     if (unit <= 0) return 1;
@@ -2885,6 +2925,13 @@ export class ShopPanel {
     this.onBuy = cb;
   }
 
+  /** Validate pen/pond exists before charging for an animal (FarmScene). */
+  setLivestockPurchaseGate(
+    fn: (animalType: AnimalType) => { ok: boolean; message: string }
+  ): void {
+    this.livestockPurchaseGate = fn;
+  }
+
   show(economy: EconomySystem, inventory: InventorySystem, _hud?: HUDResources): void {
     this.economy = economy;
     this.inventory = inventory;
@@ -2909,6 +2956,10 @@ export class ShopPanel {
 
   private purchase(itemId: string, qty: number): void {
     if (!this.economy || !this.inventory) return;
+    if (isShopLivestockId(itemId)) {
+      this.purchaseLivestock(itemId);
+      return;
+    }
     const unitPrice = this.economy.getShopPrice(itemId);
     const total = unitPrice * qty;
     if (!this.economy.canAfford(total)) {
@@ -2931,6 +2982,42 @@ export class ShopPanel {
     const result: ShopBuyResult = {
       success: true,
       message: `Đã mua ${qty} với ${total} xu`,
+    };
+    this.showToast('');
+    this.refreshAll();
+    this.onBuy?.(result);
+  }
+
+  private purchaseLivestock(itemId: string): void {
+    if (!this.economy) return;
+    const animalType = getShopLivestockAnimalType(itemId);
+    if (!animalType) return;
+
+    const gate = this.livestockPurchaseGate?.(animalType);
+    if (gate && !gate.ok) {
+      const result: ShopBuyResult = { success: false, message: gate.message };
+      this.showToast(gate.message);
+      this.onBuy?.(result);
+      return;
+    }
+
+    const unitPrice = this.economy.getShopPrice(itemId);
+    if (!this.economy.canAfford(unitPrice)) {
+      const result: ShopBuyResult = {
+        success: false,
+        message: `Cần ${unitPrice} xu (có ${this.economy.getCoins()})`,
+      };
+      this.showToast(result.message);
+      this.onBuy?.(result);
+      return;
+    }
+
+    this.economy.spend(unitPrice);
+    const def = getShopLivestockLabel(itemId);
+    const result: ShopBuyResult = {
+      success: true,
+      message: `Đã mua ${def}`,
+      livestockAnimal: animalType,
     };
     this.showToast('');
     this.refreshAll();

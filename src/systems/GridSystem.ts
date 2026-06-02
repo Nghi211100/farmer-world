@@ -16,13 +16,27 @@ import {
 import {
   cartToIso,
   isoDepth,
+  isoRectFootprintScreenBounds,
+  isoRectFootprintScreenRhombus,
   pickIsoTileAt,
   tileBottomFromTop,
   tileCenterFromGrid,
   TILE_HEIGHT,
   TILE_WIDTH,
+  type IsoFootprintScreenBounds,
+  type IsoScreenRhombus,
 } from '../utils/iso';
 import { waterTextureKeyAt, type WaterNeighborProbe } from '../utils/waterAutotile';
+import {
+  FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN,
+  computePlayableFarmViewportLayout,
+  getFarmMapLeftShiftScreenPx,
+  FARM_MAP_TOP_INSET_FRAC,
+  FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+  getFarmMapTopTargetScreenY,
+  type PlayableFarmViewportLayout,
+} from '../ui/hudLayout';
+import type { FarmFootprintBounds } from '../farmCameraScroll';
 
 export type MapLayer = 'ground' | 'objects' | 'crops' | 'buildings' | 'entities';
 
@@ -53,6 +67,14 @@ export class GridSystem {
   readonly tileHeight = TILE_HEIGHT;
   originX = 0;
   originY = 0;
+  /**
+   * Extra world Y for the full map (tiles, crops, buildings) without moving the soil
+   * rhombus / island pan bounds — {@link alignMapTopToPanBoundsInset} adjusts this, not originY.
+   */
+  mapTopPanOffsetY = 0;
+
+  /** Horizontal map shift applied to the full 20x20 map layer against pan bounds. */
+  mapTopPanOffsetX = 0;
 
   private cells: TileCell[][] = [];
 
@@ -94,39 +116,101 @@ export class GridSystem {
   }
 
   /**
-   * Lay out the grid so the farm soil patch center sits in the HUD playable band
-   * (camera scroll 0, zoom 1 baseline).
+   * Lay out the grid so the farm footprint iso rhombus center sits at the HUD-balanced viewport
+   * center (camera scroll 0, zoom 1 baseline). See {@link computePlayableFarmViewportLayout}.
    */
   centerInViewport(
     viewW: number,
     viewH: number,
-    hudTop = 56,
-    hudBottom = 72
+    padX = 10,
+    padY = 10
   ): void {
     const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
     const centerGx = (minX + maxX) / 2;
     const centerGy = (minY + maxY) / 2;
-    const targetX = viewW / 2;
-    const targetY = (viewH + hudTop - hudBottom) / 2;
+    const layout = computePlayableFarmViewportLayout(viewW, viewH, padX, padY);
+    const { centerX: targetX, centerY: targetY } = layout;
     const topOffsetX = (centerGx - centerGy) * (this.tileWidth / 2);
     const topOffsetY = (centerGx + centerGy) * (this.tileHeight / 2);
     this.originX = targetX - topOffsetX;
     this.originY = targetY - topOffsetY - this.tileHeight / 2;
+    const footprintCenter = this.getFarmFootprintScreenRhombus().center;
+    this.originX += targetX - footprintCenter.x;
+    this.originY += targetY - footprintCenter.y;
+    this.mapTopPanOffsetY = 0;
+    this.mapTopPanOffsetX = 0;
+  }
+
+  /**
+   * Align map AABB top to a screen Y inside the playable HUD band (after camera scroll/zoom).
+   * Smaller {@link FARM_MAP_TOP_INSET_FRAC} moves the map up on screen.
+   */
+  alignMapTopToPlayableInset(
+    layout: PlayableFarmViewportLayout,
+    scrollY: number,
+    zoom: number,
+    insetFrac: number = FARM_MAP_TOP_INSET_FRAC
+  ): void {
+    const playableH = layout.playableBottom - layout.playableTop;
+    const targetScreenY = getFarmMapTopTargetScreenY(
+      layout.playableTop,
+      playableH,
+      insetFrac
+    );
+    const mapMinY = this.getMapScreenBounds().minY;
+    const currentScreenY = (mapMinY - scrollY) * zoom;
+    const deltaScreen = targetScreenY - currentScreenY;
+    this.originY += deltaScreen / zoom;
+  }
+
+  /**
+   * Align full 20×20 map top to a fraction down the orange pan-bounds AABB (world Y).
+   * Adjusts {@link mapTopPanOffsetY} so the full map layer (footprint + outer tiles) shifts together.
+   */
+  alignMapTopToPanBoundsInset(
+    panBounds: FarmFootprintBounds,
+    _scrollY: number,
+    zoom: number,
+    frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC
+  ): void {
+    const panH = panBounds.maxY - panBounds.minY;
+    const targetMapMinY = panBounds.minY + panH * frac;
+    const visualMinY = this.getVisualMapScreenBounds().minY;
+    this.mapTopPanOffsetY = targetMapMinY - visualMinY;
+
+    // Apply the map-only left shift in screen space, then convert back to world units.
+    const panW = panBounds.maxX - panBounds.minX;
+    const shiftPx = getFarmMapLeftShiftScreenPx(
+      panW,
+      zoom,
+      FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN
+    );
+    const mapCenterX = this.getVisualMapScreenBounds().centerX;
+    const panCenterX = (panBounds.minX + panBounds.maxX) / 2;
+    const centerBiasWorld = panCenterX - mapCenterX;
+    this.mapTopPanOffsetX = centerBiasWorld - shiftPx / zoom;
+  }
+
+  /** Screen center of the farm soil + path ring AABB (iso diamond bounds). */
+  getFarmFootprintAabbCenterScreen(): { x: number; y: number } {
+    const { minX, maxX, minY, maxY } = this.getFarmFootprintScreenBounds();
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
   }
 
   /** Farm soil patch bottom-right anchor (SE corner tile bottom vertex). */
   getFarmSoilBottomRightAnchor(): { x: number; y: number } {
     const { maxX, maxY } = FARM_SOIL_BOUNDS;
-    return this.gridToTileBottom(maxX, maxY);
+    return this.gridToMapTileBottom(maxX, maxY);
   }
 
   private accumulateIsoBounds(
     corners: [number, number][],
-    out: { minX: number; minY: number; maxX: number; maxY: number }
+    out: { minX: number; minY: number; maxX: number; maxY: number },
+    useMapOffset = false
   ): void {
     const hw = this.tileWidth / 2;
     for (const [gx, gy] of corners) {
-      const top = this.gridToScreen(gx, gy);
+      const top = useMapOffset ? this.gridToMapScreen(gx, gy) : this.gridToScreen(gx, gy);
       const bottom = tileBottomFromTop(top);
       out.minX = Math.min(out.minX, top.x - hw);
       out.maxX = Math.max(out.maxX, top.x + hw);
@@ -135,7 +219,24 @@ export class GridSystem {
     }
   }
 
+  /** Full 20×20 map AABB including {@link mapTopPanOffsetY} (camera virtual layer). */
   getMapScreenBounds(): {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    centerX: number;
+    centerY: number;
+  } {
+    return this.getVisualMapScreenBounds(true);
+  }
+
+  /**
+   * 20×20 map AABB from {@link gridToScreen} when `includeMapTopOffset` is false (pre-pan baseline).
+   * {@link alignMapTopToPanBoundsInset} compares that baseline to the pan target before setting
+   * {@link mapTopPanOffsetY}; rendered tiles use {@link gridToMapScreen}.
+   */
+  getVisualMapScreenBounds(includeMapTopOffset = false): {
     minX: number;
     minY: number;
     maxX: number;
@@ -150,7 +251,7 @@ export class GridSystem {
       [this.size - 1, this.size - 1],
     ];
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    this.accumulateIsoBounds(corners, box);
+    this.accumulateIsoBounds(corners, box, includeMapTopOffset);
     return {
       ...box,
       centerX: (box.minX + box.maxX) / 2,
@@ -178,7 +279,7 @@ export class GridSystem {
     }
     const corners: [number, number][] = unlocked.map(({ x, y }) => [x, y]);
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    this.accumulateIsoBounds(corners, box);
+    this.accumulateIsoBounds(corners, box, true);
     const anchor = this.getFarmSoilCameraAnchor();
     return {
       ...box,
@@ -191,26 +292,111 @@ export class GridSystem {
    * Outer iso rhombus of FARM_SOIL_BOUNDS: N/E/S/W apexes of the 8×8 soil cluster
    * (not the axis-aligned AABB from {@link getFarmSoilScreenBounds}).
    */
-  getFarmSoilScreenRhombus(): {
-    north: { x: number; y: number };
-    east: { x: number; y: number };
-    south: { x: number; y: number };
-    west: { x: number; y: number };
-    center: { x: number; y: number };
+  getFarmSoilScreenRhombus(): IsoScreenRhombus {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    const tilesW = maxX - minX + 1;
+    const tilesH = maxY - minY + 1;
+    return isoRectFootprintScreenRhombus(
+      minX,
+      minY,
+      tilesW,
+      tilesH,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY
+    );
+  }
+
+  /** Soil + path ring outer iso rhombus (10×10 cells for 8×8 soil + margin 1). */
+  getFarmFootprintScreenRhombus(ringMargin = FARM_ISLAND_RING_MARGIN): IsoScreenRhombus {
+    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
+    const anchorGx = minX - ringMargin;
+    const anchorGy = minY - ringMargin;
+    const tilesW = maxX - minX + 1 + 2 * ringMargin;
+    const tilesH = maxY - minY + 1 + 2 * ringMargin;
+    return isoRectFootprintScreenRhombus(
+      anchorGx,
+      anchorGy,
+      tilesW,
+      tilesH,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY
+    );
+  }
+
+  /**
+   * Soil tile tops vs cyan footprint rhombus (world space). Used by tests and
+   * {@link FarmScene.getSoilFootprintAlignMetricsForTest}.
+   */
+  measureSoilFootprintAlignment(ringMargin = FARM_ISLAND_RING_MARGIN): {
+    soilGridRange: { minX: number; maxX: number; minY: number; maxY: number };
+    footprintCenterX: number;
+    footprintCenterY: number;
+    soilClusterCenterX: number;
+    soilClusterCenterY: number;
+    centerAlignErrorPx: number;
+    maxTileOutsideAabbPx: number;
+    soilFootprintAlignError: number;
   } {
     const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
-    const northTop = this.gridToScreen(minX, minY);
-    const eastTop = this.gridToScreen(maxX, minY);
-    const southTop = this.gridToScreen(maxX, maxY);
-    const westTop = this.gridToScreen(minX, maxY);
-    const hw = this.tileWidth / 2;
-    const hh = this.tileHeight / 2;
+    const footprint = this.getFarmFootprintScreenRhombus(ringMargin);
+    const aabbMinX = Math.min(
+      footprint.north.x,
+      footprint.east.x,
+      footprint.south.x,
+      footprint.west.x
+    );
+    const aabbMaxX = Math.max(
+      footprint.north.x,
+      footprint.east.x,
+      footprint.south.x,
+      footprint.west.x
+    );
+    const aabbMinY = Math.min(
+      footprint.north.y,
+      footprint.east.y,
+      footprint.south.y,
+      footprint.west.y
+    );
+    const aabbMaxY = Math.max(
+      footprint.north.y,
+      footprint.east.y,
+      footprint.south.y,
+      footprint.west.y
+    );
+
+    let maxTileOutsideAabbPx = 0;
+
+    for (let gy = minY; gy <= maxY; gy++) {
+      for (let gx = minX; gx <= maxX; gx++) {
+        const top = this.gridToMapScreen(gx, gy);
+        const outsideX =
+          top.x < aabbMinX ? aabbMinX - top.x : top.x > aabbMaxX ? top.x - aabbMaxX : 0;
+        const outsideY =
+          top.y < aabbMinY ? aabbMinY - top.y : top.y > aabbMaxY ? top.y - aabbMaxY : 0;
+        maxTileOutsideAabbPx = Math.max(
+          maxTileOutsideAabbPx,
+          Math.hypot(outsideX, outsideY)
+        );
+      }
+    }
+
+    const patchCenter = this.getFarmSoilPatchCenterScreen();
+    const soilClusterCenterX = patchCenter.x;
+    const soilClusterCenterY = patchCenter.y;
+    const centerAlignErrorPx = Math.hypot(
+      footprint.center.x - soilClusterCenterX,
+      footprint.center.y - soilClusterCenterY
+    );
+
     return {
-      north: { x: northTop.x, y: northTop.y },
-      east: { x: eastTop.x + hw, y: eastTop.y + hh },
-      south: tileBottomFromTop(southTop),
-      west: { x: westTop.x - hw, y: westTop.y + hh },
-      center: this.getFarmSoilPatchCenterScreen(),
+      soilGridRange: { minX, maxX, minY, maxY },
+      footprintCenterX: footprint.center.x,
+      footprintCenterY: footprint.center.y,
+      soilClusterCenterX,
+      soilClusterCenterY,
+      centerAlignErrorPx,
+      maxTileOutsideAabbPx,
+      soilFootprintAlignError: Math.max(centerAlignErrorPx, maxTileOutsideAabbPx),
     };
   }
 
@@ -231,7 +417,7 @@ export class GridSystem {
       [maxX, maxY],
     ];
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    this.accumulateIsoBounds(corners, box);
+    this.accumulateIsoBounds(corners, box, true);
     const patchCenter = this.getFarmSoilPatchCenterScreen();
     return {
       ...box,
@@ -253,17 +439,24 @@ export class GridSystem {
     centerY: number;
   } {
     const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
-    const corners: [number, number][] = [
-      [minX - ringMargin, minY - ringMargin],
-      [maxX + ringMargin, minY - ringMargin],
-      [minX - ringMargin, maxY + ringMargin],
-      [maxX + ringMargin, maxY + ringMargin],
-    ];
-    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    this.accumulateIsoBounds(corners, box);
+    const anchorGx = minX - ringMargin;
+    const anchorGy = minY - ringMargin;
+    const tilesW = maxX - minX + 1 + 2 * ringMargin;
+    const tilesH = maxY - minY + 1 + 2 * ringMargin;
+    const box = isoRectFootprintScreenBounds(
+      anchorGx,
+      anchorGy,
+      tilesW,
+      tilesH,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY
+    );
     const patchCenter = this.getFarmSoilPatchCenterScreen();
     return {
-      ...box,
+      minX: box.minX,
+      minY: box.minY,
+      maxX: box.maxX,
+      maxY: box.maxY,
       centerX: patchCenter.x,
       centerY: patchCenter.y,
     };
@@ -272,7 +465,7 @@ export class GridSystem {
   /** Iso diamond center of the full farm soil rectangle (FARM_SOIL_BOUNDS). */
   getFarmSoilPatchCenterScreen(): { x: number; y: number } {
     const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
-    return this.gridToTileCenter((minX + maxX) / 2, (minY + maxY) / 2);
+    return this.gridToMapTileCenter((minX + maxX) / 2, (minY + maxY) / 2);
   }
 
   /** Camera scroll anchor: iso center of the full farm soil patch (FARM_SOIL_BOUNDS). */
@@ -329,19 +522,79 @@ export class GridSystem {
     return cartToIso(gx, gy, this.originX, this.originY);
   }
 
+  /** Map-layer top vertex (ground, island, debug, camera bounds) including {@link mapTopPanOffsetY}. */
+  gridToMapScreen(gx: number, gy: number): { x: number; y: number } {
+    const p = this.gridToScreen(gx, gy);
+    return { x: p.x + this.mapTopPanOffsetX, y: p.y + this.mapTopPanOffsetY };
+  }
+
   /** Diamond geometric center; accepts fractional grid coords during movement */
   gridToTileCenter(gx: number, gy: number): { x: number; y: number } {
     return tileCenterFromGrid(gx, gy, this.originX, this.originY);
   }
 
-  /** Player feet at diamond center (not bottom vertex) */
-  gridToPlayerTile(gx: number, gy: number): { x: number; y: number } {
-    return tileCenterFromGrid(gx, gy, this.originX, this.originY);
+  /** Tile center on the shifted map layer (VFX, crops). */
+  gridToMapTileCenter(gx: number, gy: number): { x: number; y: number } {
+    return tileCenterFromGrid(
+      gx,
+      gy,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY
+    );
   }
 
-  /** Diamond bottom vertex (crops, decorations, buildings — not player) */
+  /** Player feet at diamond center on the map layer (not bottom vertex). */
+  gridToPlayerTile(gx: number, gy: number): { x: number; y: number } {
+    return this.gridToMapTileCenter(gx, gy);
+  }
+
+  /** Diamond bottom vertex on the map layer (crops, decorations, buildings). */
   gridToTileBottom(gx: number, gy: number): { x: number; y: number } {
-    return tileBottomFromTop(this.gridToScreen(gx, gy));
+    return this.gridToMapTileBottom(gx, gy);
+  }
+
+  /** Diamond bottom on the map layer (alias for pens / explicit map-layer callers). */
+  gridToMapTileBottom(gx: number, gy: number): { x: number; y: number } {
+    return tileBottomFromTop(this.gridToMapScreen(gx, gy));
+  }
+
+  /** Ground tile top vertex on the map layer (same as {@link gridToMapScreen}). */
+  gridToGroundScreen(gx: number, gy: number): { x: number; y: number } {
+    return this.gridToMapScreen(gx, gy);
+  }
+
+  /** Screen bounds for a rectangular tile footprint (e.g. livestock pen 3×3). */
+  getRectFootprintScreenBounds(
+    anchorGx: number,
+    anchorGy: number,
+    tilesW: number,
+    tilesH: number
+  ): IsoFootprintScreenBounds {
+    return isoRectFootprintScreenBounds(
+      anchorGx,
+      anchorGy,
+      tilesW,
+      tilesH,
+      this.originX,
+      this.originY
+    );
+  }
+
+  /** Rect footprint on the shifted map layer (livestock pens). */
+  getRectMapFootprintScreenBounds(
+    anchorGx: number,
+    anchorGy: number,
+    tilesW: number,
+    tilesH: number
+  ): IsoFootprintScreenBounds {
+    return isoRectFootprintScreenBounds(
+      anchorGx,
+      anchorGy,
+      tilesW,
+      tilesH,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY
+    );
   }
 
   /** World-space pick using isometric diamond hit test (matches top-vertex tile sprites). */
@@ -349,8 +602,8 @@ export class GridSystem {
     return pickIsoTileAt(
       worldX,
       worldY,
-      this.originX,
-      this.originY,
+      this.originX + this.mapTopPanOffsetX,
+      this.originY + this.mapTopPanOffsetY,
       this.size,
       (gx, gy) => this.inBounds(gx, gy)
     );

@@ -115,11 +115,15 @@ export function getFarmLandGroundDepth(
   return Math.max(baseGroundDepth, footprintFloor, northEdgeFloor);
 }
 
-/** Horizontal island.png screen offset, as fraction of rhombus W–E span. */
-export const FARM_ISLAND_OFFSET_X_FRAC = 0.06;
+/**
+ * Island art is centered on the soil iso rhombus. Grid placement already applies
+ * {@link FARM_VISUAL_CENTER_OFFSET_X_FRAC} via {@link GridSystem.centerInViewport}; do not
+ * nudge island.png again or soil tiles read shifted vs the cyan footprint / orange grid.
+ */
+export const FARM_ISLAND_OFFSET_X_FRAC = 0;
 
-/** Vertical island.png screen offset, as fraction of rhombus N–S span. */
-export const FARM_ISLAND_OFFSET_Y_FRAC = 0.33;
+/** Vertical island.png offset as fraction of rhombus N–S span. */
+export const FARM_ISLAND_OFFSET_Y_FRAC = 0;
 
 export type FarmSoilScreenRhombus = {
   north: { x: number; y: number };

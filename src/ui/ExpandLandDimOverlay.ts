@@ -101,7 +101,7 @@ export class ExpandLandDimOverlay {
     this.maskGraphics.clear();
     this.maskGraphics.setPosition(0, 0);
     for (const { x, y } of this.collectPurchasableTiles()) {
-      const top = this.grid.gridToScreen(x, y);
+      const top = this.grid.gridToMapScreen(x, y);
       fillIsoTileDiamond(this.maskGraphics, top.x, top.y, 0xffffff, 1);
     }
 

@@ -2,9 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   clampScrollToFarmPlayable,
   computeCenteredFarmCameraScroll,
+  computeFarmCameraScrollForMapTopAndPanCenter,
   computeFarmCameraScrollLimits,
+  computeFarmPlayableScreenMargins,
+  farmFootprintCenter,
   type FarmFootprintBounds,
 } from '../../src/farmCameraScroll';
+import {
+  FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
+  FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+  getFarmMapTopTargetScreenY,
+  getFarmMapTopTargetScreenYFromPanBounds,
+  getPlayableBandPanBoundsCenter,
+  shiftPlayableBandForPanBoundsCenter,
+} from '../../src/ui/hudLayout';
 
 const phonePlayable = {
   playableLeft: 10,
@@ -137,11 +148,15 @@ describe('clampScrollToFarmPlayable', () => {
 });
 
 describe('computeCenteredFarmCameraScroll', () => {
-  it('uses footprint midpoint on oversize X and ideal scroll on in-band Y', () => {
+  it('centers footprint AABB on target when X is oversize (ignores anchor offset)', () => {
     const zoom = 1.7;
     const limits = computeFarmCameraScrollLimits(phoneFootprint, phonePlayable, zoom);
-    const targetCenter = { x: 155, y: 414 };
+    const targetCenter = {
+      x: (phonePlayable.playableLeft + phonePlayable.playableRight) / 2,
+      y: (phonePlayable.playableTop + phonePlayable.playableBottom) / 2,
+    };
     const anchor = { x: 330, y: 366 };
+    const boundsCenter = farmFootprintCenter(phoneFootprint);
     const scroll = computeCenteredFarmCameraScroll(
       anchor,
       targetCenter,
@@ -152,7 +167,106 @@ describe('computeCenteredFarmCameraScroll', () => {
 
     expect(limits.x.oversize).toBe(true);
     expect(limits.y.oversize).toBe(false);
-    expect(scroll.scrollX).toBeCloseTo((limits.x.minScroll + limits.x.maxScroll) / 2, 5);
+    const screenX = (boundsCenter.x - scroll.scrollX) * zoom;
+    const screenY = (boundsCenter.y - scroll.scrollY) * zoom;
+    expect(screenX).toBeCloseTo(targetCenter.x, 1);
+    expect(screenY).toBeCloseTo(targetCenter.y, 1);
+    const margins = computeFarmPlayableScreenMargins(
+      phoneFootprint,
+      phonePlayable,
+      scroll.scrollX,
+      scroll.scrollY,
+      zoom
+    );
+    expect(Math.abs(margins.left - margins.right)).toBeLessThan(1);
+  });
+
+  it('places oversize scroll at limit midpoint when pan-bounds offset shifts the clamp band', () => {
+    const zoom = 1.7;
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(phonePlayable);
+    const targetCenter = getPlayableBandPanBoundsCenter(phonePlayable);
+    const anchor = farmFootprintCenter(phoneFootprint);
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, scrollBand, zoom);
+    const scroll = computeCenteredFarmCameraScroll(
+      anchor,
+      targetCenter,
+      phoneFootprint,
+      scrollBand,
+      zoom
+    );
+    expect(limits.x.oversize).toBe(true);
+    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC).toBe(0.45);
+    const midX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    expect(scroll.scrollX).toBeCloseTo(midX, 5);
+  });
+
+  it('uses anchor scroll when farm fits on both axes', () => {
+    const zoom = 0.4;
+    const targetCenter = { x: 155, y: 414 };
+    const anchor = { x: 330, y: 366 };
+    const scroll = computeCenteredFarmCameraScroll(
+      anchor,
+      targetCenter,
+      phoneFootprint,
+      phonePlayable,
+      zoom
+    );
+    expect(scroll.scrollX).toBeCloseTo(anchor.x - targetCenter.x / zoom, 5);
     expect(scroll.scrollY).toBeCloseTo(anchor.y - targetCenter.y / zoom, 5);
+  });
+});
+
+describe('computeFarmCameraScrollForMapTopAndPanCenter', () => {
+  it('keeps map top on screen target when map minY shifts (origin align)', () => {
+    const zoom = 1.7;
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(phonePlayable);
+    const panTarget = getPlayableBandPanBoundsCenter(phonePlayable);
+    const mapTopTarget = getFarmMapTopTargetScreenYFromPanBounds(
+      phoneFootprint,
+      0,
+      zoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC
+    );
+    const anchor = farmFootprintCenter(phoneFootprint);
+    const mapMinY = 80;
+    const scroll0 = computeFarmCameraScrollForMapTopAndPanCenter(
+      mapMinY,
+      anchor,
+      phoneFootprint,
+      scrollBand,
+      mapTopTarget,
+      panTarget,
+      zoom
+    );
+    const screenTop0 = (mapMinY - scroll0.scrollY) * zoom;
+    expect(screenTop0).toBeCloseTo(mapTopTarget, 1);
+
+    const mapMinYRaised = mapMinY - 120;
+    const scroll1 = computeFarmCameraScrollForMapTopAndPanCenter(
+      mapMinYRaised,
+      anchor,
+      phoneFootprint,
+      scrollBand,
+      mapTopTarget,
+      panTarget,
+      zoom
+    );
+    const screenTop1 = (mapMinYRaised - scroll1.scrollY) * zoom;
+    expect(screenTop1).toBeCloseTo(mapTopTarget, 1);
+    expect(scroll1.scrollY).toBeCloseTo(scroll0.scrollY - 120, 1);
+  });
+
+  it('default pan-bounds frac 0.165 places map top 16.5% down pan height', () => {
+    const zoom = 1.7;
+    const panTop = (phoneFootprint.minY - 0) * zoom;
+    const panH = (phoneFootprint.maxY - phoneFootprint.minY) * zoom;
+    const target = getFarmMapTopTargetScreenYFromPanBounds(
+      phoneFootprint,
+      0,
+      zoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC
+    );
+    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.165);
+    expect(target).toBeCloseTo(panTop + panH * 0.165, 1);
   });
 });

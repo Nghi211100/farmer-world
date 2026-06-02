@@ -1,3 +1,4 @@
+import type { PlayableBandRect } from '../farmCameraScroll';
 import { getHudSafeAreaInsets } from '../safeArea';
 import { getUiFontScale, scaledFontSizePx } from './uiFontScale';
 
@@ -322,4 +323,204 @@ export function computeRightMenuLayout(
 
 export function rightHudBandWidth(viewportW: number, viewportH: number): number {
   return computeRightMenuLayout(viewportW, viewportH).bandWidth;
+}
+
+/** Left HUD strip width from the viewport left edge (bag icon + pad). */
+export function leftHudBandWidth(viewportW: number, viewportH: number): number {
+  const { iconCenterX, iconSize } = computeLeftMenuLayout(viewportW, viewportH);
+  const iconPad = hudSpan(RIGHT_ICON_PAD_ART, viewportW, viewportH);
+  return iconCenterX + iconSize / 2 + iconPad;
+}
+
+/**
+ * Nudge the farm centering target along playable width so the iso mass reads centered.
+ * Positive X shifts the farm right on screen (corrects “too far left” perception).
+ */
+export const FARM_VISUAL_CENTER_OFFSET_X_FRAC = 0.1;
+
+/** Optional vertical visual correction (fraction of playable height). */
+export const FARM_VISUAL_CENTER_OFFSET_Y_FRAC = 0;
+
+/**
+ * Camera / orange pan-bounds centering: shift right as a fraction of playable width.
+ * Independent from {@link FARM_VISUAL_CENTER_OFFSET_X_FRAC} (grid tile placement).
+ */
+export const FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC = 0.45;
+
+/** Vertical pan-bounds center correction (fraction of playable height; positive = down on screen). */
+export const FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC = 0.5;
+
+/**
+ * @deprecated Playable-band inset — use {@link FARM_MAP_TOP_PAN_BOUNDS_FRAC} for camera layout.
+ * Fraction of playable height from band top; negative = map extends above band top.
+ */
+export const FARM_MAP_TOP_INSET_FRAC = -0.5;
+
+/**
+ * Map 20×20 top target as a fraction down the orange **pan bounds** AABB height
+ * (`getFarmCameraScrollBounds()` / island screen AABB), not the yellow HUD playable band.
+ * `0` = flush with pan top; positive = lower on screen; **negative = above pan top**.
+ */
+export const FARM_MAP_TOP_PAN_BOUNDS_FRAC = 0.165;
+
+/**
+ * Horizontal map-top (20×20) shift: move the full map layer left as a fraction of the
+ * orange pan-bounds AABB width.
+ *
+ * Single X-shift source of truth for the farm world: WORLD ENDS bounds, soil/path footprint,
+ * island art anchoring, crops/buildings/entities, and debug overlays all consume this delta via
+ * `GridSystem.mapTopPanOffsetX` so every 20×20 element moves together.
+ */
+export const FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN = -0.005;
+/** @deprecated Use {@link FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN}. */
+export const FARM_MAP_LEFT_PAN_BOUNDS_FRAC = FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN;
+
+/** Screen-space left shift (px) for the full farm map relative to pan-bounds width. */
+export function getFarmMapLeftShiftScreenPx(
+  panBoundsWidth: number,
+  zoom: number,
+  frac: number = FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN
+): number {
+  return panBoundsWidth * zoom * frac;
+}
+
+/** Pan-bounds vertical span in screen pixels at the given scroll/zoom. */
+export type FarmPanBoundsY = { minY: number; maxY: number };
+
+/**
+ * Target on-screen Y for the full-map AABB top:
+ * `panTopScreen + panHeightScreen * frac` (same as world formula after camera is stable).
+ */
+export function getFarmMapTopTargetScreenYFromPanBounds(
+  panBounds: FarmPanBoundsY,
+  scrollY: number,
+  zoom: number,
+  frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC
+): number {
+  const panTopScreen = (panBounds.minY - scrollY) * zoom;
+  const panHeightScreen = (panBounds.maxY - panBounds.minY) * zoom;
+  return panTopScreen + panHeightScreen * frac;
+}
+
+/** Target on-screen Y for the map AABB top (screen coords; Y grows downward). */
+export function getFarmMapTopTargetScreenY(
+  playableTop: number,
+  playableH: number,
+  insetFrac: number = FARM_MAP_TOP_INSET_FRAC
+): number {
+  return playableTop + playableH * insetFrac;
+}
+
+/** @deprecated Use {@link getFarmMapTopTargetScreenY} — same value at scroll 0 / zoom 1. */
+export function getFarmMapTopTargetY(playableTop: number, playableH: number): number {
+  return getFarmMapTopTargetScreenY(playableTop, playableH);
+}
+
+/** Geometric center of the HUD playable inset (yellow debug band). */
+export function getPlayableBandGeometricCenter(playable: PlayableBandRect): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: (playable.playableLeft + playable.playableRight) / 2,
+    y: (playable.playableTop + playable.playableBottom) / 2,
+  };
+}
+
+/** Screen target for camera scroll / orange pan-bounds centering. */
+export function getPlayableBandPanBoundsCenter(playable: PlayableBandRect): {
+  x: number;
+  y: number;
+} {
+  const geom = getPlayableBandGeometricCenter(playable);
+  const playableW = playable.playableRight - playable.playableLeft;
+  const playableH = playable.playableBottom - playable.playableTop;
+  return {
+    x: geom.x + playableW * FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
+    y: geom.y + playableH * FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC,
+  };
+}
+
+/**
+ * Playable band shifted so its geometric center matches {@link getPlayableBandPanBoundsCenter}.
+ * Use with the same band for {@link computeFarmCameraScrollLimits} when pan axes are oversize.
+ */
+export function shiftPlayableBandForPanBoundsCenter(
+  playable: PlayableBandRect
+): PlayableBandRect {
+  const playableW = playable.playableRight - playable.playableLeft;
+  const playableH = playable.playableBottom - playable.playableTop;
+  const dx = playableW * FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC;
+  const dy = playableH * FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC;
+  return {
+    playableLeft: playable.playableLeft + dx,
+    playableTop: playable.playableTop + dy,
+    playableRight: playable.playableRight + dx,
+    playableBottom: playable.playableBottom + dy,
+  };
+}
+
+/**
+ * Playable band shifted so its geometric center matches {@link computePlayableFarmViewportLayout}'s
+ * visual `centerX`/`centerY` (grid tile placement only).
+ */
+export function shiftPlayableBandForFarmVisualCenter(
+  playable: PlayableBandRect
+): PlayableBandRect {
+  const playableW = playable.playableRight - playable.playableLeft;
+  const playableH = playable.playableBottom - playable.playableTop;
+  const dx = playableW * FARM_VISUAL_CENTER_OFFSET_X_FRAC;
+  const dy = playableH * FARM_VISUAL_CENTER_OFFSET_Y_FRAC;
+  return {
+    playableLeft: playable.playableLeft + dx,
+    playableTop: playable.playableTop + dy,
+    playableRight: playable.playableRight + dx,
+    playableBottom: playable.playableBottom + dy,
+  };
+}
+
+/** Farm camera / grid playable band and its geometric center (equal L/R and T/B margins). */
+export type PlayableFarmViewportLayout = {
+  playableLeft: number;
+  playableTop: number;
+  playableRight: number;
+  playableBottom: number;
+  /** `(playableLeft + playableRight) / 2` — centers farm in the HUD inset rect. */
+  centerX: number;
+  /** `(playableTop + playableBottom) / 2`. */
+  centerY: number;
+};
+
+/**
+ * Playable inset rect for farm fit/clamp/centering (inset already accounts for HUD chrome).
+ * Target center is the geometric midpoint plus {@link FARM_VISUAL_CENTER_OFFSET_*_FRAC} so the
+ * farm reads visually balanced. Camera pan/clamp targets
+ * {@link getPlayableBandPanBoundsCenter} ({@link FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC}).
+ */
+export function computePlayableFarmViewportLayout(
+  viewportW: number,
+  viewportH: number,
+  padX = 10,
+  padY = 10
+): PlayableFarmViewportLayout {
+  const topBand = topHudBandHeight(viewportW, viewportH);
+  const bottomBand = bottomHudBandHeight(viewportW, viewportH);
+  const rightBand = rightHudBandWidth(viewportW, viewportH);
+  const leftBand = leftHudBandWidth(viewportW, viewportH);
+  const playableLeft = Math.max(padX, leftBand + padX);
+  const playableTop = topBand + padY;
+  const playableRight = viewportW - rightBand - padX;
+  const playableBottom = viewportH - bottomBand - padY;
+  const playableW = playableRight - playableLeft;
+  const playableH = playableBottom - playableTop;
+  const geomCenterX = (playableLeft + playableRight) / 2;
+  const geomCenterY = (playableTop + playableBottom) / 2;
+  return {
+    playableLeft,
+    playableTop,
+    playableRight,
+    playableBottom,
+    centerX: geomCenterX + playableW * FARM_VISUAL_CENTER_OFFSET_X_FRAC,
+    centerY: geomCenterY + playableH * FARM_VISUAL_CENTER_OFFSET_Y_FRAC,
+  };
 }

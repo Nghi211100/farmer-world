@@ -1,0 +1,17 @@
+{
+  "mode": "off",
+  "url": "http://localhost:5173/?debugGrid=1",
+  "zoom": 1.7,
+  "panBoundsWidth": 2229,
+  "scrollX": 60,
+  "scrollY": 434,
+  "mapTopLeftScreenX": -321.53799999999995,
+  "mapTopLeftScreenY": 168.02800000000045,
+  "mapCenterScreenX": 766.4620000000001,
+  "mapCenterScreenY": 712.0280000000002,
+  "footprintCenterScreenX": 657.6620000000001,
+  "footprintCenterScreenY": 813.2715000000003,
+  "panBoundsCenterX": 656.3699999999999,
+  "panBoundsErrorX": 1.2920000000002574,
+  "mapTopErrorY": 5.684341886080802e-14
+}

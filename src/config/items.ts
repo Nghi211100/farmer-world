@@ -17,6 +17,12 @@ export const ITEM_IDS = {
   CANDY: 'candy',
   JUICE: 'juice',
   MILK: 'milk',
+  EGG: 'egg',
+  PORK: 'pork',
+  FISH: 'fish',
+  DUCK_EGG: 'duck_egg',
+  WOOL: 'wool',
+  GOAT_MILK: 'goat_milk',
   FLOUR: 'flour',
   WOOD: 'wood',
   STONE: 'stone',
@@ -51,6 +57,12 @@ export const ITEM_CATEGORIES: Record<ItemCategory, readonly string[]> = {
     ITEM_IDS.CANDY,
     ITEM_IDS.JUICE,
     ITEM_IDS.MILK,
+    ITEM_IDS.EGG,
+    ITEM_IDS.PORK,
+    ITEM_IDS.FISH,
+    ITEM_IDS.DUCK_EGG,
+    ITEM_IDS.WOOL,
+    ITEM_IDS.GOAT_MILK,
   ],
   materials: [ITEM_IDS.WOOD, ITEM_IDS.STONE, ITEM_IDS.ROPE, ITEM_IDS.IRON, ITEM_IDS.FLOUR],
   tools: [ITEM_IDS.SHOVEL],
@@ -81,6 +93,12 @@ export const ITEM_LABELS: Record<string, string> = {
   [ITEM_IDS.CANDY]: 'Candy',
   [ITEM_IDS.JUICE]: 'Juice',
   [ITEM_IDS.MILK]: 'Milk',
+  [ITEM_IDS.EGG]: 'Egg',
+  [ITEM_IDS.PORK]: 'Pork',
+  [ITEM_IDS.FISH]: 'Fish',
+  [ITEM_IDS.DUCK_EGG]: 'Duck egg',
+  [ITEM_IDS.WOOL]: 'Wool',
+  [ITEM_IDS.GOAT_MILK]: 'Goat milk',
   [ITEM_IDS.FLOUR]: 'Flour',
   [ITEM_IDS.WOOD]: 'Wood',
   [ITEM_IDS.STONE]: 'Stone',
@@ -106,6 +124,12 @@ export const ITEM_ICON_KEYS: Record<string, string> = {
   [ITEM_IDS.CANDY]: 'candy',
   [ITEM_IDS.JUICE]: 'juice',
   [ITEM_IDS.MILK]: 'milk',
+  [ITEM_IDS.EGG]: 'milk',
+  [ITEM_IDS.PORK]: 'bread',
+  [ITEM_IDS.FISH]: 'juice',
+  [ITEM_IDS.DUCK_EGG]: 'cookie',
+  [ITEM_IDS.WOOL]: 'wheat',
+  [ITEM_IDS.GOAT_MILK]: 'milk',
   [ITEM_IDS.FLOUR]: 'flour',
   [ITEM_IDS.WOOD]: 'ui_wood',
   [ITEM_IDS.STONE]: 'rock_01',
@@ -136,11 +160,29 @@ export const FOOD_BUY_PRICES: Record<string, number> = {
 
 /** Resource sell prices (coins per unit) */
 export const RESOURCE_SELL_PRICES: Record<string, number> = {
-  [ITEM_IDS.WHEAT]: 9,
-  [ITEM_IDS.CORN]: 14,
-  [ITEM_IDS.CARROT]: 17,
-  [ITEM_IDS.TOMATO]: 21,
-  [ITEM_IDS.PUMPKIN]: 35,
+  [ITEM_IDS.WHEAT]: 45,
+  [ITEM_IDS.CORN]: 70,
+  [ITEM_IDS.CARROT]: 85,
+  [ITEM_IDS.TOMATO]: 105,
+  [ITEM_IDS.PUMPKIN]: 175,
+  [ITEM_IDS.MILK]: 12,
+  [ITEM_IDS.EGG]: 10,
+  [ITEM_IDS.PORK]: 18,
+  [ITEM_IDS.FISH]: 14,
+  [ITEM_IDS.DUCK_EGG]: 11,
+  [ITEM_IDS.WOOL]: 13,
+  [ITEM_IDS.GOAT_MILK]: 15,
+};
+
+/** Livestock product sell prices (mirrors LivestockConfig; used by EconomySystem). */
+export const LIVESTOCK_SELL_PRICES: Record<string, number> = {
+  [ITEM_IDS.MILK]: 12,
+  [ITEM_IDS.EGG]: 10,
+  [ITEM_IDS.PORK]: 18,
+  [ITEM_IDS.FISH]: 14,
+  [ITEM_IDS.DUCK_EGG]: 11,
+  [ITEM_IDS.WOOL]: 13,
+  [ITEM_IDS.GOAT_MILK]: 15,
 };
 
 /** Energy restored when consuming food from inventory */
@@ -158,7 +200,9 @@ export function isFoodItem(itemId: string): boolean {
 }
 
 export function isShopBuyable(itemId: string): boolean {
-  return itemId in SEED_BUY_PRICES || itemId in FOOD_BUY_PRICES;
+  if (itemId in SEED_BUY_PRICES || itemId in FOOD_BUY_PRICES) return true;
+  // Livestock shop ids checked in shopLivestock (avoids circular import).
+  return itemId.startsWith('shop_livestock_');
 }
 
 export function getItemCategory(itemId: string): ItemCategory | null {

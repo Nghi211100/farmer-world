@@ -26,7 +26,26 @@ export type AnimalLifecycleState =
 /** Goat + sheep share one buildable pen (house art until stocked). */
 export type LivestockPenKind = 'ruminant';
 
-export interface RuminantOccupantData {
+/** Per-animal lifecycle timers (growth, production, hunger). */
+export interface LivestockAnimalLifecycle {
+  lifecycleState?: AnimalLifecycleState;
+  growthStartAt?: number;
+  growthDurationMs?: number;
+  productionProgressMs?: number;
+  hungerSinceFeedMs?: number;
+  hungrySince?: number;
+  happiness?: number;
+  lastUpdatedAt?: number;
+}
+
+export interface PenAnimalData extends LivestockAnimalLifecycle {
+  animalType: AnimalType;
+  stage?: LivestockStage;
+  variant?: number;
+  animalTextureKey?: string;
+}
+
+export interface RuminantOccupantData extends LivestockAnimalLifecycle {
   animalType: 'goat' | 'sheep';
   stage?: LivestockStage;
   variant?: number;
@@ -52,6 +71,9 @@ export interface LivestockPenData {
   animalTextureKey?: string;
   /** Shared-pen occupants for goat/sheep rendering + persistence. */
   ruminantOccupants?: RuminantOccupantData[];
+  /** Per-animal instances for dedicated species pens (cow, chicken, …). */
+  penAnimals?: PenAnimalData[];
+  /** @deprecated Pen-level mirror of primary animal; use penAnimals / ruminantOccupants. */
   lifecycleState?: AnimalLifecycleState;
   growthStartAt?: number;
   growthDurationMs?: number;

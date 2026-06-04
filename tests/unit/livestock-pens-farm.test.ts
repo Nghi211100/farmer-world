@@ -147,7 +147,14 @@ describe('LivestockSystem — player-placed pens', () => {
     ]);
     expect(loaded).toHaveLength(1);
     expect(loaded[0]?.ruminantOccupants).toEqual([
-      { animalType: 'goat', stage: 'adult', variant: 0, animalTextureKey: 'goat_ault' },
+      expect.objectContaining({
+        animalType: 'goat',
+        stage: 'adult',
+        variant: 0,
+        animalTextureKey: 'goat_ault',
+        growthStartAt: expect.any(Number),
+        lifecycleState: expect.any(String),
+      }),
     ]);
   });
 

@@ -24,13 +24,14 @@ import {
 } from '../config/livestockPenRenderSlots';
 import type { GridSystem } from '../systems/GridSystem';
 import {
-  getLivestockTimerInfo,
+  getLivestockTimerInfoForSlot,
   isRuminantPen,
   penStockCount,
+  tickLivestockPen,
 } from '../systems/livestockLogic';
+import type { AnimalLifecycleState } from '../config/LivestockConfig';
 import { DISPLAY_SIZE, computeSpriteFitScale } from '../utils/iso';
 
-const READY_TINT = 0xa8e6cf;
 const BAR_W = 36;
 const BAR_H = 4;
 const BAR_ABOVE_ANIMAL = 2;
@@ -140,11 +141,10 @@ export class LivestockPenSprite {
     this.clearGrowthOverlays();
     if (this.data.state === 'unstocked') return;
 
-    const timerInfo = getLivestockTimerInfo(this.data, nowMs);
-    if (!timerInfo) return;
-
     const slots = this.resolvedRenderSlots();
     if (slots.length === 0) return;
+
+    const tickedPen = tickLivestockPen(this.data, nowMs);
 
     const positions = livestockRenderSlotPositions(
       slots.length,
@@ -159,7 +159,12 @@ export class LivestockPenSprite {
       const pos = positions[i];
       const slot = slots[i];
       if (!pos || !slot) continue;
-      const mappedStage = lifecycleStateToTextureStage(this.data.lifecycleState, slot.stage ?? 'adult');
+      const timerInfo = getLivestockTimerInfoForSlot(tickedPen, i, nowMs);
+      if (!timerInfo) continue;
+      const mappedStage = lifecycleStateToTextureStage(
+        slot.lifecycleState ?? this.data.lifecycleState,
+        slot.stage ?? 'adult'
+      );
       const box = getLivestockAnimalRenderBox(slot.animalType, mappedStage);
       const anchorX = snapToWholePixel(pos.x);
       const animalTopY = snapToWholePixel(pos.y - box.height);
@@ -170,17 +175,6 @@ export class LivestockPenSprite {
       const fill = this.progressFills[i];
       const text = this.timerTexts[i];
       if (!bg || !fill || !text) continue;
-
-      if (timerInfo.kind === 'ready') {
-        bg.setVisible(false);
-        fill.setVisible(false);
-        text.setText(timerInfo.growthTimeText);
-        text.setColor('#f1c40f');
-        text.setFontStyle('bold');
-        text.setPosition(anchorX, timerY);
-        text.setVisible(true);
-        continue;
-      }
 
       const ratio = Math.max(0, Math.min(1, timerInfo.hungerProgress));
       const fillColor =
@@ -205,8 +199,8 @@ export class LivestockPenSprite {
         text.setVisible(false);
       } else {
         text.setText(label);
-        text.setColor('#ecf0f1');
-        text.setFontStyle('');
+        text.setColor(timerInfo.kind === 'ready' ? '#f1c40f' : '#ecf0f1');
+        text.setFontStyle(timerInfo.kind === 'ready' ? 'bold' : '');
         text.setPosition(anchorX, timerY);
         text.setVisible(true);
       }
@@ -307,6 +301,14 @@ export class LivestockPenSprite {
     stage?: RuminantOccupantData['stage'];
     variant?: RuminantOccupantData['variant'];
     animalTextureKey?: string;
+    lifecycleState?: AnimalLifecycleState;
+    growthStartAt?: number;
+    growthDurationMs?: number;
+    productionProgressMs?: number;
+    hungerSinceFeedMs?: number;
+    hungrySince?: number;
+    happiness?: number;
+    lastUpdatedAt?: number;
   }> {
     const count = visibleLivestockRenderCount(
       penStockCount(this.data),
@@ -321,14 +323,34 @@ export class LivestockPenSprite {
         stage: this.data.stage,
         variant: this.data.variant,
         animalTextureKey: this.data.animalTextureKey,
+        lifecycleState: this.data.lifecycleState,
+        growthStartAt: this.data.growthStartAt,
+        growthDurationMs: this.data.growthDurationMs,
+        productionProgressMs: this.data.productionProgressMs,
+        hungerSinceFeedMs: this.data.hungerSinceFeedMs,
+        hungrySince: this.data.hungrySince,
+        happiness: this.data.happiness,
+        lastUpdatedAt: this.data.lastUpdatedAt,
       };
       return Array.from({ length: count }, (_, i) => occupants[i] ?? fallback);
+    }
+    const penAnimals = this.data.penAnimals;
+    if (penAnimals && penAnimals.length > 0) {
+      return penAnimals.slice(0, count);
     }
     return Array.from({ length: count }, () => ({
       animalType: this.data.animalType,
       stage: this.data.stage,
       variant: this.data.variant,
       animalTextureKey: this.data.animalTextureKey,
+      lifecycleState: this.data.lifecycleState,
+      growthStartAt: this.data.growthStartAt,
+      growthDurationMs: this.data.growthDurationMs,
+      productionProgressMs: this.data.productionProgressMs,
+      hungerSinceFeedMs: this.data.hungerSinceFeedMs,
+      hungrySince: this.data.hungrySince,
+      happiness: this.data.happiness,
+      lastUpdatedAt: this.data.lastUpdatedAt,
     }));
   }
 
@@ -356,7 +378,10 @@ export class LivestockPenSprite {
       const slot = slots[i];
       const pos = positions[i];
       if (!image || !slot || !pos) continue;
-      const mappedStage = lifecycleStateToTextureStage(this.data.lifecycleState, slot.stage ?? 'adult');
+      const mappedStage = lifecycleStateToTextureStage(
+        slot.lifecycleState ?? this.data.lifecycleState,
+        slot.stage ?? 'adult'
+      );
       const mappedTexture = resolveLivestockAnimalTextureKey(
         slot.animalType,
         mappedStage,
@@ -378,13 +403,10 @@ export class LivestockPenSprite {
       image.setPosition(snapToWholePixel(pos.x), snapToWholePixel(pos.y));
       image.setVisible(true);
     }
-    if (this.data.state === 'ready') {
-      this.penImage.setTint(READY_TINT);
-    } else {
-      this.penImage.clearTint();
-    }
+    this.penImage.clearTint();
+    const anyHungry = slots.some((s) => s.lifecycleState === 'hungry');
     this.hungryWarningImage.setVisible(
-      this.data.lifecycleState === 'hungry' && this.container.visible && scene.textures.exists(LIVESTOCK_WARNING_TEXTURE_KEY)
+      anyHungry && this.container.visible && scene.textures.exists(LIVESTOCK_WARNING_TEXTURE_KEY)
     );
   }
 

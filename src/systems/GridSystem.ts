@@ -18,7 +18,6 @@ import {
 import {
   cartToIso,
   isoDepth,
-  moveDestinationMarkerPositionFromTop,
   isoRectFootprintScreenBounds,
   isoRectFootprintScreenRhombus,
   pickIsoTileAt,
@@ -627,9 +626,9 @@ export class GridSystem {
     return this.gridToMapTileBottom(gx, gy);
   }
 
-  /** Walk destination pin: lerp(bottom, center, {@link MOVE_DESTINATION_MARKER_TILE_LIFT}) */
+  /** Walk destination pin: diamond center on map layer (same anchor as {@link gridToPlayerTile}). */
   gridToMoveDestinationMarker(gx: number, gy: number): { x: number; y: number } {
-    return moveDestinationMarkerPositionFromTop(this.gridToMapScreen(gx, gy));
+    return this.gridToMapTileCenter(gx, gy);
   }
 
   /** Diamond bottom on the map layer (alias for pens / explicit map-layer callers). */

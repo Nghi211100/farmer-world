@@ -6,10 +6,12 @@ import {
   feedPen,
   growthProgressRatio,
   livestockSellPrice,
+  livestockSellPriceForAnimal,
   stockPenWithAnimal,
   tickLivestockPen,
   tickAllLivestockPens,
   getLivestockTimerInfo,
+  getLivestockTimerInfoForAnimal,
 } from '../../src/systems/livestockLogic';
 import { getLivestockDef, livestockPenCapacity } from '../../src/config/LivestockConfig';
 import { ITEM_IDS } from '../../src/config/items';
@@ -48,20 +50,40 @@ describe('livestockLogic', () => {
 
   it('getLivestockTimerInfo uses hunger bar and maturation/production labels', () => {
     let pen = stockPenWithAnimal(createNewPen('t1', 'chicken', 0, 0), 'chicken', () => 0)!;
-    const growInfo = getLivestockTimerInfo(pen, pen.growthStartAt! + 1);
+    const growInfo = getLivestockTimerInfo(
+      tickLivestockPen(pen, pen.growthStartAt! + 1),
+      pen.growthStartAt! + 1
+    );
     expect(growInfo?.kind).toBe('grow');
     expect(growInfo?.hungerProgress).toBe(1);
     expect(growInfo?.growthTimeText).toMatch(/^\d{2}:\d{2}:\d{2}$/);
 
     pen = tickLivestockPen(pen, pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1);
+    const animal = pen.penAnimals?.[0];
     const producing = {
       ...pen,
       lifecycleState: 'producing' as const,
       state: 'producing' as const,
+      penAnimals: animal
+        ? [
+            {
+              ...animal,
+              lifecycleState: 'producing' as const,
+              growthStartAt: 1_000_000,
+              productionProgressMs: 1000,
+              hungerSinceFeedMs: 50_000,
+              lastUpdatedAt: 1_100_000,
+            },
+          ]
+        : pen.penAnimals,
       productionProgressMs: 1000,
       hungerSinceFeedMs: 50_000,
+      lastUpdatedAt: 1_100_000,
     };
-    const produceInfo = getLivestockTimerInfo(producing, producing.lastUpdatedAt! + 1);
+    const produceInfo = getLivestockTimerInfo(
+      tickLivestockPen(producing, 1_100_001),
+      1_100_001
+    );
     expect(produceInfo?.kind).toBe('produce');
     expect(produceInfo?.growthTimeText).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     expect(produceInfo?.hungerProgress).toBeGreaterThan(0);
@@ -71,20 +93,33 @@ describe('livestockLogic', () => {
       pen,
       (pen.lastUpdatedAt ?? 0) + getLivestockDef('chicken').hungryAfterMs + 1
     );
-    const hungryInfo = getLivestockTimerInfo(hungry, hungry.lastUpdatedAt! + 1);
+    const hungryInfo = getLivestockTimerInfo(
+      tickLivestockPen(hungry, hungry.lastUpdatedAt! + 1),
+      hungry.lastUpdatedAt! + 1
+    );
     expect(hungryInfo?.kind).toBe('hungry');
     expect(hungryInfo?.hungerProgress).toBe(0);
     expect(hungryInfo?.growthTimeText).toBe('');
 
+    const produceMs = getLivestockDef('chicken').produceMs;
+    const readyAnimal = producing.penAnimals?.[0]
+      ? { ...producing.penAnimals[0], productionProgressMs: produceMs, lastUpdatedAt: 1_200_000 }
+      : undefined;
     const readyPen = {
       ...producing,
       state: 'ready' as const,
       lifecycleState: 'producing' as const,
-      productionProgressMs: getLivestockDef('chicken').produceMs,
+      penAnimals: readyAnimal ? [readyAnimal] : producing.penAnimals,
+      productionProgressMs: produceMs,
+      lastUpdatedAt: 1_200_000,
     };
-    const readyInfo = getLivestockTimerInfo(readyPen, readyPen.lastUpdatedAt! + 1);
+    const readyInfo = getLivestockTimerInfo(
+      tickLivestockPen(readyPen, 1_200_001),
+      1_200_001
+    );
     expect(readyInfo?.kind).toBe('ready');
     expect(readyInfo?.growthTimeText).toBe('Ready');
+    expect(readyInfo?.hungerProgress).toBeGreaterThan(0);
   });
 
   it('hungry pauses production and feeding resumes', () => {
@@ -98,23 +133,40 @@ describe('livestockLogic', () => {
   });
 
   it('production output uses species product', () => {
-    let pen = createNewPen('c1', 'cow', 1, 1);
-    pen = stockPenWithAnimal(pen, 'cow')!;
-    pen = tickLivestockPen(pen, pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1);
-    const ready = tickLivestockPen(
-      { ...pen, productionProgressMs: 1_000_000, state: 'producing', lifecycleState: 'producing' },
-      (pen.lastUpdatedAt ?? 0) + 1
-    );
-    const out = collectFromPen(ready, (ready.lastUpdatedAt ?? 0) + 1);
+    const t0 = 2_000_000;
+    let pen = stockPenWithAnimal(createNewPen('c1', 'cow', 1, 1), 'cow', () => 0, t0)!;
+    const growMs = pen.penAnimals![0]!.growthDurationMs ?? getLivestockDef('cow').growthMs;
+    pen = tickLivestockPen(pen, t0 + growMs + 1);
+    const produceMs = getLivestockDef('cow').produceMs;
+    const readyAnimal = {
+      ...pen.penAnimals![0]!,
+      lifecycleState: 'producing' as const,
+      productionProgressMs: produceMs,
+      lastUpdatedAt: t0 + growMs + 2,
+    };
+    const ready = {
+      ...pen,
+      state: 'ready' as const,
+      penAnimals: [readyAnimal],
+      productionProgressMs: produceMs,
+      lastUpdatedAt: readyAnimal.lastUpdatedAt,
+    };
+    const out = collectFromPen(ready, readyAnimal.lastUpdatedAt! + 1);
     expect(out?.productItemId).toBe(ITEM_IDS.MILK);
   });
 
   it('early sell thresholds enforce 50% growth gate', () => {
     const pen = stockPenWithAnimal(createNewPen('s1', 'pig', 2, 2), 'pig', () => 0)!;
-    const start = pen.growthStartAt!;
-    const tooEarly = livestockSellPrice(pen, start + Math.floor((pen.growthDurationMs ?? 0) * 0.49));
-    const half = livestockSellPrice(pen, start + Math.floor((pen.growthDurationMs ?? 0) * 0.5));
-    const full = livestockSellPrice(pen, start + (pen.growthDurationMs ?? 0) + 1);
+    const animal = pen.penAnimals![0]!;
+    const start = animal.growthStartAt!;
+    const duration = animal.growthDurationMs ?? getLivestockDef('pig').growthMs;
+    const tooEarly = livestockSellPriceForAnimal(
+      animal,
+      'pig',
+      start + Math.floor(duration * 0.49)
+    );
+    const half = livestockSellPriceForAnimal(animal, 'pig', start + Math.floor(duration * 0.5));
+    const full = livestockSellPriceForAnimal(animal, 'pig', start + duration + 1);
     expect(tooEarly).toBe(0);
     expect(half).toBeGreaterThan(0);
     expect(full).toBeGreaterThanOrEqual(half);
@@ -122,9 +174,16 @@ describe('livestockLogic', () => {
 
   it('happiness decreases under prolonged hunger', () => {
     let pen = stockPenWithAnimal(createNewPen('h1', 'sheep', 0, 0), 'sheep', () => 0)!;
-    pen = { ...pen, lifecycleState: 'hungry', hungrySince: 0, lastUpdatedAt: 0, happiness: 100 };
+    const hungryAnimal = {
+      ...pen.penAnimals![0]!,
+      lifecycleState: 'hungry' as const,
+      hungrySince: 0,
+      lastUpdatedAt: 0,
+      happiness: 100,
+    };
+    pen = { ...pen, penAnimals: [hungryAnimal], lifecycleState: 'hungry', hungrySince: 0, lastUpdatedAt: 0 };
     const ticked = tickLivestockPen(pen, 250 * 60 * 1000);
-    expect(ticked.happiness).toBeLessThanOrEqual(50);
+    expect(ticked.penAnimals?.[0]?.happiness).toBeLessThanOrEqual(50);
   });
 
   it('offline tick advances all pens', () => {
@@ -136,5 +195,27 @@ describe('livestockLogic', () => {
   it('preserves global capacity by level (lv1=4, lv2=8)', () => {
     expect(livestockPenCapacity(1)).toBe(4);
     expect(livestockPenCapacity(2)).toBe(8);
+  });
+
+  it('each stocked animal keeps independent growth timers', () => {
+    const t0 = 1_000_000;
+    let pen = stockPenWithAnimal(createNewPen('multi', 'chicken', 0, 0), 'chicken', () => 0, t0)!;
+    const first = pen.penAnimals![0]!;
+    const growMs = first.growthDurationMs ?? getLivestockDef('chicken').growthMs;
+    pen = tickLivestockPen(pen, t0 + growMs + 1);
+    expect(pen.penAnimals![0]?.lifecycleState).toBe('producing');
+
+    const t1 = t0 + growMs + 2_000;
+    pen = stockPenWithAnimal(pen, 'chicken', () => 0, t1)!;
+    expect(pen.penAnimals?.length).toBe(2);
+    const second = pen.penAnimals![1]!;
+    expect(second.growthStartAt).toBe(t1);
+    expect(second.lifecycleState).toBe('baby');
+
+    const infoFirst = getLivestockTimerInfoForAnimal(pen.penAnimals![0]!, 'chicken', t1);
+    const infoSecond = getLivestockTimerInfoForAnimal(second, 'chicken', t1);
+    expect(infoFirst?.kind).toBe('produce');
+    expect(infoSecond?.kind).toBe('grow');
+    expect(infoFirst?.growthTimeText).not.toBe(infoSecond?.growthTimeText);
   });
 });

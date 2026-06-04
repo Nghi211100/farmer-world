@@ -23,6 +23,7 @@ import {
   getPenForSpecies,
   isRuminantPen,
   livestockSellPrice,
+  removeSoldAnimalFromPen,
   penCapacity,
   penStockCount,
   livestockPenKey,
@@ -394,22 +395,7 @@ export class LivestockSystem {
     const current = tickLivestockPen(pen, nowMs);
     const sellPrice = livestockSellPrice(current, nowMs);
     if (sellPrice <= 0) return null;
-    const nextCount = Math.max(0, penStockCount(current) - 1);
-    const next: LivestockPenData = {
-      ...current,
-      stockCount: nextCount,
-      state: nextCount === 0 ? 'unstocked' : current.state,
-      lifecycleState: nextCount === 0 ? undefined : current.lifecycleState,
-      readyAt: undefined,
-    };
-    if (isRuminantPen(current)) {
-      next.ruminantOccupants = (current.ruminantOccupants ?? []).slice(0, nextCount);
-      if (nextCount === 0) {
-        next.animalType = 'sheep';
-      } else {
-        next.animalType = next.ruminantOccupants[0]?.animalType ?? current.animalType;
-      }
-    }
+    const next = removeSoldAnimalFromPen(current, nowMs);
     this.replacePen(next);
     return { pen: next, sellPrice };
   }

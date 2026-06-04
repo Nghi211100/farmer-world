@@ -8,7 +8,6 @@ import {
   TILE_HEIGHT,
   TILE_WIDTH,
   moveDestinationMarkerPositionFromTop,
-  tileBottomFromTop,
   tileCenterFromTop,
 } from '../../src/utils/iso';
 import { getAssetPathToUrlMap } from '../../src/utils/assetUrls';
@@ -22,18 +21,28 @@ describe('move destination marker (ui/coming.png)', () => {
 
   it('targets on-screen size far below source art dimensions', () => {
     expect(MOVE_DESTINATION_MARKER_MAX_PX).toBeLessThan(TILE_WIDTH);
-    expect(MOVE_DESTINATION_MARKER_MAX_PX).toBeGreaterThan(20);
+    expect(MOVE_DESTINATION_MARKER_MAX_PX).toBe(TILE_WIDTH * 0.275);
+    expect(MOVE_DESTINATION_MARKER_MAX_PX).toBeGreaterThan(15);
   });
 
-  it('anchor sits 30% from tile bottom toward diamond center', () => {
+  it('anchor at diamond geometric center (same as player tile)', () => {
     const top = { x: 100, y: 200 };
-    const bottom = tileBottomFromTop(top);
     const center = tileCenterFromTop(top);
     const pin = moveDestinationMarkerPositionFromTop(top);
-    const t = MOVE_DESTINATION_MARKER_TILE_LIFT;
-    expect(pin.x).toBeCloseTo(bottom.x + (center.x - bottom.x) * t);
-    expect(pin.y).toBeCloseTo(bottom.y + (center.y - bottom.y) * t);
-    expect(pin.y).toBe(bottom.y - TILE_HEIGHT * 0.5 * t);
+    expect(pin.x).toBe(center.x);
+    expect(pin.y).toBe(center.y);
+    expect(MOVE_DESTINATION_MARKER_TILE_LIFT).toBe(1);
+  });
+
+  it('gridToMoveDestinationMarker matches gridToMapTileCenter', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const gx = FARM_SOIL_BOUNDS.minX + 2;
+    const gy = FARM_SOIL_BOUNDS.minY + 2;
+    const pin = grid.gridToMoveDestinationMarker(gx, gy);
+    const center = grid.gridToMapTileCenter(gx, gy);
+    expect(pin.x).toBe(center.x);
+    expect(pin.y).toBe(center.y);
   });
 
   it('marker depth sorts above farm ground on unlocked soil', () => {

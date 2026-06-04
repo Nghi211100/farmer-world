@@ -253,7 +253,12 @@ export interface FarmerWorldTestApi {
   closeCropSelectPopup: () => void;
   openObjectEditPopup: (gx?: number, gy?: number, penOnly?: boolean) => void;
   isObjectEditPopupOpen: () => boolean;
-  getObjectEditPopupActions: () => Array<'move' | 'remove' | 'upgrade' | 'feed' | 'sell'>;
+  getObjectEditPopupActions: () => Array<
+    'move' | 'remove' | 'upgrade' | 'feed' | 'sell' | 'sellAll'
+  >;
+  getExpectedPenObjectEditActions: (gx: number, gy: number) => Array<
+    'move' | 'remove' | 'upgrade' | 'feed' | 'sellAll'
+  >;
   isObjectEditFeedWarningVisible: () => boolean;
   isPenHungryWarningVisible: (gx: number, gy: number) => boolean;
   forcePenHungryState: (gx: number, gy: number, hungry: boolean) => boolean;
@@ -764,6 +769,8 @@ export function installGameTestApi(game: Phaser.Game): void {
     },
     isObjectEditPopupOpen: () => getFarmScene(game)?.isObjectEditPopupVisibleForTest() ?? false,
     getObjectEditPopupActions: () => getFarmScene(game)?.getObjectEditPopupActionsForTest() ?? [],
+    getExpectedPenObjectEditActions: (gx, gy) =>
+      getFarmScene(game)?.getExpectedPenObjectEditActionsForTest(gx, gy) ?? [],
     isObjectEditFeedWarningVisible: () =>
       getFarmScene(game)?.isObjectEditFeedWarningVisibleForTest() ?? false,
     isPenHungryWarningVisible: (gx, gy) =>

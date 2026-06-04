@@ -20,6 +20,8 @@ export const UI_OBJECT_UPGRADE_TEXTURE_KEY = 'ui_object_upgrade';
 export const UI_OBJECT_FEED_TEXTURE_KEY = 'ui_object_feed';
 /** Object edit remove (see ui/remove.png). */
 export const UI_OBJECT_REMOVE_TEXTURE_KEY = 'ui_object_remove';
+/** Livestock sell action (see ui/sell.png). */
+export const UI_OBJECT_SELL_TEXTURE_KEY = 'ui_object_sell';
 /** Walk-to destination marker (see ui/coming.png). */
 export const UI_COMING_TEXTURE_KEY = 'ui_coming';
 /** Livestock hungry warning indicator (see animals/warning.png). */
@@ -404,6 +406,13 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     key: UI_OBJECT_REMOVE_TEXTURE_KEY,
     path: 'ui/remove.png',
     placeholderColor: 0xc0392b,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_OBJECT_SELL_TEXTURE_KEY,
+    path: 'ui/sell.png',
+    placeholderColor: 0xe67e22,
     width: 48,
     height: 48,
   },

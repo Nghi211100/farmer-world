@@ -9,9 +9,7 @@ import {
 import {
   getLivestockAnimalRenderBox,
   lifecycleStateToTextureStage,
-  penFootprintTiles,
-  penHouseDisplaySize,
-  penHouseYOffsetPx,
+  penHouseFootprintLayout,
   resolveLivestockAnimalTextureKey,
 } from '../config/livestockAssets';
 import {
@@ -30,7 +28,7 @@ import {
   tickLivestockPen,
 } from '../systems/livestockLogic';
 import type { AnimalLifecycleState } from '../config/LivestockConfig';
-import { DISPLAY_SIZE, computeSpriteFitScale } from '../utils/iso';
+import { computeSpriteFitScale } from '../utils/iso';
 
 const BAR_W = 36;
 const BAR_H = 4;
@@ -41,22 +39,6 @@ function resolvePenTexture(scene: Phaser.Scene, data: LivestockPenData): string 
   const key = getLivestockPenTextureKeyForPen(data, data.level);
   if (scene.textures.exists(key)) return key;
   return scene.textures.exists('coop_lv1') ? 'coop_lv1' : key;
-}
-
-function footprintLayout(grid: GridSystem, data: LivestockPenData) {
-  const { w, h } = penFootprintTiles(data.level ?? 1);
-  const screen = grid.getRectMapFootprintScreenBounds(data.gridX, data.gridY, w, h);
-  const display = penHouseDisplaySize(
-    data.level ?? 1,
-    DISPLAY_SIZE.tileW,
-    DISPLAY_SIZE.tileH,
-    undefined,
-    undefined,
-    undefined,
-    data.animalType
-  );
-  const yOffset = penHouseYOffsetPx(data.level ?? 1, DISPLAY_SIZE.tileW, DISPLAY_SIZE.tileH, data.animalType);
-  return { screen, display, yOffset };
 }
 
 function snapToWholePixel(value: number): number {
@@ -95,10 +77,16 @@ export class LivestockPenSprite {
 
   constructor(scene: Phaser.Scene, grid: GridSystem, data: LivestockPenData) {
     this.data = data;
-    const { screen, display, yOffset } = footprintLayout(grid, data);
+    const layout = penHouseFootprintLayout(
+      grid,
+      data.gridX,
+      data.gridY,
+      data.level ?? 1,
+      data.animalType
+    );
     this.container = scene.add.container(
-      snapToWholePixel(screen.centerX),
-      snapToWholePixel(screen.bottomY + yOffset)
+      snapToWholePixel(layout.x),
+      snapToWholePixel(layout.y)
     );
     this.container.setAlpha(1);
 
@@ -109,7 +97,7 @@ export class LivestockPenSprite {
       .image(0, 0, LIVESTOCK_WARNING_TEXTURE_KEY)
       .setOrigin(0.5, 1)
       .setVisible(false);
-    this.layoutPenHouse(display.width, display.height);
+    this.layoutPenHouse(layout.displayWidth, layout.displayHeight);
 
     // Keep animals above house so stocked livestock remains visible in-pen.
     this.container.add([this.penImage, this.hungryWarningImage]);
@@ -120,11 +108,14 @@ export class LivestockPenSprite {
 
   updateData(data: LivestockPenData, grid: GridSystem, scene: Phaser.Scene): void {
     this.data = data;
-    const { screen, display, yOffset } = footprintLayout(grid, data);
-    this.container.setPosition(
-      snapToWholePixel(screen.centerX),
-      snapToWholePixel(screen.bottomY + yOffset)
+    const layout = penHouseFootprintLayout(
+      grid,
+      data.gridX,
+      data.gridY,
+      data.level ?? 1,
+      data.animalType
     );
+    this.container.setPosition(snapToWholePixel(layout.x), snapToWholePixel(layout.y));
     this.container.setDepth(grid.getDepth(data.gridX, data.gridY, 'buildings') + 2);
     this.container.setAlpha(1);
     const penKey = resolvePenTexture(scene, data);
@@ -132,7 +123,7 @@ export class LivestockPenSprite {
       applyNearestTextureFilter(scene, penKey);
       this.penImage.setTexture(penKey);
     }
-    this.layoutPenHouse(display.width, display.height);
+    this.layoutPenHouse(layout.displayWidth, layout.displayHeight);
     this.applyStateVisual(scene);
     this.updateOverlays(scene);
   }
@@ -422,6 +413,28 @@ export class LivestockPenSprite {
 
   getHouseBounds(): Phaser.Geom.Rectangle {
     return this.penImage.getBounds();
+  }
+
+  /** World-space hit test for a visible animal sprite in this pen. */
+  pickAnimalSlotAtWorldPoint(worldX: number, worldY: number): number | undefined {
+    const hits: Array<{ slot: number; depth: number }> = [];
+    for (let i = 0; i < this.animalImages.length; i++) {
+      const image = this.animalImages[i];
+      if (!image?.visible) continue;
+      const bounds = image.getBounds();
+      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      if (
+        worldX >= bounds.x &&
+        worldX <= bounds.x + bounds.width &&
+        worldY >= bounds.y &&
+        worldY <= bounds.y + bounds.height
+      ) {
+        hits.push({ slot: i, depth: image.depth });
+      }
+    }
+    if (hits.length === 0) return undefined;
+    hits.sort((a, b) => b.depth - a.depth || b.slot - a.slot);
+    return hits[0]?.slot;
   }
 
   isHungryWarningVisibleForTest(): boolean {

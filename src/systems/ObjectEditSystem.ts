@@ -6,6 +6,7 @@ import {
 import { penFootprintTiles } from '../config/livestockAssets';
 import type { BuildSystem } from './BuildSystem';
 import type { GridSystem } from './GridSystem';
+import { penHasStockedAnimals } from './livestockLogic';
 import type { LivestockSystem } from './LivestockSystem';
 
 export type EditableObject =
@@ -23,6 +24,8 @@ export type MoveSession = {
 export class ObjectEditSystem {
   active = false;
   previewLocked = false;
+  /** True after long-press: ghost follows pointer until release. */
+  moveDragging = false;
   ghostX = 0;
   ghostY = 0;
   private session: MoveSession | null = null;
@@ -52,13 +55,20 @@ export class ObjectEditSystem {
     if (payload.kind === 'pen') {
       return this.livestock?.canMovePenTo(payload.pen, gx, gy) ?? false;
     }
-    return this.build.canPlaceObjectAt(gx, gy);
+    if (!this.build.canPlaceObjectAt(gx, gy)) return false;
+    if (this.grid.isLockedSoil(gx, gy)) return false;
+    const cell = this.grid.getCell(gx, gy);
+    if (cell?.type === 'soil') return false;
+    return true;
   }
 
   removeAt(gx: number, gy: number): boolean {
     const obj = this.findEditableAt(gx, gy);
     if (!obj) return false;
-    if (obj.kind === 'pen') return false;
+    if (obj.kind === 'pen') {
+      if (penHasStockedAnimals(obj.pen)) return false;
+      return this.livestock?.removePen(obj.pen) ?? false;
+    }
     if (obj.kind === 'building') {
       return this.build.removeBuildingAt(gx, gy);
     }
@@ -75,10 +85,32 @@ export class ObjectEditSystem {
     const anchorGy = payload.kind === 'pen' ? payload.pen.gridY : gy;
     this.session = { originGx: anchorGx, originGy: anchorGy, payload };
     this.active = true;
-    this.previewLocked = false;
+    this.previewLocked = true;
+    this.moveDragging = false;
     this.ghostX = anchorGx;
     this.ghostY = anchorGy;
     return this.session;
+  }
+
+  startMoveDrag(): void {
+    if (!this.active) return;
+    this.moveDragging = true;
+    this.previewLocked = false;
+  }
+
+  /** End pointer drag but keep ghost at the current cell (locked preview). */
+  finishMoveDrag(): void {
+    if (!this.active) return;
+    this.moveDragging = false;
+    this.previewLocked = true;
+  }
+
+  stopMoveDragAtOrigin(): void {
+    if (!this.session) return;
+    this.moveDragging = false;
+    this.previewLocked = true;
+    this.ghostX = this.session.originGx;
+    this.ghostY = this.session.originGy;
   }
 
   getSession(): MoveSession | null {
@@ -123,6 +155,7 @@ export class ObjectEditSystem {
   endMove(): void {
     this.active = false;
     this.previewLocked = false;
+    this.moveDragging = false;
     this.session = null;
   }
 

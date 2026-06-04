@@ -318,8 +318,15 @@ test.describe('Object edit popup actions', () => {
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
       .toBe(true);
     await expect
-      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getObjectEditPopupActions()))
-      .toEqual(['move', 'upgrade', 'feed', 'sell']);
+      .poll(() =>
+        page.evaluate(() => {
+          const api = window.__FARMER_WORLD_TEST__;
+          const actions = api?.getObjectEditPopupActions() ?? [];
+          const expected = api?.getExpectedPenObjectEditActions(7, 9) ?? [];
+          return JSON.stringify(actions) === JSON.stringify(expected);
+        })
+      )
+      .toBe(true);
   });
 
   test('pen popup shows movement, upgrade, feed, sell', async ({ page }) => {
@@ -329,8 +336,15 @@ test.describe('Object edit popup actions', () => {
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
       .toBe(true);
     await expect
-      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getObjectEditPopupActions()))
-      .toEqual(['move', 'upgrade', 'feed', 'sell']);
+      .poll(() =>
+        page.evaluate(() => {
+          const api = window.__FARMER_WORLD_TEST__;
+          const actions = api?.getObjectEditPopupActions() ?? [];
+          const expected = api?.getExpectedPenObjectEditActions(7, 9) ?? [];
+          return JSON.stringify(actions) === JSON.stringify(expected);
+        })
+      )
+      .toBe(true);
   });
 
   test('non-pen popup keeps movement/remove actions', async ({ page }) => {

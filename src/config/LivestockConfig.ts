@@ -95,6 +95,8 @@ export const LIVESTOCK_PEN_CAPACITY_BY_LEVEL: Record<LivestockPenLevel, number> 
   1: 4,
   2: 8,
 };
+/** Highest pen footprint / capacity tier (see `LIVESTOCK_PEN_LEVELS` in livestockAssets). */
+export const LIVESTOCK_PEN_MAX_LEVEL: LivestockPenLevel = 2;
 
 export const RUMINANT_PEN_LABEL_VI = 'Chuồng Dê/Cừu';
 

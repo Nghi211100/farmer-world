@@ -5,12 +5,13 @@ import {
   UI_OBJECT_FEED_TEXTURE_KEY,
   UI_OBJECT_MOVE_TEXTURE_KEY,
   UI_OBJECT_REMOVE_TEXTURE_KEY,
+  UI_OBJECT_SELL_TEXTURE_KEY,
   UI_OBJECT_UPGRADE_TEXTURE_KEY,
 } from '../config/assets';
 import type { GridSystem } from '../systems/GridSystem';
 import { placePopupAboveTile } from '../utils/popupPosition';
 
-export type ObjectEditAction = 'move' | 'remove' | 'upgrade' | 'feed' | 'sell';
+export type ObjectEditAction = 'move' | 'remove' | 'upgrade' | 'feed' | 'sell' | 'sellAll';
 
 const PANEL_DEPTH = 11940;
 const BTN_SIZE = Math.round(44 * (2 / 3));
@@ -18,10 +19,25 @@ const BTN_GAP = 12;
 const PANEL_W_TWO = BTN_SIZE * 2 + BTN_GAP;
 const PANEL_H = BTN_SIZE;
 const ABOVE_OFFSET_PX = 48;
+const DISABLED_ALPHA = 0.38;
 
 type ButtonVisual = {
   root: Phaser.GameObjects.Image;
   hit: Phaser.GameObjects.Rectangle;
+};
+
+export type ObjectEditPopupShowOptions = {
+  hideRemove?: boolean;
+  showHungryWarning?: boolean;
+  /** Pen-level actions (move / upgrade / feed / sell all). */
+  penMode?: boolean;
+  /** Placed building (house / barn / decor tree). */
+  buildingMode?: boolean;
+  /** Feed + sell for one animal in the pen. */
+  animalMode?: boolean;
+  disabledActions?: ReadonlyArray<ObjectEditAction>;
+  /** Omit buttons entirely (e.g. feed/sellAll when pen empty, upgrade at max level). */
+  hiddenActions?: ReadonlyArray<ObjectEditAction>;
 };
 
 /** Move / Remove actions above a clicked building or natural object. */
@@ -33,6 +49,7 @@ export class ObjectEditPopup {
   private tileGx = 0;
   private tileGy = 0;
   private onAction?: (action: ObjectEditAction, gx: number, gy: number) => void;
+  private onDisabledAction?: (action: ObjectEditAction, gx: number, gy: number) => void;
   private onDismiss?: () => void;
   private showHungryWarningBadge = false;
 
@@ -50,28 +67,52 @@ export class ObjectEditPopup {
     this.onAction = cb;
   }
 
+  setOnDisabledAction(cb: (action: ObjectEditAction, gx: number, gy: number) => void): void {
+    this.onDisabledAction = cb;
+  }
+
   setOnDismiss(cb: () => void): void {
     this.onDismiss = cb;
   }
 
-  show(gx: number, gy: number, options?: { hideRemove?: boolean; showHungryWarning?: boolean }): void {
+  show(gx: number, gy: number, options?: ObjectEditPopupShowOptions): void {
     this.hide(false);
     this.tileGx = gx;
     this.tileGy = gy;
 
-    const isPenPopup = Boolean(options?.hideRemove);
+    const disabled = new Set(options?.disabledActions ?? []);
+    const hidden = new Set(options?.hiddenActions ?? []);
     this.showHungryWarningBadge = Boolean(options?.showHungryWarning);
-    const buttonSpecs: ReadonlyArray<{ action: ObjectEditAction; texture: string }> = isPenPopup
-      ? [
-          { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
-          { action: 'upgrade', texture: UI_OBJECT_UPGRADE_TEXTURE_KEY },
-          { action: 'feed', texture: UI_OBJECT_FEED_TEXTURE_KEY },
-          { action: 'sell', texture: UI_OBJECT_REMOVE_TEXTURE_KEY },
-        ]
-      : [
-          { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
-          { action: 'remove', texture: UI_OBJECT_REMOVE_TEXTURE_KEY },
-        ];
+
+    const allButtonSpecs: ReadonlyArray<{ action: ObjectEditAction; texture: string }> =
+      options?.animalMode
+        ? [
+            { action: 'feed', texture: UI_OBJECT_FEED_TEXTURE_KEY },
+            { action: 'sell', texture: UI_OBJECT_SELL_TEXTURE_KEY },
+          ]
+        : options?.penMode
+          ? [
+              { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
+              { action: 'upgrade', texture: UI_OBJECT_UPGRADE_TEXTURE_KEY },
+              { action: 'feed', texture: UI_OBJECT_FEED_TEXTURE_KEY },
+              { action: 'sellAll', texture: UI_OBJECT_SELL_TEXTURE_KEY },
+              ...(options.hideRemove
+                ? []
+                : [{ action: 'remove' as const, texture: UI_OBJECT_REMOVE_TEXTURE_KEY }]),
+            ]
+          : options?.buildingMode
+            ? [
+                { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
+                { action: 'upgrade', texture: UI_OBJECT_UPGRADE_TEXTURE_KEY },
+                { action: 'remove', texture: UI_OBJECT_REMOVE_TEXTURE_KEY },
+              ]
+            : [
+              { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
+              ...(options?.hideRemove
+                ? []
+                : [{ action: 'remove' as const, texture: UI_OBJECT_REMOVE_TEXTURE_KEY }]),
+            ];
+    const buttonSpecs = allButtonSpecs.filter((spec) => !hidden.has(spec.action));
 
     const children: Phaser.GameObjects.GameObject[] = [];
     this.hitTargets = [];
@@ -79,7 +120,14 @@ export class ObjectEditPopup {
     const startX = -((buttonSpecs.length - 1) * (BTN_SIZE + BTN_GAP)) / 2;
     buttonSpecs.forEach((spec, index) => {
       const x = startX + index * (BTN_SIZE + BTN_GAP);
-      const btn = this.createButton(x, spec.texture, () => this.fireAction(spec.action));
+      const isDisabled = disabled.has(spec.action);
+      const btn = this.createButton(x, spec.texture, () => {
+        if (isDisabled) {
+          this.onDisabledAction?.(spec.action, this.tileGx, this.tileGy);
+          return;
+        }
+        this.fireAction(spec.action);
+      }, isDisabled);
       this.hitTargets.push(btn.hit, btn.root);
       children.push(btn.hit, btn.root);
       if (
@@ -93,7 +141,10 @@ export class ObjectEditPopup {
 
     this.container.add(children);
 
-    this.layout(isPenPopup, buttonSpecs.length);
+    this.layout(
+      Boolean(options?.penMode || options?.animalMode || options?.buildingMode),
+      buttonSpecs.length
+    );
     this.container.setVisible(true);
     this.visible = true;
   }
@@ -155,7 +206,8 @@ export class ObjectEditPopup {
   private createButton(
     x: number,
     textureKey: string,
-    onPress: () => void
+    onPress: () => void,
+    disabled = false
   ): ButtonVisual {
     const hit = this.scene.add
       .rectangle(x, 0, BTN_SIZE, BTN_SIZE, 0x000000, 0.001)
@@ -163,12 +215,17 @@ export class ObjectEditPopup {
 
     const img = this.scene.add.image(x, 0, textureKey).setScrollFactor(0);
     img.setDisplaySize(BTN_SIZE, BTN_SIZE);
+    if (disabled) {
+      img.setAlpha(DISABLED_ALPHA);
+      hit.setInteractive({ useHandCursor: false });
+    } else {
+      hit.setInteractive({ useHandCursor: true });
+    }
 
     const stopAnd = (event: Phaser.Types.Input.EventData) => {
       event.stopPropagation();
       onPress();
     };
-    hit.setInteractive({ useHandCursor: true });
     hit.on(
       'pointerdown',
       (

@@ -15,6 +15,7 @@ function candidate(
     visible: partial.visible ?? true,
     alpha: partial.alpha ?? 1,
     bounds: partial.bounds ?? { x: 100, y: 100, width: 80, height: 60 },
+    footprintBounds: partial.footprintBounds,
   };
 }
 
@@ -43,5 +44,33 @@ describe('pickLivestockPenAtWorldPoint', () => {
       120
     );
     expect(hit).toBeUndefined();
+  });
+
+  it('uses footprint bounds so art outside grid does not steal clicks', () => {
+    const hit = pickLivestockPenAtWorldPoint(
+      [
+        candidate({
+          id: 'pen-wide-art',
+          bounds: { x: 50, y: 50, width: 200, height: 200 },
+          footprintBounds: { x: 100, y: 100, width: 40, height: 40 },
+        }),
+      ],
+      60,
+      60
+    );
+    expect(hit).toBeUndefined();
+
+    const inside = pickLivestockPenAtWorldPoint(
+      [
+        candidate({
+          id: 'pen-wide-art',
+          bounds: { x: 50, y: 50, width: 200, height: 200 },
+          footprintBounds: { x: 100, y: 100, width: 40, height: 40 },
+        }),
+      ],
+      120,
+      120
+    );
+    expect(inside?.id).toBe('pen-wide-art');
   });
 });

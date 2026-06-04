@@ -13,6 +13,7 @@ import {
   DEFAULT_COINS,
   DEFAULT_ENERGY,
   DEFAULT_GEMS,
+  ECONOMY,
   FARM_PLAYER_SPAWN_GX,
   FARM_PLAYER_SPAWN_GY,
   FarmTool,
@@ -31,7 +32,7 @@ import { ExpandLandDimOverlay } from '../ui/ExpandLandDimOverlay';
 import { BuildPlacementConfirm } from '../ui/BuildPlacementConfirm';
 import { LandUnlockConfirm } from '../ui/LandUnlockConfirm';
 import { ObjectEditPopup, type ObjectEditAction } from '../ui/ObjectEditPopup';
-import { ObjectEditSystem } from '../systems/ObjectEditSystem';
+import { ObjectEditSystem, type MoveSession } from '../systems/ObjectEditSystem';
 import { BuildingSprite, renderBuildings } from '../entities/Building';
 import { cropKey, CropSprite, syncCropSprites } from '../entities/Crop';
 import { renderMapDecorations } from '../entities/Decoration';
@@ -52,12 +53,15 @@ import {
   FARM_NORTH_EDGE_GROUND_SCALE,
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
-  fitSpriteToIsoFootprint,
   MOVE_DESTINATION_MARKER_MAX_PX,
   NATURE_DISPLAY_SCALE,
   tileCenterFromTop,
 } from '../utils/iso';
-import { penFootprintTiles, penHouseDisplaySize } from '../config/livestockAssets';
+import {
+  getAnimalTypeForHouseTextureKey,
+  penFootprintTiles,
+  penHouseFootprintLayout,
+} from '../config/livestockAssets';
 import {
   buildFarmViewportHudDebugOverlay,
   buildFarmWorldDebugGridOverlay,
@@ -87,6 +91,23 @@ import {
   type LivestockPenData,
 } from '../config/LivestockConfig';
 import { renderLivestockPens, type LivestockPenSprite } from '../entities/LivestockPen';
+import {
+  getBuildingObjectEditDisabledActions,
+  getBuildingObjectEditHiddenActions,
+  getBuildingObjectEditVisibleActions,
+} from '../systems/buildingObjectEditLogic';
+import {
+  canFeedAnimalAtSlot,
+  isAnimalHungryAtSlot,
+  isAnimalSellableAtSlot,
+  livestockSellPriceForPenAnimalAt,
+  getPenObjectEditHiddenActions,
+  getPenObjectEditVisibleActions,
+  type PenObjectEditAction,
+  penHasStockedAnimals,
+  shouldShowHungryFeedWarningForPen,
+  shouldShowHungryFeedWarningForSlot,
+} from '../systems/livestockLogic';
 import type { BuildingData } from '../config/gameConfig';
 import {
   computePlayableFarmViewportLayout,
@@ -100,6 +121,11 @@ import {
 import type { UIScene } from './UIScene';
 import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
+import {
+  isGridOnMoveSessionOrigin,
+  objectMovePickupScale,
+} from '../utils/objectMoveDrag';
+import { penIdAfterConfirmedMove } from '../utils/objectMoveReveal';
 import { pickLivestockPenAtWorldPoint } from '../utils/livestockPenHitTest';
 import {
   clampScrollToFarmPlayable,
@@ -176,6 +202,8 @@ export class FarmScene extends Phaser.Scene {
   private landUnlockConfirm!: LandUnlockConfirm;
   private buildPlacementConfirm!: BuildPlacementConfirm;
   private objectEditPopup!: ObjectEditPopup;
+  /** When set, object-edit feed/sell targets this animal slot in the pen at tileGx/tileGy. */
+  private objectEditAnimalSlot: number | undefined;
   private pendingExpandTile?: { x: number; y: number };
   private toolBar?: ToolBar;
 
@@ -192,6 +220,10 @@ export class FarmScene extends Phaser.Scene {
   private buildingSprites = new Map<string, BuildingSprite>();
   private livestockPenSprites = new Map<string, LivestockPenSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
+  private objectMoveLongPressTimer?: Phaser.Time.TimerEvent;
+  private objectMovePressPointerId = -1;
+  private objectMovePressScreenX = 0;
+  private objectMovePressScreenY = 0;
   private moveDestinationMarker?: Phaser.GameObjects.Image;
   private moveDestinationGx = -1;
   private moveDestinationGy = -1;
@@ -1562,10 +1594,6 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.objectEditSystem.active) {
-      if (this.buildPlacementConfirm?.hitsPointer(pointer)) {
-        return;
-      }
-      this.handleObjectMovePreviewTap(x, y);
       return;
     }
 
@@ -1579,18 +1607,34 @@ export class FarmScene extends Phaser.Scene {
     const cell = this.grid.getCell(x, y);
 
     if (this.farmMode === 'normal') {
-      const pen = this.resolvePenFromPointer(pointer) ?? this.livestockSystem.getPenAt(x, y);
-      if (pen) {
+      const cam = this.cameras.main;
+      const world = cam.getWorldPoint(pointer.x, pointer.y);
+      for (const spr of this.livestockPenSprites.values()) {
+        const animalSlot = spr.pickAnimalSlotAtWorldPoint(world.x, world.y);
+        if (animalSlot !== undefined) {
+          this.dismissFarmPopups();
+          this.showAnimalEditPopup(spr.data, animalSlot);
+          return;
+        }
+      }
+      const penAtCell = this.livestockSystem.getPenAt(x, y);
+      const editableOnCell = this.objectEditSystem.findEditableAt(x, y);
+      if (penAtCell) {
         this.dismissFarmPopups();
-        this.showObjectEditPopup(pen.gridX, pen.gridY, true);
+        this.showObjectEditPopup(penAtCell.gridX, penAtCell.gridY, true);
         return;
       }
-    }
-
-    if (this.farmMode === 'normal' && this.objectEditSystem.findEditableAt(x, y)) {
-      this.dismissFarmPopups();
-      this.showObjectEditPopup(x, y);
-      return;
+      if (editableOnCell) {
+        this.dismissFarmPopups();
+        this.showObjectEditPopup(x, y);
+        return;
+      }
+      const penFromPointer = this.resolvePenFromPointer(pointer);
+      if (penFromPointer) {
+        this.dismissFarmPopups();
+        this.showObjectEditPopup(penFromPointer.gridX, penFromPointer.gridY, true);
+        return;
+      }
     }
 
     if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
@@ -1624,6 +1668,15 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
+      // Farm popups before HUD dismiss — popup buttons are interactive and match hitsInteractiveHud.
+      if (this.handleObjectEditPointer(pointer)) {
+        return;
+      }
+
+      if (this.handleFarmPopupPointer(pointer)) {
+        return;
+      }
+
       const ui = this.getUIScene();
       if (ui?.hitsInteractiveHud(pointer)) {
         if (
@@ -1636,7 +1689,11 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
-      if (this.handleObjectEditPointer(pointer)) {
+      if (this.tryBeginObjectMoveLongPress(pointer)) {
+        return;
+      }
+
+      if (this.tryBeginLivestockPlaceLongPress(pointer)) {
         return;
       }
 
@@ -1659,10 +1716,6 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
-      if (this.handleFarmPopupPointer(pointer)) {
-        return;
-      }
-
       this.beginPointerGesture(pointer);
     });
 
@@ -1673,10 +1726,28 @@ export class FarmScene extends Phaser.Scene {
         this.updateGhostSprite();
       }
 
-      if (this.objectEditSystem.active && !this.objectEditSystem.previewLocked) {
+      if (
+        this.objectEditSystem.active &&
+        this.objectEditSystem.moveDragging &&
+        !this.objectEditSystem.previewLocked
+      ) {
         const { x, y } = this.screenPointToGrid(pointer);
         this.objectEditSystem.updateGhost(x, y);
         this.updateGhostSprite();
+      }
+
+      if (
+        this.livestockSystem.active &&
+        this.livestockSystem.placeDragging &&
+        !this.livestockSystem.previewLocked
+      ) {
+        const { x, y } = this.screenPointToGrid(pointer);
+        this.livestockSystem.updateGhost(x, y);
+        this.updateGhostSprite();
+      }
+
+      if (this.updateObjectMoveLongPressGesture(pointer)) {
+        return;
       }
 
       if (this.pointerGestureActive && pointer.isDown) {
@@ -1689,6 +1760,14 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (this.finishLivestockPlaceDrag(pointer)) {
+        return;
+      }
+
+      if (this.finishObjectMoveDrag(pointer)) {
+        return;
+      }
+
       const wasDrag = this.pointerGestureDragged;
       const wasTap =
         this.pointerGestureActive &&
@@ -1720,7 +1799,10 @@ export class FarmScene extends Phaser.Scene {
       }
     });
 
-    this.input.on('pointerupoutside', () => {
+    this.input.on('pointerupoutside', (pointer: Phaser.Input.Pointer) => {
+      if (this.finishObjectMoveDrag(pointer)) {
+        return;
+      }
       this.endPointerGesture();
     });
 
@@ -1835,12 +1917,20 @@ export class FarmScene extends Phaser.Scene {
   private handleLivestockPenPlaceSelect(item: LivestockPenPlaceItemDef): void {
     this.buildSystem.exitBuildMode();
     this.livestockSystem.enterPlaceMode(item);
+    const spot = this.livestockSystem.findFirstValidPenPlacement(item.placeTarget, 1);
+    if (!spot) {
+      this.livestockSystem.exitPlaceMode();
+      this.showToast('Không còn chỗ trống để đặt chuồng');
+      return;
+    }
+    this.livestockSystem.lockPreviewAt(spot.gx, spot.gy);
     this.setFarmMode('livestock');
     this.updateGhostSprite();
+    this.showLivestockPlacementConfirm();
     const hint =
       item.placeTarget === 'fish'
-        ? 'Chọn ô 3×3, đặt hồ cá, rồi bấm ✓'
-        : 'Chọn ô 3×3 cỏ trống, đặt chuồng, rồi bấm ✓';
+        ? 'Chạm hồ cá để kéo · Lưu / Hủy'
+        : 'Chạm chuồng để kéo · Lưu / Hủy';
     this.events.emit('mode-hint', { text: hint, prominent: true });
   }
 
@@ -1907,6 +1997,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private cancelLivestockPlaceMode(): void {
+    this.objectMovePressPointerId = -1;
     this.livestockSystem.exitPlaceMode();
     this.buildPlacementConfirm.hide();
     this.ghostSprite?.setVisible(false);
@@ -1932,22 +2023,59 @@ export class FarmScene extends Phaser.Scene {
   }
 
 
+  private handleBuildingUpgradeTap(building: BuildingData): void {
+    if (!this.buildSystem.canUpgrade(building)) {
+      if (building.type === 'tree') {
+        this.showToast('Cây trang trí không thể nâng cấp');
+      } else if (building.level >= ECONOMY.maxBuildingLevel) {
+        this.showToast('Công trình đã đạt cấp tối đa');
+      } else {
+        this.showToast('Không thể nâng cấp công trình này');
+      }
+      return;
+    }
+    const cost = this.economy.getBuildingUpgradeCost(building.type, building.level);
+    if (!this.economy.canUpgradeBuilding(building.type, building.level)) {
+      this.showToast(`Cần ${cost} xu để nâng cấp`);
+      return;
+    }
+    if (!this.upgradeBuilding(building)) {
+      this.showToast(`Cần ${cost} xu để nâng cấp`);
+    } else {
+      this.showToast('Đã nâng cấp công trình');
+    }
+  }
+
   private handleLivestockPenUpgradeTap(pen: LivestockPenData): void {
     const current = this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ?? pen;
-    const action = this.livestockSystem.getPenAction(current, Date.now());
-    if (!action.canUpgrade) {
-      this.showToast('Không thể nâng cấp chuồng tại đây');
+    const blockMsg = this.livestockSystem.getPenUpgradeBlockMessage(current);
+    if (blockMsg) {
+      this.showToast(blockMsg);
+      return;
+    }
+    if (!this.economy.canAfford(LIVESTOCK_PEN_UPGRADE_COST)) {
+      this.showToast(`Cần ${LIVESTOCK_PEN_UPGRADE_COST} xu để nâng cấp chuồng`);
       return;
     }
     if (!this.economy.spend(LIVESTOCK_PEN_UPGRADE_COST)) {
       this.showToast(`Cần ${LIVESTOCK_PEN_UPGRADE_COST} xu để nâng cấp chuồng`);
       return;
     }
-    if (!this.livestockSystem.tryUpgrade(current)) {
+    const upgraded = this.livestockSystem.tryUpgrade(current);
+    if (!upgraded) {
       this.economy.earn(LIVESTOCK_PEN_UPGRADE_COST);
-      this.showToast('Vùng 4×4 bị chặn — dọn ô trống quanh chuồng');
+      this.showToast(
+        this.livestockSystem.getPenUpgradeBlockMessage(current) ??
+          'Vùng 4×4 bị chặn — dọn ô trống quanh chuồng'
+      );
       return;
     }
+    renderLivestockPens(
+      this,
+      this.grid,
+      this.livestockSystem.getPens(),
+      this.livestockPenSprites
+    );
     this.emitHud();
     this.scheduleSave();
     this.showToast('Đã nâng cấp chuồng lên 4×4');
@@ -1991,7 +2119,48 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
-  private handleLivestockPenSell(pen: LivestockPenData): void {
+  private handleLivestockPenSellAll(pen: LivestockPenData): void {
+    const now = Date.now();
+    this.livestockSystem.tick(now);
+    const current =
+      this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+      this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+      pen;
+    const result = this.livestockSystem.trySellAllAnimals(current, now);
+    if (!result) {
+      this.showToast('Chưa thể bán hết — mỗi con cần ≥50% trưởng thành');
+      return;
+    }
+    this.economy.earn(result.sellPrice);
+    this.refreshMapDecorations();
+    this.emitHud();
+    this.scheduleSave();
+    this.showToast(`Đã bán hết vật nuôi +${result.sellPrice} xu`);
+  }
+
+  private handleLivestockPenSellAnimal(
+    pen: LivestockPenData,
+    slotIndex: number
+  ): void {
+    const now = Date.now();
+    this.livestockSystem.tick(now);
+    const current =
+      this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+      this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+      pen;
+    const result = this.livestockSystem.trySellAnimalAt(current, slotIndex, now);
+    if (!result) {
+      this.showToast('Chưa thể bán con này (cần ≥50% trưởng thành)');
+      return;
+    }
+    this.economy.earn(result.sellPrice);
+    this.refreshMapDecorations();
+    this.emitHud();
+    this.scheduleSave();
+    this.showToast(`Đã bán vật nuôi +${result.sellPrice} xu`);
+  }
+
+  private handleLivestockPenFeedAnimal(pen: LivestockPenData, slotIndex: number): void {
     const now = Date.now();
     this.livestockSystem.tick(now);
     const current =
@@ -1999,41 +2168,151 @@ export class FarmScene extends Phaser.Scene {
       this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
       pen;
     const def = getLivestockDef(current.animalType);
-    const result = this.livestockSystem.trySellAnimal(current, now);
-    if (!result) {
-      this.showToast(`Chưa thể bán ${def.labelVi}`);
+    if (!canFeedAnimalAtSlot(current, slotIndex, now)) {
+      this.showToast(`Không thể cho ${def.labelVi} ăn lúc này`);
       return;
     }
-    this.economy.earn(result.sellPrice);
-    this.refreshMapDecorations();
+    if (!this.economy.spend(def.feedCost)) {
+      this.showToast(`Cần ${def.feedCost} xu cho ăn`);
+      return;
+    }
+    if (!this.livestockSystem.tryFeedAnimalAt(current, slotIndex, now)) {
+      this.economy.earn(def.feedCost);
+      this.showToast(`Không thể cho ${def.labelVi} ăn`);
+      return;
+    }
     this.emitHud();
     this.scheduleSave();
-    this.showToast(`Đã bán ${def.labelVi} +${result.sellPrice} xu`);
+    this.showToast(`Đã cho ${def.labelVi} ăn`);
+  }
+
+  private showAnimalEditPopup(pen: LivestockPenData, slotIndex: number): void {
+    this.objectEditAnimalSlot = slotIndex;
+    const now = Date.now();
+    this.livestockSystem.tick(now);
+    const current =
+      this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+      this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+      pen;
+    const showHungryWarning = shouldShowHungryFeedWarningForSlot(current, slotIndex, now);
+    this.objectEditPopup.show(pen.gridX, pen.gridY, {
+      animalMode: true,
+      showHungryWarning,
+      disabledActions: isAnimalSellableAtSlot(current, slotIndex, now) ? [] : ['sell'],
+    });
+    const sellPrice = livestockSellPriceForPenAnimalAt(current, slotIndex, now);
+    if (sellPrice > 0) {
+      const hungry = isAnimalHungryAtSlot(current, slotIndex, now);
+      const hint = hungry
+        ? `Bán con này: ${sellPrice} xu (giảm 5% khi đói)`
+        : `Bán con này: ${sellPrice} xu`;
+      this.events.emit('mode-hint', { text: hint, prominent: false });
+    }
   }
 
   private showObjectEditPopup(gx: number, gy: number, penOnly = false): void {
+    this.objectEditAnimalSlot = undefined;
     const pen = penOnly ? this.livestockSystem.getPenAt(gx, gy) : undefined;
-    const showHungryWarning = pen?.lifecycleState === 'hungry';
-    this.objectEditPopup.show(
-      gx,
-      gy,
-      penOnly ? { hideRemove: true, showHungryWarning } : undefined
-    );
+    const now = Date.now();
+    const disabledActions: ObjectEditAction[] = [];
+    const hiddenActions: ObjectEditAction[] = [];
+    let showHungryWarning = false;
+    if (pen) {
+      this.livestockSystem.tick(now);
+      const current =
+        this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+        this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+        pen;
+      showHungryWarning = shouldShowHungryFeedWarningForPen(current, now);
+      if (!this.livestockSystem.canSellAllAnimals(current, now)) {
+        disabledActions.push('sellAll');
+      }
+      if (
+        this.livestockSystem.getPenUpgradeBlockMessage(current) ||
+        !this.economy.canAfford(LIVESTOCK_PEN_UPGRADE_COST)
+      ) {
+        disabledActions.push('upgrade');
+      }
+      hiddenActions.push(...getPenObjectEditHiddenActions(current));
+      this.objectEditPopup.show(gx, gy, {
+        penMode: true,
+        hideRemove: penHasStockedAnimals(pen),
+        showHungryWarning,
+        disabledActions,
+        hiddenActions,
+      });
+    } else {
+      const editable = this.objectEditSystem.findEditableAt(gx, gy);
+      if (editable?.kind === 'building') {
+        const building = editable.building;
+        hiddenActions.push(...getBuildingObjectEditHiddenActions(building));
+        disabledActions.push(
+          ...getBuildingObjectEditDisabledActions(building, this.buildSystem, this.economy)
+        );
+        this.objectEditPopup.show(gx, gy, {
+          buildingMode: true,
+          disabledActions,
+          hiddenActions,
+        });
+      } else {
+        this.objectEditPopup.show(gx, gy, { disabledActions, hiddenActions });
+      }
+    }
+    if (pen) {
+      const current =
+        this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+        this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+        pen;
+      const sellPrice = this.livestockSystem.getSellAllPrice(current, now);
+      if (sellPrice > 0) {
+        const hungry = current.lifecycleState === 'hungry';
+        const hint = hungry
+          ? `Bán hết: ${sellPrice} xu (giảm 5% khi đói)`
+          : `Bán hết: ${sellPrice} xu`;
+        this.events.emit('mode-hint', { text: hint, prominent: false });
+      } else if (penHasStockedAnimals(current)) {
+        this.events.emit('mode-hint', {
+          text: 'Bán hết: mỗi con cần ≥50% trưởng thành',
+          prominent: false,
+        });
+      }
+    }
   }
 
   private executeObjectEditAction(action: ObjectEditAction, gx: number, gy: number): void {
     const pen = this.livestockSystem.getPenAt(gx, gy);
+    const building = this.buildSystem.findBuildingAt(gx, gy);
+    if (action === 'upgrade') {
+      if (pen) {
+        this.handleLivestockPenUpgradeTap(pen);
+        return;
+      }
+      if (building) {
+        this.handleBuildingUpgradeTap(building);
+        return;
+      }
+      this.showToast('Vật thể này không thể nâng cấp');
+      return;
+    }
+    if (pen && this.objectEditAnimalSlot !== undefined) {
+      const slot = this.objectEditAnimalSlot;
+      this.objectEditAnimalSlot = undefined;
+      if (action === 'feed') {
+        this.handleLivestockPenFeedAnimal(pen, slot);
+        return;
+      }
+      if (action === 'sell') {
+        this.handleLivestockPenSellAnimal(pen, slot);
+        return;
+      }
+    }
     if (pen) {
       if (action === 'feed') {
         this.handleLivestockPenTap(pen);
         return;
       }
-      if (action === 'upgrade') {
-        this.handleLivestockPenUpgradeTap(pen);
-        return;
-      }
-      if (action === 'sell') {
-        this.handleLivestockPenSell(pen);
+      if (action === 'sellAll') {
+        this.handleLivestockPenSellAll(pen);
         return;
       }
     }
@@ -2043,6 +2322,8 @@ export class FarmScene extends Phaser.Scene {
         this.refreshMapDecorations();
         this.scheduleSave();
         this.showToast('Removed');
+      } else if (this.livestockSystem.getPenAt(gx, gy) && penHasStockedAnimals(this.livestockSystem.getPenAt(gx, gy)!)) {
+        this.showToast('Không thể gỡ chuồng khi còn vật nuôi');
       }
       return;
     }
@@ -2055,28 +2336,15 @@ export class FarmScene extends Phaser.Scene {
     }
     this.setObjectOriginHidden(session.originGx, session.originGy, true);
     this.updateGhostSprite();
+    this.showObjectMovePlacementConfirm();
     const hint =
       session.payload.kind === 'pen'
-        ? 'Chọn ô mới cho chuồng, rồi bấm ✓'
-        : 'Tap a tile, then tap ✓ to place';
+        ? 'Chạm chuồng để kéo · Lưu / Hủy'
+        : 'Chạm vật thể để kéo · Lưu / Hủy';
     this.events.emit('mode-hint', { text: hint, prominent: false });
   }
 
-  private finishObjectEditInteraction(): void {
-    if (this.objectEditSystem.active) return;
-  }
-
-  private handleObjectMovePreviewTap(gx: number, gy: number): void {
-    if (!this.objectEditSystem.canPlaceAt(gx, gy)) {
-      this.showToast("Can't place here");
-      return;
-    }
-    this.objectEditSystem.lockPreviewAt(gx, gy);
-    this.updateGhostSprite();
-    this.showObjectMoveConfirm();
-  }
-
-  private showObjectMoveConfirm(): void {
+  private showObjectMovePlacementConfirm(): void {
     const { ghostX, ghostY } = this.objectEditSystem;
     const canPlace = this.objectEditSystem.canPlaceAt(ghostX, ghostY);
     this.buildPlacementConfirm.show(
@@ -2089,23 +2357,166 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private confirmObjectMove(): void {
+    const session = this.objectEditSystem.getSession();
+    if (!session) return;
     const { ghostX, ghostY } = this.objectEditSystem;
-    if (!this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
-      this.showToast("Can't place here");
-      this.showObjectMoveConfirm();
+    const penId = penIdAfterConfirmedMove(session);
+    if (!this.objectEditSystem.canPlaceAt(ghostX, ghostY)) {
+      this.showToast('Không đặt được tại đây');
+      this.showObjectMovePlacementConfirm();
       return;
     }
-    const movedPen = this.objectEditSystem.isPenSession();
-    this.refreshMapDecorations();
-    this.objectEditSystem.endMove();
-    this.buildPlacementConfirm.hide();
-    this.ghostSprite?.setVisible(false);
-    this.events.emit('mode-hint', { text: '', prominent: false });
-    this.scheduleSave();
-    this.showToast(movedPen ? 'Đã di chuyển chuồng' : 'Moved');
+    if (this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
+      this.revealObjectAfterConfirmedMove(session, penId, ghostX, ghostY);
+      this.buildPlacementConfirm.hide();
+      this.ghostSprite?.setVisible(false);
+      this.events.emit('mode-hint', { text: '', prominent: false });
+      this.scheduleSave();
+      this.showToast(penId ? 'Đã di chuyển chuồng' : 'Đã di chuyển');
+      return;
+    }
+    this.showToast('Không đặt được tại đây');
+    this.showObjectMovePlacementConfirm();
+  }
+
+  private revealObjectAfterConfirmedMove(
+    session: MoveSession,
+    penId: string | null,
+    gx: number,
+    gy: number
+  ): void {
+    if (penId) {
+      this.livestockPenSprites.get(penId)?.container.setVisible(true);
+      return;
+    }
+    if (session.payload.kind === 'building') {
+      const spr = this.buildingSprites.get(`${gx},${gy}`);
+      spr?.sprite.setVisible(true);
+      return;
+    }
+    if (session.payload.kind === 'natural') {
+      this.refreshMapDecorations();
+    }
+  }
+
+  private finishObjectEditInteraction(): void {
+    if (this.objectEditSystem.active) return;
+    if (this.farmMode === 'normal') {
+      this.events.emit('mode-hint', { text: '', prominent: false });
+    }
+  }
+
+  private cancelObjectMoveLongPress(): void {
+    this.objectMoveLongPressTimer?.remove(false);
+    this.objectMoveLongPressTimer = undefined;
+    this.objectMovePressPointerId = -1;
+  }
+
+  private tryBeginLivestockPlaceLongPress(pointer: Phaser.Input.Pointer): boolean {
+    if (
+      !this.livestockSystem.active ||
+      !this.livestockSystem.selectedItem ||
+      !this.livestockSystem.previewLocked ||
+      this.livestockSystem.placeDragging
+    ) {
+      return false;
+    }
+    const { x, y } = this.screenPointToGrid(pointer);
+    if (!this.livestockSystem.isGridOnPlaceGhostFootprint(x, y)) {
+      return false;
+    }
+    this.cancelObjectMoveLongPress();
+    this.objectMovePressPointerId = pointer.id;
+    this.objectMovePressScreenX = pointer.x;
+    this.objectMovePressScreenY = pointer.y;
+    this.livestockSystem.startPlaceDrag();
+    this.updateGhostSprite();
+    return true;
+  }
+
+  private finishLivestockPlaceDrag(_pointer: Phaser.Input.Pointer): boolean {
+    const wasDragging = this.livestockSystem.placeDragging;
+    this.objectMovePressPointerId = -1;
+    if (!wasDragging) {
+      return false;
+    }
+    this.livestockSystem.finishPlaceDrag();
+    this.updateGhostSprite();
+    this.showLivestockPlacementConfirm();
+    return true;
+  }
+
+  private tryBeginObjectMoveLongPress(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.objectEditSystem.active || this.objectEditSystem.moveDragging) {
+      return false;
+    }
+    const session = this.objectEditSystem.getSession();
+    if (!session) return false;
+    const { x, y } = this.screenPointToGrid(pointer);
+    if (
+      !isGridOnMoveSessionOrigin(
+        session,
+        x,
+        y,
+        this.objectEditSystem.ghostX,
+        this.objectEditSystem.ghostY
+      )
+    ) {
+      return false;
+    }
+    this.cancelObjectMoveLongPress();
+    this.objectMovePressPointerId = pointer.id;
+    this.objectMovePressScreenX = pointer.x;
+    this.objectMovePressScreenY = pointer.y;
+    this.objectEditSystem.startMoveDrag();
+    this.updateGhostSprite();
+    return true;
+  }
+
+  /** Converts early movement while waiting for long-press into camera pan. */
+  private updateObjectMoveLongPressGesture(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.objectMoveLongPressTimer || !pointer.isDown) {
+      return false;
+    }
+    if (pointer.id !== this.objectMovePressPointerId) {
+      return false;
+    }
+    if (
+      exceedsDragThreshold(
+        this.objectMovePressScreenX,
+        this.objectMovePressScreenY,
+        pointer.x,
+        pointer.y
+      )
+    ) {
+      this.cancelObjectMoveLongPress();
+      this.beginPointerGesture(pointer);
+      this.pointerGestureStartX = this.objectMovePressScreenX;
+      this.pointerGestureStartY = this.objectMovePressScreenY;
+      this.pointerPanLastX = pointer.x;
+      this.pointerPanLastY = pointer.y;
+      this.updatePointerDragState(pointer);
+      return true;
+    }
+    return false;
+  }
+
+  private finishObjectMoveDrag(_pointer: Phaser.Input.Pointer): boolean {
+    const wasDragging = this.objectEditSystem.moveDragging;
+    this.cancelObjectMoveLongPress();
+
+    if (!wasDragging) {
+      return false;
+    }
+
+    this.objectEditSystem.finishMoveDrag();
+    this.updateGhostSprite();
+    this.showObjectMovePlacementConfirm();
+    return true;
   }
 
   private cancelObjectMoveMode(clearHint = true): void {
+    this.cancelObjectMoveLongPress();
     const session = this.objectEditSystem.getSession();
     if (session) {
       this.setObjectOriginHidden(session.originGx, session.originGy, false);
@@ -2238,7 +2649,48 @@ export class FarmScene extends Phaser.Scene {
     this.objectEditPopup.setOnAction((action, gx, gy) =>
       this.executeObjectEditAction(action, gx, gy)
     );
-    this.objectEditPopup.setOnDismiss(() => this.finishObjectEditInteraction());
+    this.objectEditPopup.setOnDisabledAction((action, gx, gy) => {
+      if (action === 'sellAll') {
+        this.showToast('Bán hết: mỗi con cần ≥50% trưởng thành');
+      } else if (action === 'sell') {
+        this.showToast('Chưa thể bán con này (cần ≥50% trưởng thành)');
+      } else if (action === 'upgrade') {
+        const disabledBuilding = this.buildSystem.findBuildingAt(gx, gy);
+        if (disabledBuilding) {
+          if (disabledBuilding.type === 'tree') {
+            this.showToast('Cây trang trí không thể nâng cấp');
+          } else if (disabledBuilding.level >= ECONOMY.maxBuildingLevel) {
+            this.showToast('Công trình đã đạt cấp tối đa');
+          } else {
+            const cost = this.economy.getBuildingUpgradeCost(
+              disabledBuilding.type,
+              disabledBuilding.level
+            );
+            this.showToast(`Cần ${cost} xu để nâng cấp`);
+          }
+          return;
+        }
+        const disabledPen = this.livestockSystem.getPenAt(gx, gy);
+        if (!disabledPen) {
+          this.showToast('Vật thể này không thể nâng cấp');
+          return;
+        }
+        const current =
+          this.livestockSystem.getPenAt(disabledPen.gridX, disabledPen.gridY) ?? disabledPen;
+        const blockMsg = this.livestockSystem.getPenUpgradeBlockMessage(current);
+        if (blockMsg) {
+          this.showToast(blockMsg);
+        } else if (!this.economy.canAfford(LIVESTOCK_PEN_UPGRADE_COST)) {
+          this.showToast(`Cần ${LIVESTOCK_PEN_UPGRADE_COST} xu để nâng cấp chuồng`);
+        } else {
+          this.showToast('Không thể nâng cấp chuồng tại đây');
+        }
+      }
+    });
+    this.objectEditPopup.setOnDismiss(() => {
+      this.objectEditAnimalSlot = undefined;
+      this.finishObjectEditInteraction();
+    });
     this.expandDimOverlay = new ExpandLandDimOverlay(this, this.grid, (gx, gy) =>
       this.isExpandPurchaseTarget(gx, gy)
     );
@@ -2788,27 +3240,45 @@ export class FarmScene extends Phaser.Scene {
     return px === gx && py === gy;
   }
 
-  /** Prefer pen-house screen bounds over grid pick (iso sprites extend past footprint). */
+  /** Pen pick uses grid footprint only (art may extend; clicks pass through to tiles behind). */
   private resolvePenFromPointer(pointer: Phaser.Input.Pointer): LivestockPenData | undefined {
     const cam = this.cameras.main;
     const world = cam.getWorldPoint(pointer.x, pointer.y);
-    const candidates = [...this.livestockPenSprites.values()].map((spr) => {
-      const bounds = spr.getHouseBounds();
-      return {
-        id: spr.data.id,
-        gridX: spr.data.gridX,
-        gridY: spr.data.gridY,
-        depth: spr.container.depth,
-        visible: spr.container.visible,
-        alpha: spr.container.alpha,
-        bounds: {
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
-        },
-      };
-    });
+    const moveSession = this.objectEditSystem.getSession();
+    const movingPenId =
+      moveSession?.payload.kind === 'pen' ? moveSession.payload.pen.id : undefined;
+    const candidates = [...this.livestockPenSprites.values()]
+      .filter((spr) => spr.data.id !== movingPenId)
+      .map((spr) => {
+        const bounds = spr.getHouseBounds();
+        const { w, h } = penFootprintTiles(spr.data.level ?? 1);
+        const footprint = this.grid.getRectMapFootprintScreenBounds(
+          spr.data.gridX,
+          spr.data.gridY,
+          w,
+          h
+        );
+        return {
+          id: spr.data.id,
+          gridX: spr.data.gridX,
+          gridY: spr.data.gridY,
+          depth: spr.container.depth,
+          visible: spr.container.visible,
+          alpha: spr.container.alpha,
+          bounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          },
+          footprintBounds: {
+            x: footprint.minX,
+            y: footprint.minY,
+            width: footprint.width,
+            height: footprint.height,
+          },
+        };
+      });
     const hit = pickLivestockPenAtWorldPoint(candidates, world.x, world.y);
     if (!hit) return undefined;
     return (
@@ -3054,6 +3524,18 @@ export class FarmScene extends Phaser.Scene {
     return this.objectEditPopup.getVisibleActionsForTest();
   }
 
+  getExpectedPenObjectEditActionsForTest(gx: number, gy: number): PenObjectEditAction[] {
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    if (!pen) return [];
+    return getPenObjectEditVisibleActions(pen);
+  }
+
+  getExpectedBuildingObjectEditActionsForTest(gx: number, gy: number): string[] {
+    const building = this.buildSystem.findBuildingAt(gx, gy);
+    if (!building) return [];
+    return getBuildingObjectEditVisibleActions(building);
+  }
+
   isObjectEditFeedWarningVisibleForTest(): boolean {
     return this.objectEditPopup.isFeedWarningBadgeVisibleForTest();
   }
@@ -3106,6 +3588,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   closeObjectEditPopupForTest(): void {
+    this.objectEditAnimalSlot = undefined;
     this.objectEditPopup.hide();
   }
 
@@ -3516,20 +3999,26 @@ export class FarmScene extends Phaser.Scene {
       livestockActive || penMove
         ? penFootprintTiles(penMove ? penMoveLevel : 1)
         : null;
+    const penSpecies =
+      penMove && moveSession?.payload.kind === 'pen'
+        ? moveSession.payload.pen.animalType
+        : livestockActive
+          ? getAnimalTypeForHouseTextureKey(
+              this.livestockSystem.selectedItem?.textureKey ?? ''
+            )
+          : undefined;
     const anchorGx = ghostX;
     const anchorGy = ghostY;
-    const foot =
-      penFootprintTiles_
-        ? (() => {
-            const b = this.grid.getRectFootprintScreenBounds(
-              anchorGx,
-              anchorGy,
-              penFootprintTiles_.w,
-              penFootprintTiles_.h
-            );
-            return { x: b.centerX, y: b.bottomY };
-          })()
-        : this.grid.gridToTileBottom(anchorGx, anchorGy);
+    const penLayout = penFootprintTiles_
+      ? penHouseFootprintLayout(
+          this.grid,
+          anchorGx,
+          anchorGy,
+          penMove ? penMoveLevel : 1,
+          penSpecies
+        )
+      : null;
+    const foot = penLayout ?? this.grid.gridToTileBottom(anchorGx, anchorGy);
     const key = moveActive
       ? this.objectEditSystem.ghostTextureKey()
       : livestockActive
@@ -3543,8 +4032,15 @@ export class FarmScene extends Phaser.Scene {
     const isNatural = moveActive && this.objectEditSystem.isNaturalTexture(key);
 
     if (!this.ghostSprite) {
-      this.ghostSprite = this.add.sprite(foot.x, foot.y, key);
+      this.ghostSprite = this.add.sprite(
+        penLayout?.x ?? foot.x,
+        penLayout?.y ?? foot.y,
+        key
+      );
       this.ghostSprite.setOrigin(0.5, 1);
+      if (this.ghostSprite.input) {
+        this.ghostSprite.disableInteractive();
+      }
     }
     this.ghostSprite.setTexture(key);
     if (isNatural) {
@@ -3555,10 +4051,9 @@ export class FarmScene extends Phaser.Scene {
         (tree ? DISPLAY_SIZE.treeH : DISPLAY_SIZE.rockH) * NATURE_DISPLAY_SCALE
       );
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'objects') + 50);
-    } else if (penFootprintTiles_) {
-      const level = penMove ? penMoveLevel : 1;
-      const display = penHouseDisplaySize(level, DISPLAY_SIZE.tileW, DISPLAY_SIZE.tileH);
-      fitSpriteToIsoFootprint(this.ghostSprite, display.width, display.height);
+    } else if (penLayout) {
+      this.ghostSprite.setScale(1, 1);
+      this.ghostSprite.setDisplaySize(penLayout.displayWidth, penLayout.displayHeight);
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
     } else {
       fitSpriteDisplay(
@@ -3568,10 +4063,20 @@ export class FarmScene extends Phaser.Scene {
       );
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
     }
-    this.ghostSprite.setPosition(foot.x, foot.y);
+    this.ghostSprite.setPosition(penLayout?.x ?? foot.x, penLayout?.y ?? foot.y);
     this.ghostSprite.setAlpha(0.55);
     this.ghostSprite.setTint(canPlace ? 0x88ff88 : 0xff8888);
+    if (moveActive && !penLayout) {
+      const { scaleX, scaleY } = objectMovePickupScale(
+        this.ghostSprite.scaleX,
+        this.ghostSprite.scaleY
+      );
+      this.ghostSprite.setScale(scaleX, scaleY);
+    }
     this.ghostSprite.setVisible(true);
+    if (this.ghostSprite.input) {
+      this.ghostSprite.disableInteractive();
+    }
 
     if (this.buildPlacementConfirm?.isVisible()) {
       this.buildPlacementConfirm.refreshLayout();

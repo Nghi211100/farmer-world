@@ -66,7 +66,7 @@ describe('ObjectEditSystem', () => {
         const gx = 5 + dx;
         const gy = 15 + dy;
         if (gx === 5 && gy === 15) continue;
-        if (build.canPlaceObjectAt(gx, gy)) {
+        if (edit.canPlaceAt(gx, gy)) {
           destGx = gx;
           destGy = gy;
           break;
@@ -75,7 +75,7 @@ describe('ObjectEditSystem', () => {
       if (destGx >= 0) break;
     }
     expect(destGx).toBeGreaterThanOrEqual(0);
-    edit.lockPreviewAt(destGx, destGy);
+    edit.startMoveDrag();
     expect(edit.confirmMoveAt(destGx, destGy)).toBe(true);
     expect(grid.getCell(destGx, destGy)?.object).toBe('rock_01');
     expect(grid.getCell(5, 15)?.object).toBeUndefined();
@@ -83,10 +83,38 @@ describe('ObjectEditSystem', () => {
     build.enterBuildMode(BUILD_ITEMS[0]);
     build.place(9, 9);
     edit.beginMove(9, 9);
-    edit.lockPreviewAt(10, 9);
-    expect(edit.confirmMoveAt(10, 9)).toBe(true);
-    expect(build.findBuildingAt(10, 9)?.type).toBe('house');
+    let houseDestGx = -1;
+    let houseDestGy = -1;
+    outer2: for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        if (gx === 9 && gy === 9) continue;
+        if (edit.canPlaceAt(gx, gy)) {
+          houseDestGx = gx;
+          houseDestGy = gy;
+          break outer2;
+        }
+      }
+    }
+    expect(houseDestGx).toBeGreaterThanOrEqual(0);
+    edit.startMoveDrag();
+    edit.updateGhost(houseDestGx, houseDestGy);
+    expect(edit.confirmMoveAt(houseDestGx, houseDestGy)).toBe(true);
+    expect(build.findBuildingAt(houseDestGx, houseDestGy)?.type).toBe('house');
     expect(build.findBuildingAt(9, 9)).toBeNull();
+  });
+
+  it('finishMoveDrag locks preview at current ghost cell', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
+    edit.beginMove(1, 9);
+    edit.startMoveDrag();
+    edit.updateGhost(2, 10);
+    edit.finishMoveDrag();
+    expect(edit.moveDragging).toBe(false);
+    expect(edit.previewLocked).toBe(true);
+    expect(edit.ghostX).toBe(2);
+    expect(edit.ghostY).toBe(10);
   });
 
   it('cancelMove clears session without changing grid', () => {

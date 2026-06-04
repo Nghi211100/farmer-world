@@ -10,6 +10,7 @@ import {
   PEN_HOUSE_VISUAL_HEIGHT_SCALE,
   PEN_HOUSE_VISUAL_SCALE,
   penHouseDisplaySize,
+  penHouseFootprintLayout,
   penHouseFootprintFitBox,
   penOccupiesCell,
   pickLivestockVariantIndex,
@@ -17,6 +18,7 @@ import {
   speciesHasAnimalSprites,
 } from '../../src/config/livestockAssets';
 import { getLivestockPenTextureKeyForPen, penFootprintDebugLabel } from '../../src/config/LivestockConfig';
+import { GridSystem } from '../../src/systems/GridSystem';
 import {
   ASSET_MANIFEST,
   LIVESTOCK_WARNING_TEXTURE_KEY,
@@ -61,6 +63,20 @@ describe('livestockAssets', () => {
     const lv2 = penHouseDisplaySize(2);
     expect(lv2.width).toBeCloseTo(281.6, 10);
     expect(lv2.height).toBeCloseTo(128, 10);
+  });
+
+  it('penHouseFootprintLayout uses penHouseDisplaySize, not iso AABB span', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    grid.centerInViewport(1280, 720);
+    const bounds = grid.getRectMapFootprintScreenBounds(5, 5, 3, 3);
+    const layout = penHouseFootprintLayout(grid, 5, 5, 1, 'chicken');
+    const display = penHouseDisplaySize(1, undefined, undefined, undefined, undefined, undefined, 'chicken');
+    expect(layout.displayWidth).toBe(Math.max(1, Math.round(display.width)));
+    expect(layout.displayHeight).toBe(Math.max(1, Math.round(display.height)));
+    expect(layout.displayHeight).not.toBe(Math.round(bounds.height));
+    expect(layout.x).toBe(bounds.centerX);
+    expect(layout.y).toBeCloseTo(bounds.bottomY + display.height * -0.03, 5);
   });
 
   it('penHouseFootprintFitBox matches penHouseDisplaySize for all species', () => {

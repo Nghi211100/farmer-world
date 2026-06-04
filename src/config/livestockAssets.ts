@@ -1,4 +1,5 @@
 import { DISPLAY_SIZE, TILE_HEIGHT, TILE_WIDTH } from '../utils/iso';
+import type { GridSystem } from '../systems/GridSystem';
 import type { AnimalLifecycleState, AnimalType } from './LivestockConfig';
 
 /** Some keys keep legacy `ault` naming for save compatibility. */
@@ -251,6 +252,43 @@ export function lifecycleStateToTextureStage(
 export function penFootprintTiles(level: LivestockPenLevel = 1): { w: number; h: number } {
   const size = LIVESTOCK_PEN_LEVELS[level].size;
   return { w: size, h: size };
+}
+
+/** Screen anchor + display size for pen house sprites (live pens and placement ghosts). */
+export type PenHouseFootprintLayout = {
+  x: number;
+  y: number;
+  displayWidth: number;
+  displayHeight: number;
+};
+
+export function penHouseFootprintLayout(
+  grid: GridSystem,
+  anchorGx: number,
+  anchorGy: number,
+  level: LivestockPenLevel,
+  species?: AnimalType,
+  tileW: number = DISPLAY_SIZE.tileW,
+  tileH: number = DISPLAY_SIZE.tileH
+): PenHouseFootprintLayout {
+  const { w, h } = penFootprintTiles(level);
+  const screen = grid.getRectMapFootprintScreenBounds(anchorGx, anchorGy, w, h);
+  const display = penHouseDisplaySize(
+    level,
+    tileW,
+    tileH,
+    PEN_HOUSE_FOOTPRINT_FIT_PADDING,
+    PEN_HOUSE_VISUAL_SCALE,
+    PEN_HOUSE_VISUAL_HEIGHT_SCALE,
+    species
+  );
+  const yOffset = penHouseYOffsetPx(level, tileW, tileH, species);
+  return {
+    x: screen.centerX,
+    y: screen.bottomY + yOffset,
+    displayWidth: Math.max(1, Math.round(display.width)),
+    displayHeight: Math.max(1, Math.round(display.height)),
+  };
 }
 
 export function penOccupiesCell(

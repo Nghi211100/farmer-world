@@ -5,12 +5,24 @@ export interface LivestockPenHitCandidate {
   depth: number;
   visible: boolean;
   alpha: number;
+  /** Full pen-house sprite AABB (may extend past footprint). */
   bounds: {
     x: number;
     y: number;
     width: number;
     height: number;
   };
+  /** Grid footprint AABB; when set, only interior tiles are clickable. */
+  footprintBounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+function pickBounds(candidate: LivestockPenHitCandidate): LivestockPenHitCandidate['bounds'] {
+  return candidate.footprintBounds ?? candidate.bounds;
 }
 
 function containsPoint(
@@ -35,14 +47,16 @@ export function pickLivestockPenAtWorldPoint(
   worldX: number,
   worldY: number
 ): LivestockPenHitCandidate | undefined {
-  const hits = candidates.filter(
-    (candidate) =>
+  const hits = candidates.filter((candidate) => {
+    const bounds = pickBounds(candidate);
+    return (
       candidate.visible &&
       candidate.alpha > 0 &&
-      candidate.bounds.width > 0 &&
-      candidate.bounds.height > 0 &&
-      containsPoint(candidate.bounds, worldX, worldY)
-  );
+      bounds.width > 0 &&
+      bounds.height > 0 &&
+      containsPoint(bounds, worldX, worldY)
+    );
+  });
   if (hits.length === 0) return undefined;
   hits.sort((a, b) => b.depth - a.depth || b.gridY - a.gridY || b.gridX - a.gridX);
   return hits[0];

@@ -12,9 +12,12 @@ import { GridSystem } from '../../src/systems/GridSystem';
 import { LivestockSystem, LIVESTOCK_PEN_PLACE_ITEMS } from '../../src/systems/LivestockSystem';
 import {
   createDefaultFarmPens,
+  createNewPen,
   findPenForStocking,
   getPenForSpecies,
   normalizeSavedLivestockPens,
+  penUpgradeExpansionCells,
+  stockPenWithAnimal,
 } from '../../src/systems/livestockLogic';
 import { penFootprintCells } from '../../src/config/livestockAssets';
 
@@ -45,6 +48,69 @@ describe('LivestockSystem — player-placed pens', () => {
   it('starts with no pens until Build placement', () => {
     const { livestock } = emptyFarm();
     expect(livestock.getPens()).toHaveLength(0);
+  });
+
+  it('findFirstValidPenPlacement skips soil and blocked cells', () => {
+    const { grid, livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
+    livestock.enterPlaceMode(item);
+    const spot = livestock.findFirstValidPenPlacement('chicken', 1);
+    expect(spot).not.toBeNull();
+    if (!spot) return;
+    expect(livestock.canPlace(spot.gx, spot.gy)).toBe(true);
+    for (let dy = 0; dy < 3; dy++) {
+      for (let dx = 0; dx < 3; dx++) {
+        const cell = grid.getCell(spot.gx + dx, spot.gy + dy);
+        expect(cell?.type).not.toBe('soil');
+        expect(cell?.type).not.toBe('water');
+      }
+    }
+  });
+
+  it('findFirstValidPenPlacement returns null when no 3×3 grass fits', () => {
+    const { grid, livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
+    for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        grid.setCell(gx, gy, { type: 'water', walkable: false });
+      }
+    }
+    livestock.enterPlaceMode(item);
+    expect(livestock.findFirstValidPenPlacement('chicken', 1)).toBeNull();
+  });
+
+  it('lockPreviewAt keeps ghost while placeDragging updates position', () => {
+    const { livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
+    livestock.enterPlaceMode(item);
+    const spot = livestock.findFirstValidPenPlacement('duck', 1);
+    expect(spot).not.toBeNull();
+    livestock.lockPreviewAt(spot!.gx, spot!.gy);
+    livestock.startPlaceDrag();
+    livestock.updateGhost(spot!.gx + 2, spot!.gy + 1);
+    expect(livestock.ghostX).toBe(spot!.gx + 2);
+    expect(livestock.ghostY).toBe(spot!.gy + 1);
+    livestock.finishPlaceDrag();
+    expect(livestock.previewLocked).toBe(true);
+  });
+
+  it('canMovePenTo allows shifting 3×3 pen one tile (ignores own footprint)', () => {
+    const { grid, livestock } = emptyFarm();
+    const anchorGx = 10;
+    const anchorGy = 10;
+    for (let dy = -1; dy <= 4; dy++) {
+      for (let dx = -1; dx <= 4; dx++) {
+        const gx = anchorGx + dx;
+        const gy = anchorGy + dy;
+        if (!grid.inBounds(gx, gy)) continue;
+        grid.setCell(gx, gy, { type: 'grass', walkable: true });
+        grid.clearObject(gx, gy);
+      }
+    }
+    const pen = createNewPen('pen-move-test', 'chicken', anchorGx, anchorGy, 1);
+    livestock.loadPens([pen]);
+    expect(livestock.canMovePenTo(pen, anchorGx + 1, anchorGy)).toBe(true);
+    expect(livestock.canMovePenTo(pen, anchorGx, anchorGy + 1)).toBe(true);
   });
 
   it('place() adds pen on valid grass tile', () => {
@@ -238,6 +304,110 @@ describe('LivestockSystem — player-placed pens', () => {
     const loaded = reloaded.getPens()[0];
     expect(loaded?.penKind).toBe('ruminant');
     expect(loaded?.ruminantOccupants?.map((o) => o.animalType)).toEqual(['goat', 'sheep']);
+  });
+
+  it('upgrade 3×3 → 4×4 requires seven free ring cells and updates footprint', () => {
+    const { livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
+    livestock.enterPlaceMode(item);
+    let placed: ReturnType<LivestockSystem['place']> = null;
+    outer: for (let gy = 0; gy < 20; gy++) {
+      for (let gx = 0; gx < 20; gx++) {
+        placed = livestock.canPlace(gx, gy) ? livestock.place(gx, gy) : null;
+        if (placed) break outer;
+      }
+    }
+    livestock.exitPlaceMode();
+    expect(placed).not.toBeNull();
+    const pen = placed!;
+    expect(penUpgradeExpansionCells(pen)).toHaveLength(7);
+    expect(livestock.canUpgradeAt(pen)).toBe(true);
+    expect(livestock.tryUpgrade(pen)?.level).toBe(2);
+    expect(penFootprintCells(livestock.getPenAt(pen.gridX, pen.gridY)!).length).toBe(16);
+  });
+
+  it('upgrade fails when 4×4 ring is blocked by another pen', () => {
+    const { grid, livestock } = emptyFarm();
+    const anchorGx = 10;
+    const anchorGy = 10;
+    for (let dy = -2; dy <= 6; dy++) {
+      for (let dx = -2; dx <= 7; dx++) {
+        const gx = anchorGx + dx;
+        const gy = anchorGy + dy;
+        if (!grid.inBounds(gx, gy)) continue;
+        grid.setCell(gx, gy, { type: 'grass', walkable: true });
+        grid.clearObject(gx, gy);
+      }
+    }
+    const penA = createNewPen('pen-a', 'chicken', anchorGx, anchorGy, 1);
+    const penB = createNewPen('pen-b', 'chicken', anchorGx + 3, anchorGy, 1);
+    livestock.loadPens([penA, penB]);
+    expect(livestock.canUpgradeAt(penA)).toBe(false);
+    expect(livestock.tryUpgrade(penA)).toBeNull();
+  });
+
+  it('can upgrade while pen lifecycle is producing (animals stay)', () => {
+    const { livestock } = emptyFarm();
+    const pen = stockPenWithAnimal(createNewPen('prod-up', 'chicken', 4, 4), 'chicken', () => 0)!;
+    const producing = { ...pen, state: 'producing' as const };
+    expect(livestock.canUpgradeAt(producing)).toBe(true);
+    const upgraded = livestock.tryUpgrade(producing);
+    expect(upgraded?.level).toBe(2);
+    expect(upgraded?.state).toBe('producing');
+    expect(upgraded?.penAnimals?.length).toBe(pen.penAnimals?.length);
+  });
+
+  it('upgrade ring ignores stale livestock_pen grid markers without a pen', () => {
+    const { grid, livestock } = emptyFarm();
+    const pen = createNewPen('stale-ring', 'chicken', 10, 10, 1);
+    livestock.loadPens([pen]);
+    for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+      grid.setObject(gx, gy, 'livestock_pen_chicken');
+    }
+    expect(livestock.canUpgradeAt(pen)).toBe(true);
+    expect(livestock.tryUpgrade(pen)?.level).toBe(2);
+  });
+
+  it('default pig pen is blocked by placeholder bush on expansion ring', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const livestock = new LivestockSystem(grid);
+    const pig = createDefaultFarmPens().find((p) => p.animalType === 'pig')!;
+    livestock.loadPens([pig]);
+    expect(livestock.canUpgradeAt(pig)).toBe(false);
+    expect(livestock.getPenUpgradeBlockMessage(pig)).toMatch(/bụi|đá|dọn/i);
+  });
+
+  it('default ruminant pen can upgrade on placeholder map', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const livestock = new LivestockSystem(grid);
+    const ruminant = createDefaultFarmPens().find((p) => p.penKind === 'ruminant')!;
+    livestock.loadPens([ruminant]);
+    expect(livestock.canUpgradeAt(ruminant)).toBe(true);
+    expect(livestock.tryUpgrade(ruminant)?.level).toBe(2);
+  });
+
+  it('upgrade ring allows soil tiles but blocks another pen', () => {
+    const { grid, livestock } = emptyFarm();
+    const anchorGx = 12;
+    const anchorGy = 12;
+    for (let dy = -1; dy <= 4; dy++) {
+      for (let dx = -1; dx <= 4; dx++) {
+        const gx = anchorGx + dx;
+        const gy = anchorGy + dy;
+        if (!grid.inBounds(gx, gy)) continue;
+        grid.setCell(gx, gy, { type: 'grass', walkable: true });
+        grid.clearObject(gx, gy);
+      }
+    }
+    const pen = createNewPen('soil-up', 'pig', anchorGx, anchorGy, 1);
+    livestock.loadPens([pen]);
+    for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+      grid.setCell(gx, gy, { type: 'soil', walkable: false });
+    }
+    expect(livestock.canUpgradeAt(pen)).toBe(true);
+    expect(livestock.tryUpgrade(pen)?.level).toBe(2);
   });
 
   it('lv2 pens stock up to eight animals', () => {

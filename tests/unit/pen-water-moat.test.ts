@@ -48,72 +48,31 @@ function wireFarmWalkBlocking(grid: GridSystem) {
   return { build, livestock };
 }
 
-function clearMoatPad(grid: GridSystem, anchorGx: number, anchorGy: number): void {
-  for (let dy = -1; dy <= 3; dy++) {
-    for (let dx = -1; dx <= 3; dx++) {
-      const gx = anchorGx + dx;
-      const gy = anchorGy + dy;
-      if (!grid.inBounds(gx, gy)) continue;
-      grid.setCell(gx, gy, { type: 'grass', walkable: true, object: undefined });
-    }
-  }
-}
-
-describe('duck/fish pen water moat', () => {
-  it('penHasWaterMoat is true only for duck and fish', () => {
-    expect(penHasWaterMoat('duck')).toBe(true);
-    expect(penHasWaterMoat('fish')).toBe(true);
+describe('duck/fish pen placement (no water moat)', () => {
+  it('penHasWaterMoat is disabled for all species', () => {
+    expect(penHasWaterMoat('duck')).toBe(false);
+    expect(penHasWaterMoat('fish')).toBe(false);
     expect(penHasWaterMoat('chicken')).toBe(false);
     expect(penHasWaterMoat('cow')).toBe(false);
   });
 
-  it('level-1 duck pen has sixteen moat cells around 3×3', () => {
+  it('duck pen has no moat cells and footprint-only occupancy', () => {
     const pen = createNewPen('d', 'duck', 5, 5, 1);
-    expect(penMoatCells(pen)).toHaveLength(16);
+    expect(penMoatCells(pen)).toHaveLength(0);
     expect(penFootprintCells(pen)).toHaveLength(9);
-    expect(penOccupiesCell(pen, 4, 5)).toBe(true);
+    expect(penOccupiesCell(pen, 4, 5)).toBe(false);
     expect(penOccupiesCell(pen, 5, 5)).toBe(true);
-    expect(penOccupiesCell(pen, 3, 5)).toBe(false);
   });
 
-  it('placing duck pen converts moat ring to water tiles', () => {
+  it('placing duck pen keeps surrounding grass (no moat conversion)', () => {
     const grid = new GridSystem();
     seedGrassVoid(grid);
     const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
-
-    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
-    livestock.enterPlaceMode(item);
-    const pen = livestock.place(8, 8);
-    livestock.exitPlaceMode();
-    expect(pen).not.toBeNull();
-
-    for (const { gx, gy } of penMoatCells(pen!)) {
-      expect(grid.getCell(gx, gy)?.type).toBe('water');
-      expect(grid.getCell(gx, gy)?.walkable).toBe(false);
-      expect(grid.getCell(gx, gy)?.object).toBe(PEN_MOAT_WATER_OBJECT);
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 3; dx++) {
+        grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });
+      }
     }
-  });
-
-  it('does not convert path or existing river cells in moat ring', () => {
-    const grid = new GridSystem();
-    seedGrassVoid(grid);
-    const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
-
-    const moatPath = { gx: 7, gy: 8 };
-    grid.setCell(moatPath.gx, moatPath.gy, {
-      type: 'path',
-      walkable: true,
-      pathVariant: 'stone_path',
-      object: undefined,
-    });
-    const riverBesideMoat = { gx: 6, gy: 9 };
-    grid.setCell(riverBesideMoat.gx, riverBesideMoat.gy, {
-      type: 'water',
-      walkable: false,
-      object: undefined,
-    });
 
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
     livestock.enterPlaceMode(item);
@@ -121,73 +80,70 @@ describe('duck/fish pen water moat', () => {
     livestock.exitPlaceMode();
     expect(pen).not.toBeNull();
 
-    expect(grid.getCell(moatPath.gx, moatPath.gy)?.type).toBe('path');
-    expect(grid.getCell(riverBesideMoat.gx, riverBesideMoat.gy)?.type).toBe('water');
-    const grassOutside = { gx: 6, gy: 8 };
-    expect(grid.getCell(grassOutside.gx, grassOutside.gy)?.type).toBe('grass');
+    expect(grid.getCell(7, 8)?.type).toBe('grass');
+    expect(grid.getCell(7, 8)?.object).not.toBe(PEN_MOAT_WATER_OBJECT);
+    expect(grid.getCell(6, 9)?.type).not.toBe('water');
   });
 
-  it('moving pen restores only pen_moat_water cells to grass, not river', () => {
+  it('places duck pen on grass without adjacent river water', () => {
     const grid = new GridSystem();
     seedGrassVoid(grid);
     const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
-    clearMoatPad(grid, 12, 12);
+    for (let dy = -1; dy <= 4; dy++) {
+      for (let dx = -1; dx <= 4; dx++) {
+        const gx = 10 + dx;
+        const gy = 10 + dy;
+        if (!grid.inBounds(gx, gy)) continue;
+        grid.setCell(gx, gy, { type: 'grass', walkable: true, object: undefined });
+      }
+    }
 
-    const riverBesideMoat = { gx: 6, gy: 9 };
-    grid.setCell(riverBesideMoat.gx, riverBesideMoat.gy, {
-      type: 'water',
-      walkable: false,
-      object: undefined,
-    });
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'fish')!;
+    livestock.enterPlaceMode(item);
+    expect(livestock.canPlace(10, 10)).toBe(true);
+    const pen = livestock.place(10, 10);
+    livestock.exitPlaceMode();
+    expect(pen).not.toBeNull();
+  });
+
+  it('moving duck pen does not create water at old or new anchor', () => {
+    const grid = new GridSystem();
+    seedGrassVoid(grid);
+    const { livestock } = wireFarmWalkBlocking(grid);
+    for (const anchor of [{ gx: 8, gy: 8 }, { gx: 12, gy: 12 }]) {
+      for (let dy = -1; dy <= 3; dy++) {
+        for (let dx = -1; dx <= 3; dx++) {
+          grid.setCell(anchor.gx + dx, anchor.gy + dy, {
+            type: 'grass',
+            walkable: true,
+            object: undefined,
+          });
+        }
+      }
+    }
 
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
     livestock.enterPlaceMode(item);
     const pen = livestock.place(8, 8);
     livestock.exitPlaceMode();
     expect(pen).not.toBeNull();
-    const moatRiverJunction = penMoatCells(pen!).find((c) => c.gx === 7 && c.gy === 9)!;
-    expect(grid.getCell(moatRiverJunction.gx, moatRiverJunction.gy)?.object).toBe(
-      PEN_MOAT_WATER_OBJECT
-    );
+    const ringCell = { gx: 7, gy: 8 };
 
+    expect(livestock.canMovePenTo(pen!, 12, 12)).toBe(true);
     livestock.movePenTo(pen!, 12, 12);
-    expect(grid.getCell(riverBesideMoat.gx, riverBesideMoat.gy)?.type).toBe('water');
-    expect(grid.getCell(riverBesideMoat.gx, riverBesideMoat.gy)?.object).toBeUndefined();
-    expect(grid.getCell(moatRiverJunction.gx, moatRiverJunction.gy)?.type).toBe('grass');
+    expect(grid.getCell(ringCell.gx, ringCell.gy)?.type).toBe('grass');
+    expect(grid.getCell(11, 12)?.type).toBe('grass');
   });
 
-  it('allows bridge on moat cell where player river meets duck pen', () => {
+  it('allows build decor on grass beside duck pen footprint', () => {
     const grid = new GridSystem();
     seedGrassVoid(grid);
     const { build, livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
-
-    grid.setCell(6, 9, { type: 'water', walkable: false, object: undefined });
-
-    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
-    livestock.enterPlaceMode(item);
-    const pen = livestock.place(8, 8);
-    livestock.exitPlaceMode();
-    expect(pen).not.toBeNull();
-
-    const junction = { gx: 7, gy: 9 };
-    expect(grid.getCell(junction.gx, junction.gy)?.type).toBe('water');
-    expect(grid.canPlaceBridgeAt(junction.gx, junction.gy)).toBe(true);
-
-    const bridgeItem = BUILD_ITEMS.find((i) => i.label === 'Bridge')!;
-    build.enterBuildMode(bridgeItem);
-    expect(build.canPlace(junction.gx, junction.gy)).toBe(true);
-    expect(build.place(junction.gx, junction.gy)).toBe(true);
-    expect(grid.getCell(junction.gx, junction.gy)?.pathVariant).toBe('bridge_tile');
-    build.exitBuildMode();
-  });
-
-  it('cannot place build decor on pen moat cells', () => {
-    const grid = new GridSystem();
-    seedGrassVoid(grid);
-    const { build, livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 3; dx++) {
+        grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });
+      }
+    }
 
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'fish')!;
     livestock.enterPlaceMode(item);
@@ -195,24 +151,23 @@ describe('duck/fish pen water moat', () => {
     livestock.exitPlaceMode();
     expect(pen).not.toBeNull();
 
-    const moat = penMoatCells(pen!)[0]!;
+    const beside = { gx: 7, gy: 8 };
+    expect(grid.getCell(beside.gx, beside.gy)?.type).toBe('grass');
     const grassItem = BUILD_ITEMS.find((i) => i.label === 'Grass')!;
     build.enterBuildMode(grassItem);
-    expect(build.canPlace(moat.gx, moat.gy)).toBe(false);
-    build.exitBuildMode();
-
-    const bridgeItem = BUILD_ITEMS.find((i) => i.label === 'Bridge')!;
-    build.enterBuildMode(bridgeItem);
-    expect(grid.isRiverWaterCell(moat.gx, moat.gy)).toBe(true);
-    expect(build.canPlace(moat.gx, moat.gy)).toBe(false);
+    expect(build.canPlace(beside.gx, beside.gy)).toBe(true);
     build.exitBuildMode();
   });
 
-  it('player cannot walk through moat water', () => {
+  it('player can walk on grass ring beside duck pen', () => {
     const grid = new GridSystem();
     seedGrassVoid(grid);
     const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 3; dx++) {
+        grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });
+      }
+    }
 
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
     livestock.enterPlaceMode(item);
@@ -220,17 +175,17 @@ describe('duck/fish pen water moat', () => {
     livestock.exitPlaceMode();
     expect(pen).not.toBeNull();
 
-    const moat = penMoatCells(pen!)[0]!;
-    expect(isPlayerWalkCell(grid, moat.gx, moat.gy)).toBe(false);
+    const ring = { gx: 7, gy: 8 };
+    expect(isPlayerWalkCell(grid, ring.gx, ring.gy)).toBe(true);
+    expect(canPlayerWalkTo(grid, 7, 7, ring.gx, ring.gy)).toBe(true);
     const inner = penFootprintCells(pen!)[0]!;
-    expect(canPlayerWalkTo(grid, moat.gx, moat.gy - 1, inner.gx, inner.gy)).toBe(false);
+    expect(isPlayerWalkCell(grid, inner.gx, inner.gy)).toBe(false);
   });
 
-  it('duck pen can upgrade after placement (own moat cells become inner)', () => {
+  it('duck pen can upgrade on grass ring (no moat blocking)', () => {
     const grid = new GridSystem();
     seedGrassVoid(grid);
     const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
     for (let dy = -1; dy <= 4; dy++) {
       for (let dx = -1; dx <= 4; dx++) {
         const gx = 8 + dx;
@@ -248,29 +203,6 @@ describe('duck/fish pen water moat', () => {
     expect(livestock.canUpgradeAt(pen!)).toBe(true);
     const upgraded = livestock.tryUpgrade(pen!);
     expect(upgraded?.level).toBe(2);
-    expect(penMoatCells(upgraded!).length).toBe(20);
-  });
-
-  it('moving duck pen clears old moat and applies water at new anchor', () => {
-    const grid = new GridSystem();
-    seedGrassVoid(grid);
-    const { livestock } = wireFarmWalkBlocking(grid);
-    clearMoatPad(grid, 8, 8);
-    clearMoatPad(grid, 12, 12);
-
-    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
-    livestock.enterPlaceMode(item);
-    const pen = livestock.place(8, 8);
-    livestock.exitPlaceMode();
-    expect(pen).not.toBeNull();
-    const oldMoat = penMoatCells(pen!)[0]!;
-
-    expect(livestock.canMovePenTo(pen!, 12, 12)).toBe(true);
-    livestock.movePenTo(pen!, 12, 12);
-    expect(grid.getCell(oldMoat.gx, oldMoat.gy)?.type).toBe('grass');
-    const moved = livestock.getPenAt(12, 12)!;
-    for (const { gx, gy } of penMoatCells(moved)) {
-      expect(grid.getCell(gx, gy)?.type).toBe('water');
-    }
+    expect(penMoatCells(upgraded!)).toHaveLength(0);
   });
 });

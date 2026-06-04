@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { penFootprintCells, penMoatCells } from '../../src/config/livestockAssets';
+import { penFootprintCells } from '../../src/config/livestockAssets';
 import { createNewPen } from '../../src/systems/livestockLogic';
 import {
   pickLivestockPenAtGridCell,
@@ -29,11 +29,10 @@ describe('pickLivestockPenAtGridCell', () => {
     expect(pickLivestockPenAtGridCell([hits], 8, 8)?.id).toBe(pen.id);
   });
 
-  it('does not hit moat ring cells', () => {
+  it('does not hit grass ring outside duck footprint', () => {
     const pen = createNewPen('duck-pen', 'duck', 8, 8, 1);
     const hits = candidate({ id: pen.id, gridX: 8, gridY: 8, level: 1 });
-    const moat = penMoatCells(pen)[0]!;
-    expect(pickLivestockPenAtGridCell([hits], moat.gx, moat.gy)).toBeUndefined();
+    expect(pickLivestockPenAtGridCell([hits], 7, 8)).toBeUndefined();
   });
 
   it('does not hit adjacent grass outside footprint', () => {

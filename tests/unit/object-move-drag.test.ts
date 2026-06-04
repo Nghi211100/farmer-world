@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { LivestockPenData } from '../../src/config/LivestockConfig';
-import { penMoatCells } from '../../src/config/livestockAssets';
 import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { BuildSystem } from '../../src/systems/BuildSystem';
 import { GridSystem } from '../../src/systems/GridSystem';
@@ -51,7 +50,7 @@ describe('objectMoveDrag', () => {
     expect(isGridOnMoveSessionOrigin(session, 7, 12)).toBe(false);
   });
 
-  it('duck pen long-press drag uses footprint only, not moat ring', () => {
+  it('duck pen long-press drag uses footprint only, not grass ring', () => {
     const pen: LivestockPenData = {
       id: 'pen-duck-1',
       animalType: 'duck',
@@ -65,8 +64,7 @@ describe('objectMoveDrag', () => {
       originGy: 8,
       payload: { kind: 'pen' as const, pen },
     };
-    const moat = penMoatCells(pen)[0]!;
-    expect(isGridOnMoveSessionOrigin(session, moat.gx, moat.gy)).toBe(false);
+    expect(isGridOnMoveSessionOrigin(session, 7, 8)).toBe(false);
     expect(isGridOnMoveSessionOrigin(session, 8, 8)).toBe(true);
   });
 
@@ -91,7 +89,7 @@ describe('objectMoveDrag', () => {
 });
 
 describe('ObjectEditSystem move placement', () => {
-  it('finds pen on footprint but not on moat ring', () => {
+  it('keeps preview locked until startMoveDrag (Move button must not auto-drag)', () => {
     const grid = new GridSystem();
     for (let y = 0; y < grid.size; y++) {
       for (let x = 0; x < grid.size; x++) {
@@ -112,11 +110,43 @@ describe('ObjectEditSystem move placement', () => {
     const placed = livestock.place(8, 8);
     livestock.exitPlaceMode();
     expect(placed).not.toBeNull();
-    const moat = penMoatCells(placed!)[0]!;
+    const session = edit.beginMove(8, 8);
+    expect(session?.payload.kind).toBe('pen');
+    expect(edit.previewLocked).toBe(true);
+    expect(edit.moveDragging).toBe(false);
+    edit.startMoveDrag();
+    expect(edit.previewLocked).toBe(false);
+    expect(edit.moveDragging).toBe(true);
+    edit.finishMoveDrag();
+    expect(edit.previewLocked).toBe(true);
+    expect(edit.moveDragging).toBe(false);
+  });
+
+  it('finds pen on footprint but not on grass ring outside', () => {
+    const grid = new GridSystem();
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 3; dx++) {
+        grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });
+      }
+    }
+    const livestock = new LivestockSystem(grid);
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid), livestock);
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
+    livestock.enterPlaceMode(item);
+    const placed = livestock.place(8, 8);
+    livestock.exitPlaceMode();
+    expect(placed).not.toBeNull();
     expect(edit.findEditableAt(8, 8)?.kind).toBe('pen');
-    expect(edit.findEditableAt(moat.gx, moat.gy)).toBeNull();
-    expect(livestock.getPenAtFootprint(moat.gx, moat.gy)).toBeUndefined();
-    expect(livestock.getPenAt(moat.gx, moat.gy)?.id).toBe(placed!.id);
+    expect(edit.findEditableAt(7, 8)).toBeNull();
+    expect(livestock.getPenAtFootprint(7, 8)).toBeUndefined();
+    expect(livestock.getPenAt(7, 8)).toBeUndefined();
   });
   it('rejects moving naturals onto farm soil', () => {
     const grid = new GridSystem(20);

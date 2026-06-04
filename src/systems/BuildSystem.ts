@@ -7,7 +7,6 @@ import {
   type GroundDecorVariant,
   type PathGroundVariant,
 } from '../config/gameConfig';
-import { PEN_MOAT_WATER_OBJECT } from '../config/livestockAssets';
 import type { GridSystem } from './GridSystem';
 
 export type BuildItemType = BuildingType;
@@ -301,12 +300,7 @@ export class BuildSystem {
   private canPlaceGroundTile(gx: number, gy: number, item: BuildItemDef): boolean {
     const cell = this.grid.getCell(gx, gy);
     if (!cell) return false;
-    if (
-      cell.object &&
-      !(item.groundTile === 'bridge' && cell.object === PEN_MOAT_WATER_OBJECT)
-    ) {
-      return false;
-    }
+    if (cell.object) return false;
     if (cell.type === 'soil') return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
     if (item.requireAdjacentFarmSoil) {

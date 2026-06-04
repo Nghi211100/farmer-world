@@ -9,6 +9,8 @@ import { placePopupAboveTile } from '../utils/popupPosition';
 const PANEL_DEPTH = 11950;
 const BTN_SIZE = Math.round(44 * (2 / 3));
 const BTN_GAP = 12;
+/** Extra slop for touch on scrollFactor-0 confirm buttons. */
+const CONFIRM_HIT_SLOP_PX = 10;
 const PANEL_W = BTN_SIZE * 2 + BTN_GAP;
 const PANEL_H = BTN_SIZE;
 /** Extra gap above tile/building anchor (canvas px). */
@@ -113,19 +115,31 @@ export class BuildPlacementConfirm {
 
   handlePointerDown(pointer: Phaser.Input.Pointer): boolean {
     if (!this.visible) return false;
-    const hits = this.scene.input.hitTestPointer(pointer);
-    if (
-      this.confirmEnabled &&
-      (hits.includes(this.checkBtn.hit) || hits.includes(this.checkBtn.root))
-    ) {
+    const action = this.resolveButtonAction(pointer);
+    if (action === 'confirm') {
       this.activateConfirm();
       return true;
     }
-    if (hits.includes(this.cancelBtn.hit) || hits.includes(this.cancelBtn.root)) {
+    if (action === 'cancel') {
       this.activateCancel();
       return true;
     }
     if (this.hitsPointer(pointer)) {
+      return true;
+    }
+    return false;
+  }
+
+  /** Touch-safe: also accept pointerup when down/up both hit a button. */
+  handlePointerUp(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.visible) return false;
+    const action = this.resolveButtonAction(pointer);
+    if (action === 'confirm') {
+      this.activateConfirm();
+      return true;
+    }
+    if (action === 'cancel') {
+      this.activateCancel();
       return true;
     }
     return false;
@@ -169,8 +183,49 @@ export class BuildPlacementConfirm {
         event: Phaser.Types.Input.EventData
       ) => stopAnd(event)
     );
+    hit.on(
+      'pointerup',
+      (
+        _pointer: Phaser.Input.Pointer,
+        _lx: number,
+        _ly: number,
+        event: Phaser.Types.Input.EventData
+      ) => stopAnd(event)
+    );
 
     return { root, hit, extras };
+  }
+
+  private resolveButtonAction(
+    pointer: Phaser.Input.Pointer
+  ): 'confirm' | 'cancel' | null {
+    const hits = this.scene.input.hitTestPointer(pointer);
+    if (
+      this.confirmEnabled &&
+      (hits.includes(this.checkBtn.hit) || hits.includes(this.checkBtn.root))
+    ) {
+      return 'confirm';
+    }
+    if (hits.includes(this.cancelBtn.hit) || hits.includes(this.cancelBtn.root)) {
+      return 'cancel';
+    }
+    const lx = pointer.x - this.container.x;
+    const ly = pointer.y - this.container.y;
+    const halfGap = BTN_GAP / 2;
+    const checkX = -BTN_SIZE / 2 - halfGap;
+    const cancelX = BTN_SIZE / 2 + halfGap;
+    const half = BTN_SIZE / 2 + CONFIRM_HIT_SLOP_PX;
+    if (
+      this.confirmEnabled &&
+      Math.abs(lx - checkX) <= half &&
+      Math.abs(ly) <= half
+    ) {
+      return 'confirm';
+    }
+    if (Math.abs(lx - cancelX) <= half && Math.abs(ly) <= half) {
+      return 'cancel';
+    }
+    return null;
   }
 
   private applyConfirmEnabled(enabled: boolean): void {
@@ -197,13 +252,14 @@ export class BuildPlacementConfirm {
   }
 
   private activateConfirm(): void {
-    if (!this.confirmEnabled) return;
+    if (!this.visible || !this.confirmEnabled) return;
     const cb = this.onConfirm;
     this.hide();
     cb?.();
   }
 
   private activateCancel(): void {
+    if (!this.visible) return;
     const cb = this.onCancel;
     this.hide();
     cb?.();

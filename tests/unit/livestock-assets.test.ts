@@ -15,7 +15,6 @@ import {
   penHouseFootprintLayout,
   penHouseFootprintFitBox,
   penFootprintOccupiesCell,
-  penMoatTouchesExternalWater,
   penOccupiesCell,
   pickLivestockVariantIndex,
   resolveLivestockAnimalTextureKey,
@@ -100,19 +99,20 @@ describe('livestockAssets', () => {
     expect(penFootprintCells(upgraded)).toHaveLength(16);
   });
 
-  it('duck/fish moat ring is one cell outside footprint', () => {
-    expect(penHasWaterMoat('duck')).toBe(true);
+  it('duck/fish pens have no water moat (footprint only)', () => {
+    expect(penHasWaterMoat('duck')).toBe(false);
+    expect(penHasWaterMoat('fish')).toBe(false);
     const duck = createNewPen('d', 'duck', 4, 4, 1);
-    expect(penMoatCells(duck)).toHaveLength(16);
-    expect(penOccupiesCell(duck, 3, 4)).toBe(true);
+    expect(penMoatCells(duck)).toHaveLength(0);
+    expect(penOccupiesCell(duck, 3, 4)).toBe(false);
     expect(penOccupiesCell(createNewPen('c', 'chicken', 4, 4, 1), 3, 4)).toBe(false);
   });
 
-  it('penFootprintOccupiesCell excludes moat ring', () => {
+  it('penFootprintOccupiesCell matches penOccupiesCell when moat disabled', () => {
     const duck = createNewPen('d', 'duck', 4, 4, 1);
     expect(penFootprintOccupiesCell(duck, 4, 4)).toBe(true);
     expect(penFootprintOccupiesCell(duck, 3, 4)).toBe(false);
-    expect(penOccupiesCell(duck, 3, 4)).toBe(true);
+    expect(penOccupiesCell(duck, 3, 4)).toBe(false);
   });
 
   it('penOccupiesCell covers full footprint', () => {

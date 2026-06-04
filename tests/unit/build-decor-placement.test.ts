@@ -3,7 +3,6 @@ import { BUILD_DECOR_COST } from '../../src/config/gameConfig';
 import { BUILD_ITEMS, BuildSystem } from '../../src/systems/BuildSystem';
 import { GridSystem } from '../../src/systems/GridSystem';
 import { LivestockSystem, LIVESTOCK_PEN_PLACE_ITEMS } from '../../src/systems/LivestockSystem';
-import { penMoatCells } from '../../src/config/livestockAssets';
 
 describe('Build decor placement (5 coins)', () => {
   it('lists all former map tiles in decor tab at BUILD_DECOR_COST', () => {
@@ -108,7 +107,7 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.place(13, 10)).toBe(true);
   });
 
-  it('blocks bridge on void, soil, path (non-water), and pen moat', () => {
+  it('blocks bridge on void, soil, path; grass beside duck pen stays buildable', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const build = new BuildSystem(grid);
@@ -145,9 +144,13 @@ describe('Build decor placement (5 coins)', () => {
     const pen = livestock.place(8, 8);
     livestock.exitPlaceMode();
     expect(pen).not.toBeNull();
-    const moat = penMoatCells(pen!)[0]!;
-    expect(grid.isRiverWaterCell(moat.gx, moat.gy)).toBe(true);
-    expect(build.canPlace(moat.gx, moat.gy)).toBe(false);
+    const beside = { gx: 7, gy: 8 };
+    expect(grid.getCell(beside.gx, beside.gy)?.type).toBe('grass');
+    build.exitBuildMode();
+    const grassItem = BUILD_ITEMS.find((i) => i.label === 'Grass')!;
+    build.enterBuildMode(grassItem);
+    expect(build.canPlace(beside.gx, beside.gy)).toBe(true);
+    build.exitBuildMode();
   });
 
   it('places bridge on water as walkable path', () => {

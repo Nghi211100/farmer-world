@@ -187,16 +187,16 @@ export const TOOL_MODAL_SLOT_BAND_EXTRA_HEIGHT_REF_PX = 5;
 
 /** Slot-band outer size at reference width (cyan wrapper + soil bg stretch target). */
 export const TOOL_MODAL_SLOT_BAND_OUTER_W_REF_PX = 160;
-export const TOOL_MODAL_SLOT_BAND_OUTER_H_REF_PX = 44;
+export const TOOL_MODAL_SLOT_BAND_OUTER_H_REF_PX = 50;
 
 /** Inset inside the panel so slot grid/icons clear the wooden frame (px). */
 export const TOOL_MODAL_SLOT_BAND_PADDING_REF_PX = 10;
 
 /** Square hit target for each tool icon at reference width (px). */
-export const TOOL_MODAL_ICON_HIT_SIZE_REF_PX = 26;
+export const TOOL_MODAL_ICON_HIT_SIZE_REF_PX = 33;
 
 /** Display size for each tool icon at reference width (px). */
-export const TOOL_MODAL_ICON_DISPLAY_SIZE_REF_PX = 20;
+export const TOOL_MODAL_ICON_DISPLAY_SIZE_REF_PX = 26;
 
 /**
  * Crop-select seed quantity label sits this many px above the icon hit-box top

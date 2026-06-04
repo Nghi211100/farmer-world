@@ -291,12 +291,12 @@ export function penHouseFootprintLayout(
   };
 }
 
-/** Grid marker for duck/fish moat cells converted from grass (not river water). */
+/** Legacy grid marker from saves that used duck/fish water moats (restored on pen clear). */
 export const PEN_MOAT_WATER_OBJECT = 'pen_moat_water';
 
-/** Duck/fish pens include a one-cell water moat around the fence footprint. */
-export function penHasWaterMoat(animalType: AnimalType): boolean {
-  return animalType === 'duck' || animalType === 'fish';
+/** Water moat around pens is disabled; duck/fish place on grass like other species. */
+export function penHasWaterMoat(_animalType: AnimalType): boolean {
+  return false;
 }
 
 export function penHasWaterMoatForPen(pen: {
@@ -307,11 +307,10 @@ export function penHasWaterMoatForPen(pen: {
   return penHasWaterMoat(pen.animalType);
 }
 
-/** One-cell ring outside the pen house footprint (duck/fish only). */
-export function penMoatCells(
-  pen: { gridX: number; gridY: number; level?: LivestockPenLevel; animalType: AnimalType; penKind?: 'ruminant' }
+/** One-cell ring outside footprint (geometry only; active moat disabled). */
+function penMoatRingGeometry(
+  pen: { gridX: number; gridY: number; level?: LivestockPenLevel }
 ): Array<{ gx: number; gy: number }> {
-  if (!penHasWaterMoatForPen(pen)) return [];
   const { w, h } = penFootprintTiles(pen.level ?? 1);
   const cells: Array<{ gx: number; gy: number }> = [];
   for (let gy = pen.gridY - 1; gy <= pen.gridY + h; gy++) {
@@ -325,6 +324,14 @@ export function penMoatCells(
   return cells;
 }
 
+/** Active moat cells (empty — moat feature disabled). */
+export function penMoatCells(
+  pen: { gridX: number; gridY: number; level?: LivestockPenLevel; animalType: AnimalType; penKind?: 'ruminant' }
+): Array<{ gx: number; gy: number }> {
+  if (!penHasWaterMoatForPen(pen)) return [];
+  return penMoatRingGeometry(pen);
+}
+
 export function penMoatOccupiesCell(
   pen: Parameters<typeof penMoatCells>[0],
   gx: number,
@@ -333,7 +340,7 @@ export function penMoatOccupiesCell(
   return penMoatCells(pen).some((c) => c.gx === gx && c.gy === gy);
 }
 
-/** Pen house fence footprint only (not the duck/fish water moat ring). */
+/** Pen house fence footprint only (excludes optional moat ring when enabled). */
 export function penFootprintOccupiesCell(
   pen: { gridX: number; gridY: number; level?: LivestockPenLevel },
   gx: number,
@@ -343,31 +350,22 @@ export function penFootprintOccupiesCell(
   return gx >= pen.gridX && gx < pen.gridX + w && gy >= pen.gridY && gy < pen.gridY + h;
 }
 
-/** Moat cell touches river/player water outside this pen's moat ring (bridge junction). */
-export function penMoatTouchesExternalWater(
+/** Restore legacy pen_moat_water tiles left from older saves. */
+export function clearLegacyPenMoatWater(
   grid: {
     inBounds(gx: number, gy: number): boolean;
-    getCell(gx: number, gy: number): { type?: string } | null | undefined;
+    getCell(gx: number, gy: number): { object?: string } | null | undefined;
+    setCell(gx: number, gy: number, cell: { type: 'grass'; walkable: true; object: undefined }): void;
   },
-  pen: Parameters<typeof penMoatCells>[0],
-  gx: number,
-  gy: number
-): boolean {
-  if (!penMoatOccupiesCell(pen, gx, gy)) return false;
-  const cardinals: ReadonlyArray<readonly [number, number]> = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-  for (const [dx, dy] of cardinals) {
-    const nx = gx + dx;
-    const ny = gy + dy;
-    if (!grid.inBounds(nx, ny)) continue;
-    if (grid.getCell(nx, ny)?.type !== 'water') continue;
-    if (!penMoatOccupiesCell(pen, nx, ny)) return true;
+  pen: { gridX: number; gridY: number; level?: LivestockPenLevel }
+): void {
+  for (const level of [1, 2] as const) {
+    for (const { gx, gy } of penMoatRingGeometry({ ...pen, level })) {
+      if (!grid.inBounds(gx, gy)) continue;
+      if (grid.getCell(gx, gy)?.object !== PEN_MOAT_WATER_OBJECT) continue;
+      grid.setCell(gx, gy, { type: 'grass', walkable: true, object: undefined });
+    }
   }
-  return false;
 }
 
 export function penOccupiesCell(

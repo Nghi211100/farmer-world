@@ -81,6 +81,9 @@ export class ObjectEditSystem {
     if (!payload || payload.kind === 'pen' && payload.pen.state === 'producing') {
       return null;
     }
+    if (this.active) {
+      this.endMove();
+    }
     const anchorGx = payload.kind === 'pen' ? payload.pen.gridX : gx;
     const anchorGy = payload.kind === 'pen' ? payload.pen.gridY : gy;
     this.session = { originGx: anchorGx, originGy: anchorGy, payload };

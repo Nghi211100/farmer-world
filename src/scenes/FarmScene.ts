@@ -133,7 +133,11 @@ import {
   isGridOnMoveSessionOrigin,
   objectMovePickupScale,
 } from '../utils/objectMoveDrag';
-import { penIdAfterConfirmedMove } from '../utils/objectMoveReveal';
+import {
+  buildingSpriteKeyAt,
+  penDataAfterMove,
+  penIdAfterConfirmedMove,
+} from '../utils/objectMoveReveal';
 import { pickLivestockPenAtGridCell } from '../utils/livestockPenHitTest';
 import {
   clampScrollToFarmPlayable,
@@ -1800,6 +1804,10 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (this.handleBuildConfirmPointerUp(pointer)) {
+        return;
+      }
+
       if (this.finishLivestockPlaceDrag(pointer)) {
         return;
       }
@@ -2379,6 +2387,9 @@ export class FarmScene extends Phaser.Scene {
       }
       return;
     }
+    if (this.objectEditSystem.active) {
+      this.cancelObjectMoveMode(false);
+    }
     const session = this.objectEditSystem.beginMove(gx, gy);
     if (!session) {
       if (this.livestockSystem.getPenAt(gx, gy)?.state === 'producing') {
@@ -2387,7 +2398,6 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
     this.setObjectOriginHidden(session.originGx, session.originGy, true);
-    this.objectEditSystem.startMoveDrag();
     this.updateGhostSprite();
     this.showObjectMovePlacementConfirm();
     const hint =
@@ -2420,11 +2430,11 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
     if (this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
-      this.revealObjectAfterConfirmedMove(session, penId, ghostX, ghostY);
+      this.restoreObjectVisualAfterMove(session, ghostX, ghostY);
       this.refreshGroundTileNeighborhood(session.originGx, session.originGy);
       this.refreshGroundTileNeighborhood(ghostX, ghostY);
-      this.buildPlacementConfirm.hide();
-      this.ghostSprite?.setVisible(false);
+      this.teardownObjectMoveVisuals();
+      this.syncFarmDebugOverlays();
       this.events.emit('mode-hint', { text: '', prominent: false });
       this.scheduleSave();
       this.showToast(penId ? 'Đã di chuyển chuồng' : 'Đã di chuyển');
@@ -2434,24 +2444,51 @@ export class FarmScene extends Phaser.Scene {
     this.showObjectMovePlacementConfirm();
   }
 
-  private revealObjectAfterConfirmedMove(
+  private restoreObjectVisualAfterMove(
     session: MoveSession,
-    penId: string | null,
-    gx: number,
-    gy: number
+    anchorGx: number,
+    anchorGy: number
   ): void {
-    if (penId) {
-      this.livestockPenSprites.get(penId)?.container.setVisible(true);
+    if (session.payload.kind === 'pen') {
+      const pen = penDataAfterMove(
+        this.livestockSystem.getPens(),
+        session,
+        anchorGx,
+        anchorGy
+      );
+      const spr = pen ? this.livestockPenSprites.get(pen.id) : undefined;
+      if (spr && pen) {
+        spr.updateData(pen, this.grid, this);
+        this.resetObjectVisualAlpha(spr.container);
+      }
       return;
     }
     if (session.payload.kind === 'building') {
-      const spr = this.buildingSprites.get(`${gx},${gy}`);
-      spr?.sprite.setVisible(true);
+      const spr = this.buildingSprites.get(buildingSpriteKeyAt(anchorGx, anchorGy));
+      if (spr) {
+        spr.sprite.setVisible(true);
+        this.resetObjectVisualAlpha(spr.sprite);
+      }
       return;
     }
     if (session.payload.kind === 'natural') {
       this.refreshMapDecorations();
     }
+  }
+
+  private resetObjectVisualAlpha(target: Phaser.GameObjects.GameObject): void {
+    if ('setAlpha' in target && typeof target.setAlpha === 'function') {
+      target.setAlpha(1);
+    }
+    if ('setVisible' in target && typeof target.setVisible === 'function') {
+      target.setVisible(true);
+    }
+  }
+
+  private teardownObjectMoveVisuals(): void {
+    this.cancelObjectMoveLongPress();
+    this.buildPlacementConfirm.hide();
+    this.ghostSprite?.setVisible(false);
   }
 
   private finishObjectEditInteraction(): void {
@@ -2571,19 +2608,44 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private cancelObjectMoveMode(clearHint = true): void {
-    this.cancelObjectMoveLongPress();
     const session = this.objectEditSystem.getSession();
     if (session) {
-      this.setObjectOriginHidden(session.originGx, session.originGy, false);
+      this.restoreObjectVisualAtOrigin(session);
       if (session.payload.kind === 'pen') {
         this.refreshGroundTileNeighborhood(session.originGx, session.originGy);
       }
     }
     this.objectEditSystem.cancelMove();
-    this.buildPlacementConfirm.hide();
-    this.ghostSprite?.setVisible(false);
+    this.teardownObjectMoveVisuals();
+    this.syncFarmDebugOverlays();
     if (clearHint && this.farmMode === 'normal') {
       this.events.emit('mode-hint', { text: '', prominent: false });
+    }
+  }
+
+  private restoreObjectVisualAtOrigin(session: MoveSession): void {
+    const { originGx, originGy } = session;
+    if (session.payload.kind === 'pen') {
+      const penId = session.payload.pen.id;
+      const pen =
+        this.livestockSystem.getPens().find((p) => p.id === penId) ??
+        this.livestockSystem.getPenAt(originGx, originGy);
+      const spr = pen ? this.livestockPenSprites.get(pen.id) : undefined;
+      if (spr && pen) {
+        spr.updateData(pen, this.grid, this);
+        this.resetObjectVisualAlpha(spr.container);
+      }
+      return;
+    }
+    this.setObjectOriginHidden(originGx, originGy, false);
+    if (session.payload.kind === 'building') {
+      const spr = this.buildingSprites.get(buildingSpriteKeyAt(originGx, originGy));
+      if (spr) {
+        this.resetObjectVisualAlpha(spr.sprite);
+      }
+    }
+    if (session.payload.kind === 'natural') {
+      this.refreshMapDecorations();
     }
   }
 
@@ -3250,6 +3312,11 @@ export class FarmScene extends Phaser.Scene {
   private handleBuildConfirmPointer(pointer: Phaser.Input.Pointer): boolean {
     if (!this.buildPlacementConfirm?.isVisible()) return false;
     return this.buildPlacementConfirm.handlePointerDown(pointer);
+  }
+
+  private handleBuildConfirmPointerUp(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.buildPlacementConfirm?.isVisible()) return false;
+    return this.buildPlacementConfirm.handlePointerUp(pointer);
   }
 
   private handleObjectEditPointer(pointer: Phaser.Input.Pointer): boolean {

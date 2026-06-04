@@ -124,6 +124,26 @@ describe('ObjectEditSystem', () => {
     expect(build.findBuildingAt(3, 3)).toBeNull();
   });
 
+  it('beginMove while active resets to a new locked session', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    grid.setCell(1, 9, { type: 'grass', walkable: true });
+    grid.setObject(1, 9, 'tree_01');
+    grid.setCell(2, 10, { type: 'grass', walkable: true });
+    grid.setObject(2, 10, 'rock_01');
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
+    edit.beginMove(1, 9);
+    edit.startMoveDrag();
+    edit.updateGhost(2, 10);
+    const second = edit.beginMove(2, 10);
+    expect(second?.originGx).toBe(2);
+    expect(second?.originGy).toBe(10);
+    expect(edit.moveDragging).toBe(false);
+    expect(edit.previewLocked).toBe(true);
+    expect(edit.ghostX).toBe(2);
+    expect(edit.ghostY).toBe(10);
+  });
+
   it('finishMoveDrag locks preview at current ghost cell', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();

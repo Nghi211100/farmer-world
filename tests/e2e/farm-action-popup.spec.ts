@@ -198,9 +198,9 @@ test.describe('Farm action popup layout', () => {
     expect(TOOL_MODAL_SLOT_BAND_EXTRA_HEIGHT_REF_PX).toBe(5);
     expect(TOOL_MODAL_SLOT_BAND_PADDING_REF_PX).toBe(10);
     expect(TOOL_MODAL_SLOT_BAND_OUTER_W_REF_PX).toBe(160);
-    expect(TOOL_MODAL_SLOT_BAND_OUTER_H_REF_PX).toBe(44);
-    expect(TOOL_MODAL_ICON_HIT_SIZE_REF_PX).toBe(26);
-    expect(TOOL_MODAL_ICON_DISPLAY_SIZE_REF_PX).toBe(20);
+    expect(TOOL_MODAL_SLOT_BAND_OUTER_H_REF_PX).toBe(50);
+    expect(TOOL_MODAL_ICON_HIT_SIZE_REF_PX).toBe(33);
+    expect(TOOL_MODAL_ICON_DISPLAY_SIZE_REF_PX).toBe(26);
     expect(TOOL_MODAL_VISUAL_SCALE).toBeCloseTo(0.75, 2);
   });
 

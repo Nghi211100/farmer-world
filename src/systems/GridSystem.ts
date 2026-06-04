@@ -779,7 +779,8 @@ export class GridSystem {
     const decor: [number, number, string][] = [
       [5, 15, 'rock_01'],
       [12, 15, 'bush_01'],
-      [17, 11, 'bush_01'],
+      // Avoid (17,11): blocks default pig pen 4×4 upgrade ring at anchor (15,8).
+      [18, 13, 'bush_01'],
     ];
     for (const [dx, dy, key] of decor) {
       if (this.isFarmIslandFootprintCell(dx, dy)) continue;

@@ -356,7 +356,9 @@ export interface LivestockTimerInfo {
   kind: LivestockTimerKind;
   /** Satiation bar 0..1 (1 = fed/full, 0 = starving). */
   hungerProgress: number;
-  /** Label above bar (maturation/production countdown); empty when hungry. */
+  /** Progress bar fill 0..1 (mirrors hungerProgress — satiation, not growth/production). */
+  barProgress: number;
+  /** Label above bar (satiation countdown until hungry, or "Ready"). */
   growthTimeText: string;
 }
 
@@ -371,36 +373,52 @@ function hungerProgressRatioForAnimal(
   return Math.max(0, Math.min(1, 1 - fedMs / hungryAfter));
 }
 
+/** Seconds until the animal becomes hungry (0 when already hungry). */
+function satiationRemainingSec(
+  animal: LivestockAnimalLifecycle,
+  animalType: AnimalType
+): number {
+  if (animal.lifecycleState === 'hungry') return 0;
+  const def = getLivestockDef(animalType);
+  const hungryAfter = Math.max(1, def.hungryAfterMs);
+  const fedMs = animal.hungerSinceFeedMs ?? 0;
+  return Math.max(0, (hungryAfter - fedMs) / 1000);
+}
+
 function buildLivestockTimerInfo(
   animal: LivestockAnimalLifecycle,
   animalType: AnimalType,
-  nowMs: number
+  _nowMs: number
 ): LivestockTimerInfo | null {
-  const def = getLivestockDef(animalType);
   const hungerProgress = hungerProgressRatioForAnimal(animal, animalType);
+  const barProgress = hungerProgress;
+  const satiationText = formatGrowthTime(satiationRemainingSec(animal, animalType));
 
   if (isAnimalProductionReady(animal, animalType)) {
-    return { kind: 'ready', hungerProgress, growthTimeText: 'Ready' };
+    return { kind: 'ready', hungerProgress, barProgress, growthTimeText: 'Ready' };
   }
   if (animal.lifecycleState === 'hungry') {
-    return { kind: 'hungry', hungerProgress: 0, growthTimeText: '' };
+    return {
+      kind: 'hungry',
+      hungerProgress: 0,
+      barProgress: 0,
+      growthTimeText: satiationText,
+    };
   }
   if (animal.lifecycleState === 'baby' || animal.lifecycleState === 'growing') {
-    const duration = Math.max(1, animal.growthDurationMs ?? def.growthMs);
-    const start = animal.growthStartAt ?? nowMs;
-    const remainingSec = Math.max(0, (duration - (nowMs - start)) / 1000);
     return {
       kind: 'grow',
       hungerProgress,
-      growthTimeText: formatGrowthTime(remainingSec),
+      barProgress,
+      growthTimeText: satiationText,
     };
   }
   if (animal.lifecycleState === 'producing') {
-    const remainingMs = Math.max(0, def.produceMs - (animal.productionProgressMs ?? 0));
     return {
       kind: 'produce',
       hungerProgress,
-      growthTimeText: formatGrowthTime(remainingMs / 1000),
+      barProgress,
+      growthTimeText: satiationText,
     };
   }
   return null;
@@ -484,6 +502,23 @@ export function canStockPenWith(
   const def = getLivestockDef(pen.animalType);
   if (def.houseOnly) return false;
   return pen.animalType === animalType;
+}
+
+/** Empty pen slots for a species across all compatible pens, capped by coins. */
+export function maxLivestockPurchasable(
+  pens: LivestockPenData[],
+  animalType: AnimalType,
+  unitPrice: number,
+  coins: number
+): number {
+  let slots = 0;
+  for (const pen of pens) {
+    if (!canStockPenWith(pen, animalType)) continue;
+    slots += penCapacity(pen) - penStockCount(pen);
+  }
+  if (slots <= 0) return 0;
+  const maxByCoins = unitPrice > 0 ? Math.floor(coins / unitPrice) : slots;
+  return Math.min(slots, maxByCoins);
 }
 
 /** Direct pen tap stock (non-ruminant species pens only; ruminant uses shop). */
@@ -963,6 +998,28 @@ export function getPenObjectEditHiddenActions(
   }
   if (isPenAtMaxLevel(pen)) hidden.push('upgrade');
   return hidden;
+}
+
+export function getPenMoveBlockMessage(pen: LivestockPenData): string | null {
+  if (pen.state === 'producing') return 'Không di chuyển khi đang sản xuất';
+  return null;
+}
+
+export function getPenObjectEditDisabledActions(
+  pen: LivestockPenData,
+  options: {
+    upgradeBlocked: boolean;
+    canAffordUpgrade: boolean;
+    canSellAll: boolean;
+  }
+): Array<'move' | 'upgrade' | 'sellAll'> {
+  const disabled: Array<'move' | 'upgrade' | 'sellAll'> = [];
+  if (getPenMoveBlockMessage(pen)) disabled.push('move');
+  if (!isPenAtMaxLevel(pen) && (options.upgradeBlocked || !options.canAffordUpgrade)) {
+    disabled.push('upgrade');
+  }
+  if (!options.canSellAll) disabled.push('sellAll');
+  return disabled;
 }
 
 /** Visible pen popup actions in display order (matches ObjectEditPopup pen mode). */

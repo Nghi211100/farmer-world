@@ -23,6 +23,7 @@ interface GameRefs {
   energy: EnergySystem;
   getHud: () => HUDResources;
   canPurchaseLivestock?: (animalType: AnimalType) => { ok: boolean; message: string };
+  getLivestockMaxBuyQuantity?: (animalType: AnimalType) => number;
 }
 
 export class UIScene extends Phaser.Scene {
@@ -85,7 +86,11 @@ export class UIScene extends Phaser.Scene {
 
     this.shopPanel.setOnBuy((result) => {
       if (result.livestockAnimal) {
-        farm.events.emit('shop-livestock-stock', result.livestockAnimal);
+        farm.events.emit(
+          'shop-livestock-stock',
+          result.livestockAnimal,
+          result.livestockQty ?? 1
+        );
       }
       refreshHud();
       requestSave();
@@ -179,6 +184,9 @@ export class UIScene extends Phaser.Scene {
     this.gameRefs = refs;
     if (refs.canPurchaseLivestock) {
       this.shopPanel.setLivestockPurchaseGate(refs.canPurchaseLivestock);
+    }
+    if (refs.getLivestockMaxBuyQuantity) {
+      this.shopPanel.setLivestockMaxBuyQuantity(refs.getLivestockMaxBuyQuantity);
     }
     this.topHUD.update(refs.getHud());
   }

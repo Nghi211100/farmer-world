@@ -66,6 +66,9 @@ export interface FarmerWorldTestApi {
   isBuildOpen: () => boolean;
   getBuildCardLabels: () => string[] | null;
   setBuildTab: (tab: 'buildings' | 'decor' | 'livestock') => void;
+  getBuildScrollMax: () => number | null;
+  setBuildScrollOffset: (offset: number) => void;
+  isBuildCardHitInteractive: (label: string) => boolean | null;
   getWarehouseTitle: () => string | null;
   getShopTitle: () => string | null;
   isShopPageLabelVisible: () => boolean | null;
@@ -264,6 +267,13 @@ export interface FarmerWorldTestApi {
   forcePenHungryState: (gx: number, gy: number, hungry: boolean) => boolean;
   tapPenAt: (gx: number, gy: number) => boolean;
   closeObjectEditPopup: () => void;
+  pressObjectEditPopupAction: (
+    action: 'move' | 'remove' | 'upgrade' | 'feed' | 'sell' | 'sellAll'
+  ) => boolean;
+  placeUpgradeableTestPen: () => { gx: number; gy: number } | null;
+  stockPenAt: (gx: number, gy: number) => boolean;
+  getPenLevelAt: (gx: number, gy: number) => number | null;
+  getCoins: () => number;
   isToolBarVisible: () => boolean;
   refocusFarmCamera: () => {
     viewW: number;
@@ -477,6 +487,19 @@ export function installGameTestApi(game: Phaser.Game): void {
     },
     setBuildTab: (tab) => {
       getUiScene(game)?.buildPanel.setActiveTabForTest(tab);
+    },
+    getBuildScrollMax: () => {
+      const ui = getUiScene(game);
+      if (!ui?.isBuildModalOpen()) return null;
+      return ui.buildPanel.getScrollMaxForTest();
+    },
+    setBuildScrollOffset: (offset) => {
+      getUiScene(game)?.buildPanel.setScrollOffsetForTest(offset);
+    },
+    isBuildCardHitInteractive: (label) => {
+      const ui = getUiScene(game);
+      if (!ui?.isBuildModalOpen()) return null;
+      return ui.buildPanel.isCardHitInteractive(label);
     },
     getWarehouseTitle: () =>
       getUiScene(game)?.inventoryPanel.isVisible() ? 'Warehouse' : null,
@@ -779,6 +802,13 @@ export function installGameTestApi(game: Phaser.Game): void {
       getFarmScene(game)?.forcePenHungryStateForTest(gx, gy, hungry) ?? false,
     tapPenAt: (gx, gy) => getFarmScene(game)?.tapPenForTest(gx, gy) ?? false,
     closeObjectEditPopup: () => getFarmScene(game)?.closeObjectEditPopupForTest(),
+    pressObjectEditPopupAction: (action) =>
+      getFarmScene(game)?.pressObjectEditPopupActionForTest(action) ?? false,
+    placeUpgradeableTestPen: () =>
+      getFarmScene(game)?.placeUpgradeableTestPenForTest() ?? null,
+    stockPenAt: (gx, gy) => getFarmScene(game)?.stockPenAtForTest(gx, gy) ?? false,
+    getPenLevelAt: (gx, gy) => getFarmScene(game)?.getPenLevelAtForTest(gx, gy) ?? null,
+    getCoins: () => getFarmScene(game)?.getCoinsForTest() ?? 0,
     isToolBarVisible: () => getFarmScene(game)?.isToolBarVisibleForTest() ?? false,
     refocusFarmCamera: () => getFarmScene(game)?.refocusFarmCameraForTest() ?? null,
     getFarmCameraCenterMetrics: () =>

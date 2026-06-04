@@ -15,6 +15,7 @@ import {
   createNewPen,
   findPenForStocking,
   getPenForSpecies,
+  getPenObjectEditDisabledActions,
   normalizeSavedLivestockPens,
   penUpgradeExpansionCells,
   stockPenWithAnimal,
@@ -350,11 +351,34 @@ describe('LivestockSystem — player-placed pens', () => {
     const { livestock } = emptyFarm();
     const pen = stockPenWithAnimal(createNewPen('prod-up', 'chicken', 4, 4), 'chicken', () => 0)!;
     const producing = { ...pen, state: 'producing' as const };
+    livestock.loadPens([producing]);
     expect(livestock.canUpgradeAt(producing)).toBe(true);
     const upgraded = livestock.tryUpgrade(producing);
     expect(upgraded?.level).toBe(2);
     expect(upgraded?.state).toBe('producing');
     expect(upgraded?.penAnimals?.length).toBe(pen.penAnimals?.length);
+    expect(livestock.getPenAt(4, 4)?.level).toBe(2);
+  });
+
+  it('upgrade ring allows grass/path with stale walkable=false and no object', () => {
+    const { grid, livestock } = emptyFarm();
+    const pen = createNewPen('orphan-walk', 'chicken', 10, 10, 1);
+    livestock.loadPens([pen]);
+    for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+      grid.setCell(gx, gy, { type: 'grass', walkable: false });
+    }
+    expect(livestock.canUpgradeAt(pen)).toBe(true);
+    expect(livestock.tryUpgrade(pen)?.level).toBe(2);
+  });
+
+  it('tryUpgrade persists when pen id differs but anchor matches', () => {
+    const { livestock } = emptyFarm();
+    const placed = createNewPen('pen-chicken-1', 'chicken', 10, 10, 1);
+    livestock.loadPens([placed]);
+    const staleRef = { ...placed, id: 'stale-copy-id' };
+    const upgraded = livestock.tryUpgrade(staleRef);
+    expect(upgraded?.level).toBe(2);
+    expect(livestock.getPenAt(10, 10)?.level).toBe(2);
   });
 
   it('upgrade ring ignores stale livestock_pen grid markers without a pen', () => {
@@ -368,14 +392,14 @@ describe('LivestockSystem — player-placed pens', () => {
     expect(livestock.tryUpgrade(pen)?.level).toBe(2);
   });
 
-  it('default pig pen is blocked by placeholder bush on expansion ring', () => {
+  it('default pig pen can upgrade after decor avoids 4×4 ring', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const livestock = new LivestockSystem(grid);
     const pig = createDefaultFarmPens().find((p) => p.animalType === 'pig')!;
     livestock.loadPens([pig]);
-    expect(livestock.canUpgradeAt(pig)).toBe(false);
-    expect(livestock.getPenUpgradeBlockMessage(pig)).toMatch(/bụi|đá|dọn/i);
+    expect(livestock.canUpgradeAt(pig)).toBe(true);
+    expect(livestock.tryUpgrade(pig)?.level).toBe(2);
   });
 
   it('default ruminant pen can upgrade on placeholder map', () => {
@@ -432,6 +456,72 @@ describe('LivestockSystem — player-placed pens', () => {
       expect(stocked).not.toBeNull();
     }
     expect(livestock.stockSpeciesPen('chicken')).toBeNull();
+  });
+
+  it('rejects level-1 placement where 4×4 upgrade ring hits water border', () => {
+    const { grid, livestock } = emptyFarm();
+    let footprintOnly: { gx: number; gy: number } | null = null;
+    for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        if (
+          livestock.canPlaceFootprint(gx, gy, { w: 3, h: 3 }) &&
+          livestock.getUpgradeRingBlockAtAnchor(gx, gy)?.includes('nước')
+        ) {
+          footprintOnly = { gx, gy };
+          break;
+        }
+      }
+      if (footprintOnly) break;
+    }
+    expect(footprintOnly).not.toBeNull();
+    expect(livestock.canPlace(footprintOnly!.gx, footprintOnly!.gy)).toBe(false);
+  });
+
+  it('empty placed pen on clear grass can upgrade to 4×4', () => {
+    const { livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
+    livestock.enterPlaceMode(item);
+    let placed: ReturnType<LivestockSystem['place']> = null;
+    outer: for (let gy = 0; gy < 20; gy++) {
+      for (let gx = 0; gx < 20; gx++) {
+        if (!livestock.canPlace(gx, gy)) continue;
+        placed = livestock.place(gx, gy);
+        if (placed) break outer;
+      }
+    }
+    livestock.exitPlaceMode();
+    expect(placed).not.toBeNull();
+    expect(livestock.getPenUpgradeBlockMessage(placed!)).toBeNull();
+    expect(livestock.canUpgradeAt(placed!)).toBe(true);
+    expect(livestock.tryUpgrade(placed!)?.level).toBe(2);
+  });
+
+  it('pen near water border stays upgrade-blocked with Vietnamese water message', () => {
+    const { grid, livestock } = emptyFarm();
+    let nearWater: { gx: number; gy: number } | null = null;
+    for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        if (!livestock.canPlaceFootprint(gx, gy, { w: 3, h: 3 })) continue;
+        const block = livestock.getUpgradeRingBlockAtAnchor(gx, gy);
+        if (block?.includes('nước')) {
+          nearWater = { gx, gy };
+          break;
+        }
+      }
+      if (nearWater) break;
+    }
+    expect(nearWater).not.toBeNull();
+    const pen = createNewPen('near-water', 'chicken', nearWater!.gx, nearWater!.gy, 1);
+    livestock.loadPens([pen]);
+    expect(livestock.canUpgradeAt(pen)).toBe(false);
+    expect(livestock.getPenUpgradeBlockMessage(pen)).toMatch(/nước/i);
+    expect(
+      getPenObjectEditDisabledActions(pen, {
+        upgradeBlocked: true,
+        canAffordUpgrade: true,
+        canSellAll: false,
+      })
+    ).toEqual(expect.arrayContaining(['upgrade']));
   });
 
   it('recovers legacy pens from grid livestock markers', () => {

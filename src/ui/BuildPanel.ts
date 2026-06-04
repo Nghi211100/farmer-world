@@ -289,6 +289,23 @@ export class BuildPanel {
     this.applyLayout();
   }
 
+  /** Dev/e2e: max horizontal scroll for the active tab's card row. */
+  getScrollMaxForTest(): number {
+    return this.scrollMax;
+  }
+
+  /** Dev/e2e: scroll card row (updates hit targets for off-screen cards). */
+  setScrollOffsetForTest(offset: number): void {
+    this.setScrollOffset(offset);
+  }
+
+  /** Dev/e2e: whether a card label's hit zone is interactive after scroll culling. */
+  isCardHitInteractive(label: string): boolean {
+    const node = this.cardNodes.find((n) => n.item.label === label);
+    if (!node) return false;
+    return Boolean(node.hit.input?.enabled);
+  }
+
   private enableBackdrop(): void {
     const { width, height } = this.root.scene.scale;
     this.backdrop.setPosition(width / 2, height / 2);
@@ -639,7 +656,10 @@ export class BuildPanel {
       const visible = right > viewLeft && left < viewRight;
       node.root.setVisible(visible);
       if (visible) {
-        if (!node.hit.input) node.hit.setInteractive({ useHandCursor: true });
+        // Re-enable after scroll: disableInteractive() keeps `input` but clears enabled.
+        if (!node.hit.input?.enabled) {
+          node.hit.setInteractive({ useHandCursor: true });
+        }
       } else {
         node.hit.disableInteractive();
       }

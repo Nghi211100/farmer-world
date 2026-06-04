@@ -73,6 +73,8 @@ export interface ShopBuyResult {
   message: string;
   /** Set when buying from Animals tab (not added to warehouse). */
   livestockAnimal?: AnimalType;
+  /** How many animals to stock when {@link livestockAnimal} is set. */
+  livestockQty?: number;
 }
 
 /** Native size of `ui/shop-modal.png` — layout fractions tuned to this art. */
@@ -693,6 +695,7 @@ export class ShopPanel {
   private livestockPurchaseGate?: (
     animalType: AnimalType
   ) => { ok: boolean; message: string };
+  private livestockMaxBuyQuantity?: (animalType: AnimalType) => number;
 
   private get gridPageSize(): number {
     return GRID_COLS * this.gridRows;
@@ -2202,7 +2205,11 @@ export class ShopPanel {
 
   /** Max purchasable qty from coins + warehouse space (min 1 when any purchase is possible). */
   private getMaxBuyQuantity(itemId: string): number {
-    if (isShopLivestockId(itemId)) return 1;
+    if (isShopLivestockId(itemId)) {
+      const animalType = getShopLivestockAnimalType(itemId);
+      if (!animalType || !this.economy) return 0;
+      return Math.max(0, this.livestockMaxBuyQuantity?.(animalType) ?? 0);
+    }
     if (!this.economy) return 1;
     const unit = this.economy.getShopPrice(itemId);
     if (unit <= 0) return 1;
@@ -2216,7 +2223,11 @@ export class ShopPanel {
   private setBuyQuantity(qty: number): void {
     if (!this.selectedId) return;
     const max = this.getMaxBuyQuantity(this.selectedId);
-    this.buyQuantity = Phaser.Math.Clamp(Math.floor(qty), 1, max);
+    if (max <= 0) {
+      this.buyQuantity = 0;
+    } else {
+      this.buyQuantity = Phaser.Math.Clamp(Math.floor(qty), 1, max);
+    }
     this.updateBuyQtyDisplay();
     this.updateDetailBuyTotalPrice();
   }
@@ -2932,6 +2943,11 @@ export class ShopPanel {
     this.livestockPurchaseGate = fn;
   }
 
+  /** Max animal qty from empty pen slots and player coins (FarmScene). */
+  setLivestockMaxBuyQuantity(fn: (animalType: AnimalType) => number): void {
+    this.livestockMaxBuyQuantity = fn;
+  }
+
   show(economy: EconomySystem, inventory: InventorySystem, _hud?: HUDResources): void {
     this.economy = economy;
     this.inventory = inventory;
@@ -2957,7 +2973,7 @@ export class ShopPanel {
   private purchase(itemId: string, qty: number): void {
     if (!this.economy || !this.inventory) return;
     if (isShopLivestockId(itemId)) {
-      this.purchaseLivestock(itemId);
+      this.purchaseLivestock(itemId, qty);
       return;
     }
     const unitPrice = this.economy.getShopPrice(itemId);
@@ -2988,10 +3004,24 @@ export class ShopPanel {
     this.onBuy?.(result);
   }
 
-  private purchaseLivestock(itemId: string): void {
+  private purchaseLivestock(itemId: string, qty: number): void {
     if (!this.economy) return;
     const animalType = getShopLivestockAnimalType(itemId);
     if (!animalType) return;
+
+    const count = Math.max(1, Math.floor(qty));
+    const maxQty = this.getMaxBuyQuantity(itemId);
+    const purchaseQty = maxQty > 0 ? Math.min(count, maxQty) : 0;
+    if (purchaseQty <= 0) {
+      const gate = this.livestockPurchaseGate?.(animalType);
+      const result: ShopBuyResult = {
+        success: false,
+        message: gate && !gate.ok ? gate.message : 'Chuồng đã đầy',
+      };
+      this.showToast(result.message);
+      this.onBuy?.(result);
+      return;
+    }
 
     const gate = this.livestockPurchaseGate?.(animalType);
     if (gate && !gate.ok) {
@@ -3002,22 +3032,24 @@ export class ShopPanel {
     }
 
     const unitPrice = this.economy.getShopPrice(itemId);
-    if (!this.economy.canAfford(unitPrice)) {
+    const total = unitPrice * purchaseQty;
+    if (!this.economy.canAfford(total)) {
       const result: ShopBuyResult = {
         success: false,
-        message: `Cần ${unitPrice} xu (có ${this.economy.getCoins()})`,
+        message: `Cần ${total} xu (có ${this.economy.getCoins()})`,
       };
       this.showToast(result.message);
       this.onBuy?.(result);
       return;
     }
 
-    this.economy.spend(unitPrice);
+    this.economy.spend(total);
     const def = getShopLivestockLabel(itemId);
     const result: ShopBuyResult = {
       success: true,
-      message: `Đã mua ${def}`,
+      message: `Đã mua ${purchaseQty} ${def}`,
       livestockAnimal: animalType,
+      livestockQty: purchaseQty,
     };
     this.showToast('');
     this.refreshAll();

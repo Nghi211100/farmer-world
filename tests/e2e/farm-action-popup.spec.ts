@@ -107,6 +107,10 @@ function assertLayoutAligned(
 }
 
 async function waitForGame(page: import('@playwright/test').Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.removeItem('your-farm-save-v4');
+    localStorage.removeItem('your-farm-save-v4-grid');
+  });
   await page.goto('/');
   await page.waitForSelector('#game-container canvas', { timeout: 30_000 });
   await page.waitForFunction(
@@ -309,40 +313,49 @@ test.describe('Farm action popup — laptop viewport', () => {
   });
 });
 
+/** Default chicken pen anchor (1,2) — center cell inside 3×3 footprint. */
+const DEFAULT_CHICKEN_PEN_CELL = { gx: 2, gy: 3 };
+
 test.describe('Object edit popup actions', () => {
   test('clicking pen in normal mode opens pen actions popup', async ({ page }) => {
     await waitForGame(page);
-    const tapped = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.tapPenAt(7, 9) ?? false);
+    const tapped = await page.evaluate(
+      ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.tapPenAt(gx, gy) ?? false,
+      DEFAULT_CHICKEN_PEN_CELL
+    );
     expect(tapped).toBe(true);
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
       .toBe(true);
     await expect
       .poll(() =>
-        page.evaluate(() => {
+        page.evaluate(({ gx, gy }) => {
           const api = window.__FARMER_WORLD_TEST__;
           const actions = api?.getObjectEditPopupActions() ?? [];
-          const expected = api?.getExpectedPenObjectEditActions(7, 9) ?? [];
+          const expected = api?.getExpectedPenObjectEditActions(gx, gy) ?? [];
           return JSON.stringify(actions) === JSON.stringify(expected);
-        })
+        }, DEFAULT_CHICKEN_PEN_CELL)
       )
       .toBe(true);
   });
 
   test('pen popup shows movement, upgrade, feed, sell', async ({ page }) => {
     await waitForGame(page);
-    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(7, 9, true));
+    await page.evaluate(
+      ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(gx, gy, true),
+      DEFAULT_CHICKEN_PEN_CELL
+    );
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
       .toBe(true);
     await expect
       .poll(() =>
-        page.evaluate(() => {
+        page.evaluate(({ gx, gy }) => {
           const api = window.__FARMER_WORLD_TEST__;
           const actions = api?.getObjectEditPopupActions() ?? [];
-          const expected = api?.getExpectedPenObjectEditActions(7, 9) ?? [];
+          const expected = api?.getExpectedPenObjectEditActions(gx, gy) ?? [];
           return JSON.stringify(actions) === JSON.stringify(expected);
-        })
+        }, DEFAULT_CHICKEN_PEN_CELL)
       )
       .toBe(true);
   });
@@ -358,18 +371,71 @@ test.describe('Object edit popup actions', () => {
       .toEqual(['move', 'remove']);
   });
 
+  test('level-1 pen upgrades to 4×4 via popup when ring clear and coins sufficient', async ({
+    page,
+  }) => {
+    await waitForGame(page);
+    const placed = await page.evaluate(() =>
+      window.__FARMER_WORLD_TEST__?.placeUpgradeableTestPen()
+    );
+    expect(placed).not.toBeNull();
+
+    const coinsBefore = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.getCoins() ?? 0);
+    expect(coinsBefore).toBeGreaterThanOrEqual(150);
+
+    await page.evaluate(({ gx, gy }) => {
+      window.__FARMER_WORLD_TEST__?.openObjectEditPopup(gx, gy, true);
+    }, placed!);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
+      .toBe(true);
+
+    const pressed = await page.evaluate(() =>
+      window.__FARMER_WORLD_TEST__?.pressObjectEditPopupAction('upgrade')
+    );
+    expect(pressed).toBe(true);
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.getPenLevelAt(gx, gy) ?? 1,
+          placed!
+        )
+      )
+      .toBe(2);
+
+    const coinsAfter = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.getCoins() ?? 0);
+    expect(coinsAfter).toBe(coinsBefore - 150);
+  });
+
   test('hungry pen shows world + feed warning and clears after feed-state reset', async ({ page }) => {
     await waitForGame(page);
+    const penCell = await page.evaluate(() => {
+      const placed = window.__FARMER_WORLD_TEST__?.placeUpgradeableTestPen();
+      if (!placed) return null;
+      if (!window.__FARMER_WORLD_TEST__?.stockPenAt(placed.gx, placed.gy)) return null;
+      return placed;
+    });
+    expect(penCell).not.toBeNull();
     const forcedHungry = await page.evaluate(
-      () => window.__FARMER_WORLD_TEST__?.forcePenHungryState(7, 9, true) ?? false
+      ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.forcePenHungryState(gx, gy, true) ?? false,
+      penCell!
     );
     expect(forcedHungry).toBe(true);
 
     await expect
-      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(7, 9)))
+      .poll(() =>
+        page.evaluate(
+          ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(gx, gy),
+          penCell!
+        )
+      )
       .toBe(true);
 
-    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(7, 9, true));
+    await page.evaluate(
+      ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(gx, gy, true),
+      penCell!
+    );
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
       .toBe(true);
@@ -378,12 +444,19 @@ test.describe('Object edit popup actions', () => {
       .toBe(true);
 
     const clearedHungry = await page.evaluate(
-      () => window.__FARMER_WORLD_TEST__?.forcePenHungryState(7, 9, false) ?? false
+      ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.forcePenHungryState(gx, gy, false) ?? false,
+      penCell!
     );
     expect(clearedHungry).toBe(true);
     await expect
-      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(7, 9)))
+      .poll(() =>
+        page.evaluate(
+          ({ gx, gy }) => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(gx, gy),
+          penCell!
+        )
+      )
       .toBe(false);
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.closeObjectEditPopup());
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditFeedWarningVisible()))
       .toBe(false);

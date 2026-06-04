@@ -46,4 +46,34 @@ test.describe('Build modal cards', () => {
     expect(livestockLabels).toHaveLength(6);
     expect(livestockLabels?.some((l) => /nâng cấp/i.test(l))).toBe(false);
   });
+
+  test('ruminant pen card is clickable after scrolling to end', async ({ page }) => {
+    await waitForGame(page);
+
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.clickBuild());
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isBuildOpen()))
+      .toBe(true);
+
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.setBuildTab('livestock'));
+
+    const beforeScroll = await page.evaluate(() =>
+      window.__FARMER_WORLD_TEST__?.isBuildCardHitInteractive('Chuồng Dê/Cừu')
+    );
+    expect(beforeScroll).toBe(false);
+
+    await page.evaluate(() => {
+      const api = window.__FARMER_WORLD_TEST__;
+      const max = api?.getBuildScrollMax();
+      if (max != null) api?.setBuildScrollOffset(max);
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.__FARMER_WORLD_TEST__?.isBuildCardHitInteractive('Chuồng Dê/Cừu')
+        )
+      )
+      .toBe(true);
+  });
 });

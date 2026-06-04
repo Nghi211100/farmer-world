@@ -8,7 +8,11 @@ import {
   type LivestockAnimalDef,
   type LivestockPenData,
 } from '../config/LivestockConfig';
-import { penFootprintTiles, penOccupiesCell } from '../config/livestockAssets';
+import {
+  penFootprintTiles,
+  penOccupiesCell,
+  type LivestockPenLevel,
+} from '../config/livestockAssets';
 import type { GridSystem } from './GridSystem';
 import {
   canCollectFromPen,
@@ -129,15 +133,16 @@ export class LivestockSystem {
   /**
    * Scan the farm grid for the first anchor where a pen footprint fits
    * (grass/walkable, not soil/water, not blocked by pens/buildings).
+   * Level-1 anchors must also have a clear 4×4 upgrade ring.
    */
   findFirstValidPenPlacement(
     _placeTarget: LivestockPenPlaceTarget,
     level: number = 1
   ): { gx: number; gy: number } | null {
-    const footprint = penFootprintTiles(level as 1 | 2);
+    const penLevel = level as LivestockPenLevel;
     for (let gy = 0; gy < this.grid.size; gy++) {
       for (let gx = 0; gx < this.grid.size; gx++) {
-        if (this.canPlaceFootprint(gx, gy, footprint)) {
+        if (this.canPlacePenAt(gx, gy, penLevel)) {
           return { gx, gy };
         }
       }
@@ -197,6 +202,22 @@ export class LivestockSystem {
     );
   }
 
+  private penMarkerFor(pen: LivestockPenData): string {
+    return `livestock_pen_${isRuminantPen(pen) ? 'ruminant' : pen.animalType}`;
+  }
+
+  /** Match registry pen by id or top-left anchor when callers pass a stale copy. */
+  private resolvePenInRegistry(pen: LivestockPenData): LivestockPenData | undefined {
+    const byId = this.pens.find((p) => p.id === pen.id);
+    if (byId) return byId;
+    return this.pens.find(
+      (p) =>
+        p.gridX === pen.gridX &&
+        p.gridY === pen.gridY &&
+        penOccupiesCell(p, pen.gridX, pen.gridY)
+    );
+  }
+
   private canPlaceCell(gx: number, gy: number, ignorePenId?: string): boolean {
     if (!this.grid.inBounds(gx, gy)) return false;
     if (this.penBlocksCell(gx, gy, ignorePenId)) return false;
@@ -233,14 +254,57 @@ export class LivestockSystem {
     return true;
   }
 
+  /** Level-1 placement/move also requires a clear 4×4 upgrade expansion ring. */
+  canPlacePenAt(
+    gx: number,
+    gy: number,
+    level: LivestockPenLevel = 1,
+    ignorePenId?: string
+  ): boolean {
+    const footprint = penFootprintTiles(level);
+    if (!this.canPlaceFootprint(gx, gy, footprint, ignorePenId)) return false;
+    if (level === 1 && this.getUpgradeRingBlockAtAnchor(gx, gy, ignorePenId ?? '__placement_probe__')) {
+      return false;
+    }
+    return true;
+  }
+
   canPlace(gx: number, gy: number): boolean {
-    const fp = this.getGhostFootprint();
-    return this.canPlaceFootprint(gx, gy, fp);
+    return this.canPlacePenAt(gx, gy, 1);
   }
 
   canMovePenTo(pen: LivestockPenData, anchorGx: number, anchorGy: number): boolean {
-    const footprint = penFootprintTiles(pen.level ?? 1);
-    return this.canPlaceFootprint(anchorGx, anchorGy, footprint, pen.id);
+    const level = (pen.level ?? 1) as LivestockPenLevel;
+    return this.canPlacePenAt(anchorGx, anchorGy, level, pen.id);
+  }
+
+  /** Why a hypothetical level-1 pen at this anchor cannot expand to 4×4. */
+  getUpgradeRingBlockAtAnchor(
+    anchorGx: number,
+    anchorGy: number,
+    ignorePenId: string = '__placement_probe__'
+  ): string | null {
+    return this.getUpgradeRingBlockAtAnchorInternal(anchorGx, anchorGy, ignorePenId);
+  }
+
+  private getUpgradeRingBlockAtAnchorInternal(
+    anchorGx: number,
+    anchorGy: number,
+    ignorePenId: string
+  ): string | null {
+    const probe: LivestockPenData = {
+      id: ignorePenId,
+      animalType: 'chicken',
+      gridX: anchorGx,
+      gridY: anchorGy,
+      level: 1,
+      state: 'unstocked',
+    };
+    for (const { gx, gy } of penUpgradeExpansionCells(probe)) {
+      const reason = this.getPenUpgradeBlockMessageForCell(gx, gy, ignorePenId);
+      if (reason) return reason;
+    }
+    return null;
   }
 
   /** First blocking reason for one expansion ring cell (Vietnamese), or null if clear. */
@@ -280,6 +344,9 @@ export class LivestockSystem {
       objectId?.startsWith('livestock_pen_') &&
       !this.penBlocksCell(gx, gy, ignorePenId)
     ) {
+      return null;
+    }
+    if (!cell.object && (cell.type === 'grass' || cell.type === 'path')) {
       return null;
     }
     if (!cell.walkable && cell.type !== 'soil') {
@@ -412,15 +479,26 @@ export class LivestockSystem {
   }
 
   private markPenFootprint(pen: LivestockPenData, occupied: boolean): void {
-    for (const { gx, gy } of penFootprintCells(pen)) {
-      if (occupied) {
-        this.grid.setObject(
-          gx,
-          gy,
-          `livestock_pen_${isRuminantPen(pen) ? 'ruminant' : pen.animalType}`
-        );
-      } else {
-        this.grid.clearObject(gx, gy);
+    const marker = this.penMarkerFor(pen);
+    if (occupied) {
+      const level = (pen.level ?? 1) as LivestockPenLevel;
+      if (level === 1) {
+        for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+          if (this.grid.getCell(gx, gy)?.object === marker) {
+            this.grid.clearObject(gx, gy);
+          }
+        }
+      }
+      for (const { gx, gy } of penFootprintCells({ ...pen, level })) {
+        this.grid.setObject(gx, gy, marker);
+      }
+      return;
+    }
+    for (const level of [1, 2] as const) {
+      for (const { gx, gy } of penFootprintCells({ ...pen, level })) {
+        if (this.grid.getCell(gx, gy)?.object === marker) {
+          this.grid.clearObject(gx, gy);
+        }
       }
     }
   }
@@ -469,6 +547,17 @@ export class LivestockSystem {
     return next;
   }
 
+  /** Dev/test: stock the pen at grid cell (not first pen of species). */
+  tryStockPenAt(gx: number, gy: number): LivestockPenData | null {
+    const pen = this.getPenAt(gx, gy);
+    if (!pen || pen.state !== 'unstocked') return null;
+    const type = pen.penKind === 'ruminant' ? 'sheep' : pen.animalType;
+    const next = stockPenWithAnimal(pen, type);
+    if (!next) return null;
+    this.replacePen(next);
+    return next;
+  }
+
   tryFeed(pen: LivestockPenData, nowMs: number): LivestockPenData | null {
     const next = feedPen(pen, nowMs);
     if (!next) return null;
@@ -477,22 +566,23 @@ export class LivestockSystem {
   }
 
   tryUpgrade(pen: LivestockPenData): LivestockPenData | null {
-    if (!this.canUpgradeAt(pen)) return null;
-    const next = upgradePen(pen);
+    const current = this.resolvePenInRegistry(pen) ?? pen;
+    if (!this.canUpgradeAt(current)) return null;
+    const next = upgradePen(current);
     if (!next) return null;
-    for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+    for (const { gx, gy } of penUpgradeExpansionCells(current)) {
       const cell = this.grid.getCell(gx, gy);
       const objectId = cell?.object;
       if (
         objectId?.startsWith('livestock_pen_') &&
-        !this.penBlocksCell(gx, gy, pen.id)
+        !this.penBlocksCell(gx, gy, current.id)
       ) {
         this.grid.clearObject(gx, gy);
       }
     }
-    this.markPenFootprint(pen, false);
+    this.markPenFootprint(current, false);
     this.markPenFootprint(next, true);
-    this.replacePen(next);
+    if (!this.replacePen(next)) return null;
     return next;
   }
 
@@ -576,31 +666,41 @@ export class LivestockSystem {
     const pen = this.pens.find((p) => p.id === penId);
     if (!pen || pen.state === 'unstocked') return false;
     const now = Date.now();
-    const next: LivestockPenData = hungry
-      ? {
-          ...pen,
-          state: 'producing',
-          lifecycleState: 'hungry',
-          hungrySince: now,
-          lastUpdatedAt: now,
-        }
-      : {
-          ...pen,
-          state: 'producing',
-          lifecycleState: 'producing',
-          hungrySince: undefined,
-          lastUpdatedAt: now,
-        };
+    const lifecycle = hungry ? ('hungry' as const) : ('producing' as const);
+    const penAnimals = pen.penAnimals?.map((a) => ({
+      ...a,
+      lifecycleState: lifecycle,
+      hungrySince: hungry ? now : undefined,
+      lastUpdatedAt: now,
+    }));
+    const ruminantOccupants = pen.ruminantOccupants?.map((o) => ({
+      ...o,
+      lifecycleState: lifecycle,
+      hungrySince: hungry ? now : undefined,
+      lastUpdatedAt: now,
+    }));
+    const next: LivestockPenData = {
+      ...pen,
+      state: 'producing',
+      lifecycleState: lifecycle,
+      hungrySince: hungry ? now : undefined,
+      lastUpdatedAt: now,
+      ...(penAnimals ? { penAnimals } : {}),
+      ...(ruminantOccupants ? { ruminantOccupants } : {}),
+    };
     this.replacePen(next);
     return true;
   }
 
-  private replacePen(next: LivestockPenData): void {
-    const idx = this.pens.findIndex((p) => p.id === next.id);
-    if (idx >= 0) {
-      this.pens[idx] = next;
-      this.onChange?.();
+  private replacePen(next: LivestockPenData): boolean {
+    let idx = this.pens.findIndex((p) => p.id === next.id);
+    if (idx < 0) {
+      idx = this.pens.findIndex((p) => p.gridX === next.gridX && p.gridY === next.gridY);
     }
+    if (idx < 0) return false;
+    this.pens[idx] = { ...next, id: this.pens[idx]!.id };
+    this.onChange?.();
+    return true;
   }
 
   exportPens(): LivestockPenData[] {

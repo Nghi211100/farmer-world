@@ -20,10 +20,15 @@ const PANEL_W_TWO = BTN_SIZE * 2 + BTN_GAP;
 const PANEL_H = BTN_SIZE;
 const ABOVE_OFFSET_PX = 48;
 const DISABLED_ALPHA = 0.38;
+/** Extra slop for faded buttons so taps still register (manual hitTest + bounds fallback). */
+const DISABLED_HIT_SLOP_PX = 10;
 
 type ButtonVisual = {
+  action: ObjectEditAction;
+  disabled: boolean;
   root: Phaser.GameObjects.Image;
   hit: Phaser.GameObjects.Rectangle;
+  onPress: () => void;
 };
 
 export type ObjectEditPopupShowOptions = {
@@ -43,7 +48,7 @@ export type ObjectEditPopupShowOptions = {
 /** Move / Remove actions above a clicked building or natural object. */
 export class ObjectEditPopup {
   private container: Phaser.GameObjects.Container;
-  private hitTargets: Phaser.GameObjects.GameObject[] = [];
+  private buttons: ButtonVisual[] = [];
   private visible = false;
   private visibleActions: ObjectEditAction[] = [];
   private tileGx = 0;
@@ -115,20 +120,20 @@ export class ObjectEditPopup {
     const buttonSpecs = allButtonSpecs.filter((spec) => !hidden.has(spec.action));
 
     const children: Phaser.GameObjects.GameObject[] = [];
-    this.hitTargets = [];
+    this.buttons = [];
     this.visibleActions = buttonSpecs.map((s) => s.action);
     const startX = -((buttonSpecs.length - 1) * (BTN_SIZE + BTN_GAP)) / 2;
     buttonSpecs.forEach((spec, index) => {
       const x = startX + index * (BTN_SIZE + BTN_GAP);
       const isDisabled = disabled.has(spec.action);
-      const btn = this.createButton(x, spec.texture, () => {
+      const btn = this.createButton(x, spec.texture, spec.action, isDisabled, () => {
         if (isDisabled) {
           this.onDisabledAction?.(spec.action, this.tileGx, this.tileGy);
           return;
         }
         this.fireAction(spec.action);
-      }, isDisabled);
-      this.hitTargets.push(btn.hit, btn.root);
+      });
+      this.buttons.push(btn);
       children.push(btn.hit, btn.root);
       if (
         spec.action === 'feed' &&
@@ -152,7 +157,7 @@ export class ObjectEditPopup {
   hide(notify = true): void {
     const wasVisible = this.visible;
     this.container.removeAll(true);
-    this.hitTargets = [];
+    this.buttons = [];
     this.visibleActions = [];
     this.showHungryWarningBadge = false;
     this.container.setVisible(false);
@@ -174,26 +179,36 @@ export class ObjectEditPopup {
 
   refreshLayout(): void {
     if (!this.visible) return;
-    const count = this.hitTargets.length / 2;
+    const count = this.buttons.length;
     this.layout(count >= 3, count);
   }
 
   hitsPointer(pointer: Phaser.Input.Pointer): boolean {
     if (!this.visible) return false;
-    const hits = this.scene.input.hitTestPointer(pointer);
-    return hits.some(
-      (obj) =>
-        this.hitTargets.includes(obj) ||
-        (obj.parentContainer != null && obj.parentContainer === this.container)
-    );
+    return this.resolveButtonAtPointer(pointer) != null || this.hitsPopupChrome(pointer);
   }
 
   handlePointerDown(pointer: Phaser.Input.Pointer): boolean {
     if (!this.visible) return false;
-    if (this.hitsPointer(pointer)) {
+    const button = this.resolveButtonAtPointer(pointer);
+    if (button) {
+      pointer.event?.stopPropagation();
+      button.onPress();
+      return true;
+    }
+    if (this.hitsPopupChrome(pointer)) {
+      pointer.event?.stopPropagation();
       return true;
     }
     return false;
+  }
+
+  /** Dev/test: invoke a visible action as if the button were tapped. */
+  pressActionForTest(action: ObjectEditAction): boolean {
+    const button = this.buttons.find((b) => b.action === action);
+    if (!button || !this.visible) return false;
+    button.onPress();
+    return true;
   }
 
   private fireAction(action: ObjectEditAction): void {
@@ -203,11 +218,71 @@ export class ObjectEditPopup {
     this.onAction?.(action, gx, gy);
   }
 
+  private resolveButtonAtPointer(pointer: Phaser.Input.Pointer): ButtonVisual | undefined {
+    const hits = this.scene.input.hitTestPointer(pointer);
+    const fromHitTest = this.buttons.find(
+      (btn) => hits.includes(btn.hit) || hits.includes(btn.root)
+    );
+    if (fromHitTest) return fromHitTest;
+    const fromBounds = this.resolveButtonByScreenBounds(pointer);
+    if (fromBounds) return fromBounds;
+    return this.resolveNearestButtonInPanel(pointer);
+  }
+
+  /** Fallback when hitTest misses scrollFactor-0 popup buttons (depth / container). */
+  private resolveButtonByScreenBounds(
+    pointer: Phaser.Input.Pointer
+  ): ButtonVisual | undefined {
+    const lx = pointer.x - this.container.x;
+    const ly = pointer.y - this.container.y;
+    return this.buttons.find((btn) => this.isPointerInButtonBounds(lx, ly, btn));
+  }
+
+  private resolveNearestButtonInPanel(
+    pointer: Phaser.Input.Pointer
+  ): ButtonVisual | undefined {
+    const lx = pointer.x - this.container.x;
+    const ly = pointer.y - this.container.y;
+    const panelHalfW =
+      this.buttons.length > 0
+        ? (this.buttons.length * (BTN_SIZE + BTN_GAP) - BTN_GAP) / 2
+        : 0;
+    if (Math.abs(lx) > panelHalfW + BTN_SIZE || Math.abs(ly) > BTN_SIZE + DISABLED_HIT_SLOP_PX) {
+      return undefined;
+    }
+    let best: ButtonVisual | undefined;
+    let bestDist = Infinity;
+    for (const btn of this.buttons) {
+      const dist = Math.hypot(lx - btn.hit.x, ly - btn.hit.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = btn;
+      }
+    }
+    const maxDist = BTN_SIZE / 2 + DISABLED_HIT_SLOP_PX;
+    return bestDist <= maxDist ? best : undefined;
+  }
+
+  private isPointerInButtonBounds(lx: number, ly: number, btn: ButtonVisual): boolean {
+    const half = BTN_SIZE / 2 + (btn.disabled ? DISABLED_HIT_SLOP_PX : 0);
+    return Math.abs(lx - btn.hit.x) <= half && Math.abs(ly - btn.hit.y) <= half;
+  }
+
+  private hitsPopupChrome(pointer: Phaser.Input.Pointer): boolean {
+    const hits = this.scene.input.hitTestPointer(pointer);
+    return hits.some(
+      (obj) =>
+        (obj.parentContainer != null && obj.parentContainer === this.container) ||
+        this.buttons.some((btn) => hits.includes(btn.hit) || hits.includes(btn.root))
+    );
+  }
+
   private createButton(
     x: number,
     textureKey: string,
-    onPress: () => void,
-    disabled = false
+    action: ObjectEditAction,
+    disabled: boolean,
+    onPress: () => void
   ): ButtonVisual {
     const hit = this.scene.add
       .rectangle(x, 0, BTN_SIZE, BTN_SIZE, 0x000000, 0.001)
@@ -217,26 +292,14 @@ export class ObjectEditPopup {
     img.setDisplaySize(BTN_SIZE, BTN_SIZE);
     if (disabled) {
       img.setAlpha(DISABLED_ALPHA);
-      hit.setInteractive({ useHandCursor: false });
-    } else {
-      hit.setInteractive({ useHandCursor: true });
     }
 
-    const stopAnd = (event: Phaser.Types.Input.EventData) => {
-      event.stopPropagation();
-      onPress();
-    };
-    hit.on(
-      'pointerdown',
-      (
-        _pointer: Phaser.Input.Pointer,
-        _lx: number,
-        _ly: number,
-        event: Phaser.Types.Input.EventData
-      ) => stopAnd(event)
-    );
+    // Disabled actions stay tappable (toast via onDisabledAction).
+    const pointerOpts = { useHandCursor: true };
+    hit.setInteractive(pointerOpts);
+    img.setInteractive(pointerOpts);
 
-    return { root: img, hit };
+    return { action, disabled, root: img, hit, onPress };
   }
 
   private createFeedWarningBadge(feedButtonX: number): Phaser.GameObjects.Image {

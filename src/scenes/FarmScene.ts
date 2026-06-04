@@ -82,7 +82,11 @@ import { InventorySystem } from '../systems/InventorySystem';
 import { LandSystem } from '../systems/LandSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import type { BuildItemDef } from '../systems/BuildSystem';
-import { LivestockSystem, type LivestockPenPlaceItemDef } from '../systems/LivestockSystem';
+import {
+  LivestockSystem,
+  LIVESTOCK_PEN_PLACE_ITEMS,
+  type LivestockPenPlaceItemDef,
+} from '../systems/LivestockSystem';
 import {
   getLivestockDef,
   LIVESTOCK_PEN_UPGRADE_COST,
@@ -102,7 +106,11 @@ import {
   isAnimalSellableAtSlot,
   livestockSellPriceForPenAnimalAt,
   getPenObjectEditHiddenActions,
+  getPenObjectEditDisabledActions,
   getPenObjectEditVisibleActions,
+  createDefaultFarmPens,
+  getPenMoveBlockMessage,
+  maxLivestockPurchasable,
   type PenObjectEditAction,
   penHasStockedAnimals,
   shouldShowHungryFeedWarningForPen,
@@ -429,7 +437,7 @@ export class FarmScene extends Phaser.Scene {
       gems: DEFAULT_GEMS,
       energy: DEFAULT_ENERGY,
     });
-    this.livestockSystem.loadPens([]);
+    this.livestockSystem.loadPens(createDefaultFarmPens());
     this.scheduleSave();
   }
 
@@ -479,7 +487,19 @@ export class FarmScene extends Phaser.Scene {
       },
       canPurchaseLivestock: (animalType: AnimalType) =>
         this.validateShopLivestockPurchase(animalType),
+      getLivestockMaxBuyQuantity: (animalType: AnimalType) =>
+        this.getLivestockMaxBuyQuantity(animalType),
     });
+  }
+
+  getLivestockMaxBuyQuantity(animalType: AnimalType): number {
+    const def = getLivestockDef(animalType);
+    return maxLivestockPurchasable(
+      this.livestockSystem.getPens(),
+      animalType,
+      def.animalCost,
+      this.economy.getCoins()
+    );
   }
 
   /** Shop Animals tab: pen/pond must exist and be empty before payment. */
@@ -2005,11 +2025,19 @@ export class FarmScene extends Phaser.Scene {
     this.events.emit('mode-hint', { text: '', prominent: false });
   }
 
-  private handleShopLivestockStock(animalType: AnimalType): void {
+  private handleShopLivestockStock(animalType: AnimalType, qty = 1): void {
     const def = getLivestockDef(animalType);
-    const stocked = this.livestockSystem.stockSpeciesPen(animalType);
-    if (!stocked) {
-      this.economy.earn(def.animalCost);
+    const requested = Math.max(1, Math.floor(qty));
+    let stockedCount = 0;
+    for (let i = 0; i < requested; i++) {
+      if (!this.livestockSystem.stockSpeciesPen(animalType)) break;
+      stockedCount++;
+    }
+    const failed = requested - stockedCount;
+    if (failed > 0) {
+      this.economy.earn(def.animalCost * failed);
+    }
+    if (stockedCount === 0) {
       this.showToast(
         this.livestockSystem.findPenForStocking(animalType)
           ? `Chuồng ${def.labelVi} đã có thú`
@@ -2019,7 +2047,11 @@ export class FarmScene extends Phaser.Scene {
     }
     this.emitHud();
     this.scheduleSave();
-    this.showToast(`Đã mua ${def.labelVi} vào chuồng`);
+    this.showToast(
+      stockedCount === 1
+        ? `Đã mua ${def.labelVi} vào chuồng`
+        : `Đã mua ${stockedCount} ${def.labelVi} vào chuồng`
+    );
   }
 
 
@@ -2224,15 +2256,13 @@ export class FarmScene extends Phaser.Scene {
         this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
         pen;
       showHungryWarning = shouldShowHungryFeedWarningForPen(current, now);
-      if (!this.livestockSystem.canSellAllAnimals(current, now)) {
-        disabledActions.push('sellAll');
-      }
-      if (
-        this.livestockSystem.getPenUpgradeBlockMessage(current) ||
-        !this.economy.canAfford(LIVESTOCK_PEN_UPGRADE_COST)
-      ) {
-        disabledActions.push('upgrade');
-      }
+      disabledActions.push(
+        ...getPenObjectEditDisabledActions(current, {
+          upgradeBlocked: Boolean(this.livestockSystem.getPenUpgradeBlockMessage(current)),
+          canAffordUpgrade: this.economy.canAfford(LIVESTOCK_PEN_UPGRADE_COST),
+          canSellAll: this.livestockSystem.canSellAllAnimals(current, now),
+        })
+      );
       hiddenActions.push(...getPenObjectEditHiddenActions(current));
       this.objectEditPopup.show(gx, gy, {
         penMode: true,
@@ -2650,7 +2680,15 @@ export class FarmScene extends Phaser.Scene {
       this.executeObjectEditAction(action, gx, gy)
     );
     this.objectEditPopup.setOnDisabledAction((action, gx, gy) => {
-      if (action === 'sellAll') {
+      if (action === 'move') {
+        const disabledPen = this.livestockSystem.getPenAt(gx, gy);
+        if (disabledPen) {
+          const blockMsg = getPenMoveBlockMessage(
+            this.livestockSystem.getPenAt(disabledPen.gridX, disabledPen.gridY) ?? disabledPen
+          );
+          if (blockMsg) this.showToast(blockMsg);
+        }
+      } else if (action === 'sellAll') {
         this.showToast('Bán hết: mỗi con cần ≥50% trưởng thành');
       } else if (action === 'sell') {
         this.showToast('Chưa thể bán con này (cần ≥50% trưởng thành)');
@@ -3188,8 +3226,9 @@ export class FarmScene extends Phaser.Scene {
 
   private handleObjectEditPointer(pointer: Phaser.Input.Pointer): boolean {
     if (!this.objectEditPopup?.isVisible()) return false;
-    if (this.objectEditPopup.hitsPointer(pointer)) {
-      return this.objectEditPopup.handlePointerDown(pointer);
+    if (this.objectEditPopup.handlePointerDown(pointer)) {
+      pointer.event?.stopPropagation();
+      return true;
     }
     this.objectEditPopup.hide();
     pointer.event?.stopPropagation();
@@ -3550,6 +3589,12 @@ export class FarmScene extends Phaser.Scene {
     const pen = this.livestockSystem.getPenAt(gx, gy);
     if (!pen) return false;
     if (!this.livestockSystem.setPenHungryStateForTest(pen.id, hungry)) return false;
+    renderLivestockPens(
+      this,
+      this.grid,
+      this.livestockSystem.getPens(),
+      this.livestockPenSprites
+    );
     this.refreshMapDecorations();
     return true;
   }
@@ -3590,6 +3635,46 @@ export class FarmScene extends Phaser.Scene {
   closeObjectEditPopupForTest(): void {
     this.objectEditAnimalSlot = undefined;
     this.objectEditPopup.hide();
+  }
+
+  pressObjectEditPopupActionForTest(action: ObjectEditAction): boolean {
+    return this.objectEditPopup.pressActionForTest(action);
+  }
+
+  /** Dev/test: place chicken pen on first anchor with clear 4×4 upgrade ring. */
+  placeUpgradeableTestPenForTest(): { gx: number; gy: number } | null {
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken');
+    if (!item) return null;
+    this.livestockSystem.enterPlaceMode(item);
+    let placed: LivestockPenData | null = null;
+    outer: for (let gy = 0; gy < this.grid.size; gy++) {
+      for (let gx = 0; gx < this.grid.size; gx++) {
+        if (!this.livestockSystem.canPlace(gx, gy)) continue;
+        const pen = this.livestockSystem.place(gx, gy);
+        if (!pen) continue;
+        if (!this.livestockSystem.getPenUpgradeBlockMessage(pen)) {
+          placed = pen;
+          break outer;
+        }
+        this.livestockSystem.removePen(pen);
+      }
+    }
+    this.livestockSystem.exitPlaceMode();
+    return placed ? { gx: placed.gridX, gy: placed.gridY } : null;
+  }
+
+  /** Dev/test: stock one animal in the pen at (gx, gy) for popup/warning e2e. */
+  stockPenAtForTest(gx: number, gy: number): boolean {
+    return this.livestockSystem.tryStockPenAt(gx, gy) != null;
+  }
+
+  getPenLevelAtForTest(gx: number, gy: number): number | null {
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    return pen ? (pen.level ?? 1) : null;
+  }
+
+  getCoinsForTest(): number {
+    return this.economy.getCoins();
   }
 
   getSoilFootprintAlignMetricsForTest(): {
@@ -3900,8 +3985,8 @@ export class FarmScene extends Phaser.Scene {
     this.events.on('livestock-pen-place', (item: LivestockPenPlaceItemDef) => {
       this.handleLivestockPenPlaceSelect(item);
     });
-    this.events.on('shop-livestock-stock', (animalType: AnimalType) => {
-      this.handleShopLivestockStock(animalType);
+    this.events.on('shop-livestock-stock', (animalType: AnimalType, qty = 1) => {
+      this.handleShopLivestockStock(animalType, qty);
     });
     this.events.on('menu-action', (action: string) => this.handleMenuAction(action));
     this.events.on('dismiss-farm-popups', () => this.dismissFarmPopups());

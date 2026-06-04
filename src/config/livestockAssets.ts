@@ -103,7 +103,7 @@ export const PEN_HOUSE_VISUAL_HEIGHT_SCALE_BY_SPECIES: Partial<Record<AnimalType
   duck: 1.05,
   fish: 0.95,
   pig: 1.1,
-  cow: 1.1,
+  cow: 1.2,
   sheep: 1.1,
   goat: 1.1,
 };

@@ -18,6 +18,7 @@ import {
 import {
   cartToIso,
   isoDepth,
+  moveDestinationMarkerPositionFromTop,
   isoRectFootprintScreenBounds,
   isoRectFootprintScreenRhombus,
   pickIsoTileAt,
@@ -258,7 +259,7 @@ export class GridSystem {
   }
 
   /**
-   * Visual / playable map center for bake, zoom keyframes, and HUD red dot: default farmer spawn
+   * Visual / playable map center for bake and zoom keyframes: default farmer spawn
    * (where the character stands at the viewport center), not the iso AABB centroid on water.
    */
   getFarmPlayableMapCenterScreen(): { x: number; y: number } {
@@ -624,6 +625,11 @@ export class GridSystem {
   /** Diamond bottom vertex on the map layer (crops, decorations, buildings). */
   gridToTileBottom(gx: number, gy: number): { x: number; y: number } {
     return this.gridToMapTileBottom(gx, gy);
+  }
+
+  /** Walk destination pin: lerp(bottom, center, {@link MOVE_DESTINATION_MARKER_TILE_LIFT}) */
+  gridToMoveDestinationMarker(gx: number, gy: number): { x: number; y: number } {
+    return moveDestinationMarkerPositionFromTop(this.gridToMapScreen(gx, gy));
   }
 
   /** Diamond bottom on the map layer (alias for pens / explicit map-layer callers). */

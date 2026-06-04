@@ -2,19 +2,13 @@ import Phaser from 'phaser';
 import { BUILD_ITEMS, type BuildItemDef } from '../systems/BuildSystem';
 import {
   LIVESTOCK_PEN_PLACE_ITEMS,
-  LIVESTOCK_UPGRADE_ITEM,
   type LivestockPenPlaceItemDef,
 } from '../systems/LivestockSystem';
 
-export type LivestockUpgradeItemDef = typeof LIVESTOCK_UPGRADE_ITEM;
-export type BuildPanelItem = BuildItemDef | LivestockPenPlaceItemDef | LivestockUpgradeItemDef;
+export type BuildPanelItem = BuildItemDef | LivestockPenPlaceItemDef;
 
 function isLivestockPenPlaceItem(item: BuildPanelItem): item is LivestockPenPlaceItemDef {
   return 'placeTarget' in item;
-}
-
-export function isLivestockUpgradeItem(item: BuildPanelItem): item is LivestockUpgradeItemDef {
-  return 'kind' in item && item.kind === 'upgrade';
 }
 import { HUD_MODAL_DEPTH } from './BottomMenu';
 import {
@@ -451,7 +445,7 @@ export class BuildPanel {
   }
 
   private itemsForActiveTab(): BuildPanelItem[] {
-    if (this.activeTab === 'livestock') return [...LIVESTOCK_PEN_PLACE_ITEMS, LIVESTOCK_UPGRADE_ITEM];
+    if (this.activeTab === 'livestock') return LIVESTOCK_PEN_PLACE_ITEMS;
     return BUILD_ITEMS.filter((item) => item.category === this.activeTab);
   }
 
@@ -525,7 +519,7 @@ export class BuildPanel {
   }
 
   private isItemLocked(item: BuildPanelItem): boolean {
-    if (isLivestockPenPlaceItem(item) || isLivestockUpgradeItem(item)) return false;
+    if (isLivestockPenPlaceItem(item)) return false;
     const req = item.requiredLevel;
     return req !== undefined && this.playerLevel < req;
   }
@@ -537,7 +531,6 @@ export class BuildPanel {
       if (
         locked &&
         !isLivestockPenPlaceItem(item) &&
-        !isLivestockUpgradeItem(item) &&
         item.requiredLevel !== undefined
       ) {
         lockedText.setText(`Required\nlevel ${item.requiredLevel}`);

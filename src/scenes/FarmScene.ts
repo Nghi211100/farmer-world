@@ -8,6 +8,7 @@ import {
   layoutFarmIslandImage,
 } from '../farmIslandLayout';
 import { getCropDef } from '../config/CropConfig';
+import { UI_COMING_TEXTURE_KEY } from '../config/assets';
 import {
   DEFAULT_COINS,
   DEFAULT_ENERGY,
@@ -17,7 +18,6 @@ import {
   FarmTool,
   isDebugMode,
   isFarmCameraDebug,
-  isFarmCenterDebugMarkers,
   getFarmForceSpawnWorld,
   isFarmGridDebug,
   isPersistentToolBarEnabled,
@@ -53,17 +53,15 @@ import {
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
   fitSpriteToIsoFootprint,
+  MOVE_DESTINATION_MARKER_MAX_PX,
   NATURE_DISPLAY_SCALE,
   tileCenterFromTop,
 } from '../utils/iso';
 import { penFootprintTiles, penHouseDisplaySize } from '../config/livestockAssets';
 import {
-  buildFarmCenterDebugMarkers,
   buildFarmViewportHudDebugOverlay,
   buildFarmWorldDebugGridOverlay,
-  farmViewportCenterWorldAtScroll,
   refreshFarmViewportHudVoidHint,
-  type FarmCenterDebugMarkersOverlay,
   type FarmViewportHudDebugOverlay,
 } from '../utils/farmViewportDebug';
 import { farmWorldToScreen, screenBoundsToFootprint } from '../utils/farmViewportDebugLayout';
@@ -102,6 +100,7 @@ import {
 import type { UIScene } from './UIScene';
 import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
+import { pickLivestockPenAtWorldPoint } from '../utils/livestockPenHitTest';
 import {
   clampScrollToFarmPlayable,
   clampScrollSoFootprintOverlapsViewport,
@@ -139,7 +138,6 @@ import {
   FARM_CAMERA_PINCH_ZOOM_SCALE,
   FARM_CAMERA_WHEEL_ZOOM_SCALE,
   getFarmDefaultScrollAtZoom,
-  getFarmMapCenterWorldOffsets,
 } from '../config/farmCameraConfig';
 import {
   decayPanVelocity,
@@ -190,11 +188,13 @@ export class FarmScene extends Phaser.Scene {
   private clickPickGx = -1;
   private clickPickGy = -1;
   private cameraDebugLabel?: Phaser.GameObjects.Text;
-  private farmCenterDebugMarkers?: FarmCenterDebugMarkersOverlay;
   private cropSprites = new Map<string, CropSprite>();
   private buildingSprites = new Map<string, BuildingSprite>();
   private livestockPenSprites = new Map<string, LivestockPenSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
+  private moveDestinationMarker?: Phaser.GameObjects.Image;
+  private moveDestinationGx = -1;
+  private moveDestinationGy = -1;
   private expandDimOverlay?: ExpandLandDimOverlay;
   private decorations: ReturnType<typeof renderMapDecorations> = [];
   private backgroundImage?: Phaser.GameObjects.Image;
@@ -572,53 +572,6 @@ export class FarmScene extends Phaser.Scene {
   private syncFarmDebugOverlays(): void {
     this.renderTileDebugOutlines();
     this.renderPlayableViewportDebug();
-    this.syncFarmCenterDebugMarkers();
-  }
-
-  private syncFarmCenterDebugMarkers(): void {
-    this.farmCenterDebugMarkers?.destroy();
-    this.farmCenterDebugMarkers = undefined;
-    if (!isFarmCenterDebugMarkers()) return;
-
-    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    this.farmCenterDebugMarkers = buildFarmCenterDebugMarkers(this, viewW, viewH);
-    this.refreshFarmCenterDebugMarkers();
-  }
-
-  private refreshFarmCenterDebugMarkers(): void {
-    const overlay = this.farmCenterDebugMarkers;
-    if (!overlay || !this.grid) return;
-
-    const cam = this.cameras.main;
-    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    const mapCenterWorld = this.grid.gridToMapTileCenter(
-      FARM_PLAYER_SPAWN_GX,
-      FARM_PLAYER_SPAWN_GY
-    );
-    const mapCenterScreenTarget = getFarmMapCenterScreenTargetAtScrollZero(
-      viewW,
-      viewH,
-      cam.zoom
-    );
-    const mapCenterWorldOffset = getFarmMapCenterWorldOffsets(viewW, viewH, cam.zoom);
-    overlay.refresh(
-      {
-        mapCenterWorld,
-        mapCenterScreenTarget,
-        mapCenterWorldOffset,
-        mapCenterZoom: cam.zoom,
-        scrollOriginWorld: { x: cam.scrollX, y: cam.scrollY },
-        viewportCenterWorld: farmViewportCenterWorldAtScroll(
-          viewW,
-          viewH,
-          cam.zoom,
-          cam.scrollX,
-          cam.scrollY,
-          mapCenterScreenTarget
-        ),
-      },
-      cam
-    );
   }
 
   /** World-space iso outlines on every logical map cell (grass, water, farm). */
@@ -756,7 +709,6 @@ export class FarmScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(10002);
     this.refreshCameraDebugOverlay();
-    this.refreshFarmCenterDebugMarkers();
   }
 
   private refreshCameraDebugOverlay(): void {
@@ -765,23 +717,12 @@ export class FarmScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    const spawn = this.grid.gridToMapTileCenter(FARM_PLAYER_SPAWN_GX, FARM_PLAYER_SPAWN_GY);
-    const worldTarget = getFarmMapCenterWorldTargetAtDefaultScroll(
-      viewW,
-      viewH,
-      cam.zoom
-    );
-    const spawnWorldErrorX = spawn.x - worldTarget.x;
-    const spawnWorldErrorY = spawn.y - worldTarget.y;
     label.setPosition(viewW / 2, viewH / 2);
     label.setText(
       [
         `zoom ${cam.zoom.toFixed(3)} (${FARM_CAMERA_MIN_ZOOM}–${FARM_CAMERA_MAX_ZOOM}) target ${this.cameraTargetZoom.toFixed(3)}`,
         `scroll ${cam.scrollX.toFixed(1)}, ${cam.scrollY.toFixed(1)}`,
         `view ${viewW}×${viewH}  userPan ${this.cameraScrollTouchedByUser ? 'yes' : 'no'}`,
-        `spawn(10,10) world ${spawn.x.toFixed(1)}, ${spawn.y.toFixed(1)}`,
-        `spawn target ${worldTarget.x.toFixed(1)}, ${worldTarget.y.toFixed(1)}`,
-        `spawnWorldError ${spawnWorldErrorX.toFixed(2)}, ${spawnWorldErrorY.toFixed(2)}`,
       ].join('\n')
     );
   }
@@ -989,9 +930,6 @@ export class FarmScene extends Phaser.Scene {
     this.finalizeFarmWorldAnchorAtZoom(toZoom);
     if (!this.cameraScrollTouchedByUser) {
       this.applyFarmDefaultCameraScrollAtZoom(toZoom);
-    }
-    if (this.farmCenterDebugMarkers) {
-      this.refreshFarmCenterDebugMarkers();
     }
   }
 
@@ -1508,6 +1446,17 @@ export class FarmScene extends Phaser.Scene {
     this.player.sprite.setDepth(
       this.grid.getDepth(Math.round(spawn.x), Math.round(spawn.y), 'entities')
     );
+    if (this.moveDestinationMarker?.visible && this.moveDestinationGx >= 0) {
+      const pin = this.grid.gridToMoveDestinationMarker(
+        this.moveDestinationGx,
+        this.moveDestinationGy
+      );
+      this.moveDestinationMarker.setPosition(pin.x, pin.y);
+      this.applyMoveDestinationMarkerPresentation(
+        this.moveDestinationGx,
+        this.moveDestinationGy
+      );
+    }
     syncCropSprites(this, this.grid, this.farming, this.cropSprites);
     renderBuildings(this, this.grid, this.buildSystem.getBuildings(), this.buildingSprites);
     renderLivestockPens(
@@ -1519,7 +1468,6 @@ export class FarmScene extends Phaser.Scene {
     this.syncFarmDebugOverlays();
     this.refreshClickPickDebug();
     this.refreshCameraDebugOverlay();
-    this.refreshFarmCenterDebugMarkers();
     this.expandDimOverlay?.refresh();
   }
 
@@ -1613,12 +1561,6 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
 
-    if (this.livestockSystem.upgradeMode) {
-      const pen = this.livestockSystem.getPenAt(x, y);
-      if (pen) this.handleLivestockPenUpgradeTap(pen);
-      return;
-    }
-
     if (this.objectEditSystem.active) {
       if (this.buildPlacementConfirm?.hitsPointer(pointer)) {
         return;
@@ -1637,17 +1579,10 @@ export class FarmScene extends Phaser.Scene {
     const cell = this.grid.getCell(x, y);
 
     if (this.farmMode === 'normal') {
-      const pen = this.livestockSystem.getPenAt(x, y);
+      const pen = this.resolvePenFromPointer(pointer) ?? this.livestockSystem.getPenAt(x, y);
       if (pen) {
         this.dismissFarmPopups();
-        const now = Date.now();
-        this.livestockSystem.tick(now);
-        const action = this.livestockSystem.getPenAction(pen, now);
-        if (action.canCollect || action.canFeed || action.ticked.state === 'producing') {
-          this.handleLivestockPenTap(pen);
-          return;
-        }
-        this.showObjectEditPopup(x, y, true);
+        this.showObjectEditPopup(pen.gridX, pen.gridY, true);
         return;
       }
     }
@@ -1659,6 +1594,8 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.farmMode === 'normal' && cell && this.isLockedFarmSoil(x, y)) {
+      this.dismissFarmPopups();
+      this.handleLockedFarmSoilTap(x, y);
       return;
     }
 
@@ -1673,7 +1610,9 @@ export class FarmScene extends Phaser.Scene {
     this.pendingFarmTile = undefined;
 
     if (this.grid.isWalkable(x, y)) {
-      this.player.moveTo(x, y, this.grid);
+      this.commandPlayerWalkTo(x, y);
+    } else {
+      this.hideMoveDestinationMarker();
     }
   }
 
@@ -1895,7 +1834,6 @@ export class FarmScene extends Phaser.Scene {
 
   private handleLivestockPenPlaceSelect(item: LivestockPenPlaceItemDef): void {
     this.buildSystem.exitBuildMode();
-    this.livestockSystem.exitUpgradeMode();
     this.livestockSystem.enterPlaceMode(item);
     this.setFarmMode('livestock');
     this.updateGhostSprite();
@@ -2010,8 +1948,6 @@ export class FarmScene extends Phaser.Scene {
       this.showToast('Vùng 4×4 bị chặn — dọn ô trống quanh chuồng');
       return;
     }
-    this.livestockSystem.exitUpgradeMode();
-    this.setFarmMode('normal');
     this.emitHud();
     this.scheduleSave();
     this.showToast('Đã nâng cấp chuồng lên 4×4');
@@ -2055,6 +1991,26 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
+  private handleLivestockPenSell(pen: LivestockPenData): void {
+    const now = Date.now();
+    this.livestockSystem.tick(now);
+    const current =
+      this.livestockSystem.getPenAt(pen.gridX, pen.gridY) ??
+      this.livestockSystem.getPens().find((p) => p.id === pen.id) ??
+      pen;
+    const def = getLivestockDef(current.animalType);
+    const result = this.livestockSystem.trySellAnimal(current, now);
+    if (!result) {
+      this.showToast(`Chưa thể bán ${def.labelVi}`);
+      return;
+    }
+    this.economy.earn(result.sellPrice);
+    this.refreshMapDecorations();
+    this.emitHud();
+    this.scheduleSave();
+    this.showToast(`Đã bán ${def.labelVi} +${result.sellPrice} xu`);
+  }
+
   private showObjectEditPopup(gx: number, gy: number, penOnly = false): void {
     const pen = penOnly ? this.livestockSystem.getPenAt(gx, gy) : undefined;
     const showHungryWarning = pen?.lifecycleState === 'hungry';
@@ -2066,6 +2022,22 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private executeObjectEditAction(action: ObjectEditAction, gx: number, gy: number): void {
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    if (pen) {
+      if (action === 'feed') {
+        this.handleLivestockPenTap(pen);
+        return;
+      }
+      if (action === 'upgrade') {
+        this.handleLivestockPenUpgradeTap(pen);
+        return;
+      }
+      if (action === 'sell') {
+        this.handleLivestockPenSell(pen);
+        return;
+      }
+    }
+
     if (action === 'remove') {
       if (this.objectEditSystem.removeAt(gx, gy)) {
         this.refreshMapDecorations();
@@ -2484,9 +2456,6 @@ export class FarmScene extends Phaser.Scene {
     spawnWorldErrorY: number;
     /** True when 20×20 AABB center is corner-tile centroid (playable center may differ). */
     isMapCenterTrueAabb: boolean;
-    /** Map-center HUD label screen vs dot screen (must be < 2px when debug markers on). */
-    mapCenterDotHudDeltaX: number;
-    mapCenterDotHudDeltaY: number;
   } | null {
     if (!this.grid) return null;
     const cam = this.cameras.main;
@@ -2584,10 +2553,9 @@ export class FarmScene extends Phaser.Scene {
       FARM_PLAYER_SPAWN_GY
     );
     const mapCenterWorld = spawnWorld;
-    const mapCenterHudScreen = farmWorldToScreen(cam, mapCenterWorld.x, mapCenterWorld.y);
-    const mapCenterDotScreen = farmWorldToScreen(cam, mapCenterWorld.x, mapCenterWorld.y);
-    const mapCenterScreenX = mapCenterHudScreen.x;
-    const mapCenterScreenY = mapCenterHudScreen.y;
+    const mapCenterScreen = farmWorldToScreen(cam, mapCenterWorld.x, mapCenterWorld.y);
+    const mapCenterScreenX = mapCenterScreen.x;
+    const mapCenterScreenY = mapCenterScreen.y;
     const worldTarget = getFarmMapCenterWorldTargetAtDefaultScroll(viewW, viewH, z);
     const spawnWorldErrorX = spawnWorld.x - worldTarget.x;
     const spawnWorldErrorY = spawnWorld.y - worldTarget.y;
@@ -2673,8 +2641,6 @@ export class FarmScene extends Phaser.Scene {
       spawnWorldErrorX,
       spawnWorldErrorY,
       isMapCenterTrueAabb: this.grid.isFarmMapCenterTrueAabb(),
-      mapCenterDotHudDeltaX: mapCenterDotScreen.x - mapCenterHudScreen.x,
-      mapCenterDotHudDeltaY: mapCenterDotScreen.y - mapCenterHudScreen.y,
     };
   }
 
@@ -2822,6 +2788,99 @@ export class FarmScene extends Phaser.Scene {
     return px === gx && py === gy;
   }
 
+  /** Prefer pen-house screen bounds over grid pick (iso sprites extend past footprint). */
+  private resolvePenFromPointer(pointer: Phaser.Input.Pointer): LivestockPenData | undefined {
+    const cam = this.cameras.main;
+    const world = cam.getWorldPoint(pointer.x, pointer.y);
+    const candidates = [...this.livestockPenSprites.values()].map((spr) => {
+      const bounds = spr.getHouseBounds();
+      return {
+        id: spr.data.id,
+        gridX: spr.data.gridX,
+        gridY: spr.data.gridY,
+        depth: spr.container.depth,
+        visible: spr.container.visible,
+        alpha: spr.container.alpha,
+        bounds: {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        },
+      };
+    });
+    const hit = pickLivestockPenAtWorldPoint(candidates, world.x, world.y);
+    if (!hit) return undefined;
+    return (
+      this.livestockSystem.getPens().find((p) => p.id === hit.id) ??
+      this.livestockSystem.getPenAt(hit.gridX, hit.gridY)
+    );
+  }
+
+  /**
+   * Walk command with destination marker; hides marker on arrival or failed move.
+   * @param markerGx - Grid cell for coming.png (defaults to walk destination)
+   * @param markerGy - Grid cell for coming.png (defaults to walk destination)
+   */
+  private commandPlayerWalkTo(
+    gx: number,
+    gy: number,
+    onReach?: () => void,
+    markerGx?: number,
+    markerGy?: number
+  ): boolean {
+    const moved = this.player.moveTo(gx, gy, this.grid, () => {
+      this.hideMoveDestinationMarker();
+      onReach?.();
+    });
+    if (moved) {
+      this.showMoveDestinationMarker(markerGx ?? gx, markerGy ?? gy);
+    } else {
+      this.hideMoveDestinationMarker();
+    }
+    return moved;
+  }
+
+  private moveDestinationMarkerDepth(gx: number, gy: number): number {
+    return this.grid.getDepth(gx, gy, 'crops') + 28;
+  }
+
+  private applyMoveDestinationMarkerPresentation(gx: number, gy: number): void {
+    const marker = this.moveDestinationMarker;
+    if (!marker) return;
+    fitSpriteDisplay(
+      marker,
+      MOVE_DESTINATION_MARKER_MAX_PX,
+      MOVE_DESTINATION_MARKER_MAX_PX
+    );
+    marker.setOrigin(0.5, 1);
+    marker.setAlpha(1);
+    marker.setDepth(this.moveDestinationMarkerDepth(gx, gy));
+    this.children.bringToTop(marker);
+  }
+
+  private showMoveDestinationMarker(gx: number, gy: number): void {
+    if (!this.textures.exists(UI_COMING_TEXTURE_KEY)) return;
+
+    const pin = this.grid.gridToMoveDestinationMarker(gx, gy);
+    if (!this.moveDestinationMarker) {
+      this.moveDestinationMarker = this.add.image(pin.x, pin.y, UI_COMING_TEXTURE_KEY);
+      this.moveDestinationMarker.setScrollFactor(1);
+    } else {
+      this.moveDestinationMarker.setPosition(pin.x, pin.y);
+      this.moveDestinationMarker.setVisible(true);
+    }
+    this.applyMoveDestinationMarkerPresentation(gx, gy);
+    this.moveDestinationGx = gx;
+    this.moveDestinationGy = gy;
+  }
+
+  private hideMoveDestinationMarker(): void {
+    this.moveDestinationMarker?.setVisible(false);
+    this.moveDestinationGx = -1;
+    this.moveDestinationGy = -1;
+  }
+
   /**
    * Walk destination for a farm tile tap: the clicked cell when walkable,
    * otherwise the nearest walkable neighbor (blocked by object/building).
@@ -2867,12 +2926,29 @@ export class FarmScene extends Phaser.Scene {
     };
   }
 
+  /** Walk to locked soil with destination marker only — no land purchase UI. */
+  private handleLockedFarmSoilTap(gx: number, gy: number): void {
+    this.player.clearOnReach();
+    this.pendingFarmTile = undefined;
+
+    const walkTarget = this.findWalkTargetForFarmTile(gx, gy);
+    if (!walkTarget) {
+      this.hideMoveDestinationMarker();
+      return;
+    }
+
+    this.commandPlayerWalkTo(walkTarget.x, walkTarget.y, undefined, gx, gy);
+  }
+
   private handleFarmTileTap(
     gx: number,
     gy: number,
     cell: NonNullable<ReturnType<GridSystem['getCell']>>
   ): void {
-    if (cell.type !== 'soil' || !this.grid.isFarmUnlocked(gx, gy)) return;
+    const isUnlockedSoil = cell.type === 'soil' && this.grid.isFarmUnlocked(gx, gy);
+    const isGrassCrop =
+      cell.type === 'grass' && this.farming.hasCropRecord(gx, gy) && this.grid.isFarmUnlocked(gx, gy);
+    if (!isUnlockedSoil && !isGrassCrop) return;
 
     this.pendingFarmTile = { x: gx, y: gy };
     const player = this.player.getGridPosition();
@@ -2889,10 +2965,16 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
 
-    this.player.moveTo(walkTarget.x, walkTarget.y, this.grid, () => {
-      if (!this.pendingFarmTile) return;
-      this.showFarmActionPopup(this.pendingFarmTile.x, this.pendingFarmTile.y);
-    });
+    this.commandPlayerWalkTo(
+      walkTarget.x,
+      walkTarget.y,
+      () => {
+        if (!this.pendingFarmTile) return;
+        this.showFarmActionPopup(this.pendingFarmTile.x, this.pendingFarmTile.y);
+      },
+      gx,
+      gy
+    );
   }
 
   private showFarmActionPopup(gx: number, gy: number): void {
@@ -2995,15 +3077,32 @@ export class FarmScene extends Phaser.Scene {
     const pen = this.livestockSystem.getPenAt(gx, gy);
     if (!pen) return false;
     this.dismissFarmPopups();
-    const now = Date.now();
-    this.livestockSystem.tick(now);
-    const action = this.livestockSystem.getPenAction(pen, now);
-    if (action.canCollect || action.canFeed || action.ticked.state === 'producing') {
-      this.handleLivestockPenTap(pen);
-      return true;
-    }
-    this.showObjectEditPopup(gx, gy, true);
+    this.showObjectEditPopup(pen.gridX, pen.gridY, true);
     return true;
+  }
+
+  showMoveDestinationMarkerForTest(gx: number, gy: number): void {
+    this.showMoveDestinationMarker(gx, gy);
+  }
+
+  getMoveDestinationMarkerStateForTest(): {
+    visible: boolean;
+    gx: number;
+    gy: number;
+    depth: number;
+    displayWidth: number;
+    displayHeight: number;
+  } | null {
+    const marker = this.moveDestinationMarker;
+    if (!marker) return null;
+    return {
+      visible: marker.visible,
+      gx: this.moveDestinationGx,
+      gy: this.moveDestinationGy,
+      depth: marker.depth,
+      displayWidth: marker.displayWidth,
+      displayHeight: marker.displayHeight,
+    };
   }
 
   closeObjectEditPopupForTest(): void {
@@ -3265,7 +3364,6 @@ export class FarmScene extends Phaser.Scene {
     }
     if (mode !== 'livestock') {
       this.livestockSystem.exitPlaceMode();
-      this.livestockSystem.exitUpgradeMode();
     }
     if (mode !== 'normal') {
       this.cancelObjectMoveMode();
@@ -3285,9 +3383,7 @@ export class FarmScene extends Phaser.Scene {
         : 'a crop';
     const hints: Record<Exclude<FarmMode, 'normal'>, string> = {
       build: 'Tap a tile, then tap ✓ to build',
-      livestock: this.livestockSystem.active
-        ? 'Chọn ô 3×3, đặt chuồng/hồ, rồi bấm ✓'
-        : 'Chạm chuồng cấp 1 để nâng lên 4×4',
+      livestock: 'Chọn ô 3×3, đặt chuồng/hồ, rồi bấm ✓',
       expand: LAND_EXPAND_STRINGS.selectHint,
       plant: this.selectedSeedId
         ? `Seed tool: tap dug soil to plant ${seedHint}`
@@ -3314,7 +3410,6 @@ export class FarmScene extends Phaser.Scene {
       }
     });
     this.events.on('build-select', (item: BuildItemDef) => {
-      this.livestockSystem.exitUpgradeMode();
       this.buildSystem.enterBuildMode(item);
       this.setFarmMode('build');
       this.updateGhostSprite();
@@ -3324,16 +3419,6 @@ export class FarmScene extends Phaser.Scene {
     });
     this.events.on('shop-livestock-stock', (animalType: AnimalType) => {
       this.handleShopLivestockStock(animalType);
-    });
-    this.events.on('livestock-pen-upgrade', () => {
-      this.buildSystem.exitBuildMode();
-      this.livestockSystem.enterUpgradeMode();
-      this.setFarmMode('livestock');
-      this.updateGhostSprite();
-      this.events.emit('mode-hint', {
-        text: 'Chạm chuồng cấp 1 để nâng lên 4×4',
-        prominent: true,
-      });
     });
     this.events.on('menu-action', (action: string) => this.handleMenuAction(action));
     this.events.on('dismiss-farm-popups', () => this.dismissFarmPopups());
@@ -3408,12 +3493,7 @@ export class FarmScene extends Phaser.Scene {
     const moveActive = this.objectEditSystem.active;
     const buildActive = this.buildSystem.active;
     const livestockActive = this.livestockSystem.active;
-    const livestockUpgrade = this.livestockSystem.upgradeMode;
-    if (!buildActive && !moveActive && !livestockActive && !livestockUpgrade) {
-      this.ghostSprite?.setVisible(false);
-      return;
-    }
-    if (livestockUpgrade) {
+    if (!buildActive && !moveActive && !livestockActive) {
       this.ghostSprite?.setVisible(false);
       return;
     }
@@ -3532,7 +3612,6 @@ export class FarmScene extends Phaser.Scene {
     this.updateFarmCameraMotion(delta);
     this.ensureFarmSpawnTileWorldHardLock();
     if (this.cameraDebugLabel) this.refreshCameraDebugOverlay();
-    if (this.farmCenterDebugMarkers) this.refreshFarmCenterDebugMarkers();
     if (this.farmViewportHudDebugContainer) this.refreshFarmDebugHudVoidHint();
 
     this.player.update(this.grid, delta);
@@ -3540,7 +3619,11 @@ export class FarmScene extends Phaser.Scene {
     this.energyPassiveTimer += delta;
     if (this.energyPassiveTimer >= 1000) {
       this.energyPassiveTimer = 0;
-      this.livestockSystem.tick(Date.now());
+      const now = Date.now();
+      this.livestockSystem.tick(now);
+      for (const spr of this.livestockPenSprites.values()) {
+        spr.updateOverlays(this, now);
+      }
       const before = this.energySystem.getEnergy();
       if (this.isPlayerActive()) {
         this.energySystem.applyActiveDrain();

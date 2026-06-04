@@ -18,14 +18,7 @@ import {
 import { computePlayableFarmViewportLayout } from '../../src/ui/hudLayout';
 import { GRID_SIZE } from '../../src/config/gameConfig';
 import { TILE_HEIGHT, TILE_WIDTH } from '../../src/utils/iso';
-import {
-  farmCenterDebugMapViewportMergedTitle,
-  farmCenterDebugMarkerLabelBlock,
-  farmDebugWorldPointsCoincide,
-  farmViewportCenterWorldAtScroll,
-  farmWorldToScreen,
-  formatFarmDebugCoord,
-} from '../../src/utils/farmViewportDebugLayout';
+import { farmWorldToScreen } from '../../src/utils/farmViewportDebugLayout';
 
 describe('farm viewport debug helpers', () => {
   it('maps playable layout to screen rect', () => {
@@ -92,72 +85,12 @@ describe('farm viewport debug helpers', () => {
     expect(farmBackgroundOnlyHudLabel('map')).toContain('outside map');
   });
 
-  it('formats center debug label blocks with title, world, and screen', () => {
-    const block = farmCenterDebugMarkerLabelBlock({
-      title: 'scroll origin',
-      worldX: 0,
-      worldY: 0,
-      screenX: 0,
-      screenY: 0,
-      scrollX: 0,
-      scrollY: 0,
-    });
-    expect(block).toContain('scroll origin');
-    expect(block).toContain('scroll: (0.0, 0.0)');
-    expect(block).toContain('world: (0.0, 0.0)');
-    expect(block).not.toContain('stable');
-    expect(block).toContain('screen: (0.0, 0.0)');
-    const withTarget = farmCenterDebugMarkerLabelBlock({
-      title: 'map center',
-      worldX: 554.7,
-      worldY: 338.2,
-      screenX: 200,
-      screenY: 300,
-      scrollX: 12,
-      scrollY: 8,
-      targetScreenX: 195,
-      targetScreenY: 280,
-    });
-    expect(withTarget).toContain('target: (195.0, 280.0)');
-    expect(withTarget).toContain('scroll: (12.0, 8.0)');
-    const withWorldDelta = farmCenterDebugMarkerLabelBlock({
-      title: 'map center',
-      worldX: 100,
-      worldY: 200,
-      screenX: 50,
-      screenY: 60,
-      worldOffsetX: -12,
-      worldOffsetY: 8,
-      zoom: 2.5,
-    });
-    expect(withWorldDelta).toContain('Δ(-12.0, 8.0)');
-    expect(withWorldDelta).toContain('z=2.5');
-    expect(farmCenterDebugMapViewportMergedTitle()).toBe('map + viewport center');
-    expect(formatFarmDebugCoord(102.567)).toBe('102.6');
-  });
-
-  it('farmWorldToScreen matches Phaser scroll/zoom (hud and dot share transform)', () => {
+  it('farmWorldToScreen matches Phaser scroll/zoom transform', () => {
     const cam = { scrollX: 12, scrollY: 8, zoom: 1.9, x: 0, y: 0 };
     const world = { x: 554.7, y: 338.2 };
-    const hud = farmWorldToScreen(cam, world.x, world.y);
-    const dot = farmWorldToScreen(cam, world.x, world.y);
-    expect(Math.abs(hud.x - dot.x)).toBeLessThan(2);
-    expect(Math.abs(hud.y - dot.y)).toBeLessThan(2);
-    expect(hud.x).toBeCloseTo((world.x - cam.scrollX) * cam.zoom, 4);
-    expect(hud.y).toBeCloseTo((world.y - cam.scrollY) * cam.zoom, 4);
-  });
-
-  it('merges map and viewport center markers when world points coincide', () => {
-    expect(farmDebugWorldPointsCoincide({ x: 100, y: 200 }, { x: 100.3, y: 200.2 })).toBe(
-      true
-    );
-    expect(farmDebugWorldPointsCoincide({ x: 100, y: 200 }, { x: 101, y: 200 })).toBe(false);
-    const viewW = 390;
-    const viewH = 844;
-    const z = 1.9;
-    const mapCenter = { x: viewW / (2 * z), y: viewH / (2 * z) };
-    const viewport = farmViewportCenterWorldAtScroll(viewW, viewH, z, 0, 0);
-    expect(farmDebugWorldPointsCoincide(mapCenter, viewport)).toBe(true);
+    const screen = farmWorldToScreen(cam, world.x, world.y);
+    expect(screen.x).toBeCloseTo((world.x - cam.scrollX) * cam.zoom, 4);
+    expect(screen.y).toBeCloseTo((world.y - cam.scrollY) * cam.zoom, 4);
   });
 
   it('detects viewport void beyond map and pan bounds', () => {

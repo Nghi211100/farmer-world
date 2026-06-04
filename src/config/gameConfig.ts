@@ -243,13 +243,6 @@ export function isPersistentToolBarEnabled(): boolean {
 }
 
 /**
- * Farm map/scroll center red dots (`?debugCamera=1`, `?debugGrid=1`, or `?debug=1`).
- */
-export function isFarmCenterDebugMarkers(): boolean {
-  return isFarmGridDebug() || isFarmCameraDebug();
-}
-
-/**
  * Farm camera pan/zoom HUD (`?debugCamera=1` or global `?debug=1`).
  */
 export function isFarmCameraDebug(): boolean {

@@ -64,9 +64,7 @@ export class UIScene extends Phaser.Scene {
 
     this.buildPanel.setOnSelect((item) => {
       const farm = this.scene.get('FarmScene');
-      if ('kind' in item && item.kind === 'upgrade') {
-        farm.events.emit('livestock-pen-upgrade');
-      } else if ('placeTarget' in item) {
+      if ('placeTarget' in item) {
         farm.events.emit('livestock-pen-place', item);
       } else {
         farm.events.emit('build-select', item);

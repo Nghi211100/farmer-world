@@ -297,6 +297,12 @@ describe('LIVESTOCK_PEN_PLACE_ITEMS', () => {
     expect(LIVESTOCK_PEN_PLACE_ITEMS.some((i) => i.placeTarget === 'goat')).toBe(false);
     expect(LIVESTOCK_PEN_PLACE_ITEMS.some((i) => i.placeTarget === 'sheep')).toBe(false);
   });
+
+  it('excludes standalone pen upgrade build card', () => {
+    const labels = LIVESTOCK_PEN_PLACE_ITEMS.map((i) => i.label);
+    expect(labels.some((l) => /nâng cấp/i.test(l))).toBe(false);
+    expect(LIVESTOCK_PEN_PLACE_ITEMS.every((i) => 'placeTarget' in i)).toBe(true);
+  });
 });
 
 describe('shop livestock catalog', () => {

@@ -38,5 +38,12 @@ test.describe('Build modal cards', () => {
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getBuildCardLabels()))
       .toEqual(['Tree']);
+
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.setBuildTab('livestock'));
+    const livestockLabels = await page.evaluate(
+      () => window.__FARMER_WORLD_TEST__?.getBuildCardLabels()
+    );
+    expect(livestockLabels).toHaveLength(6);
+    expect(livestockLabels?.some((l) => /nâng cấp/i.test(l))).toBe(false);
   });
 });

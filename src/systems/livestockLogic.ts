@@ -22,6 +22,7 @@ import {
   speciesHasAnimalSprites,
   type LivestockPenLevel,
 } from '../config/livestockAssets';
+import { formatGrowthTime } from '../utils/iso';
 
 export function livestockPenKey(gx: number, gy: number): string {
   return `${gx},${gy}`;
@@ -73,6 +74,63 @@ export function growthProgressRatio(pen: LivestockPenData, nowMs: number): numbe
   return Math.max(0, Math.min(1, (nowMs - start) / duration));
 }
 
+export type LivestockTimerKind = 'ready' | 'grow' | 'produce' | 'hungry';
+
+export interface LivestockTimerInfo {
+  kind: LivestockTimerKind;
+  /** Satiation bar 0..1 (1 = fed/full, 0 = starving). */
+  hungerProgress: number;
+  /** Label above bar (maturation/production countdown); empty when hungry. */
+  growthTimeText: string;
+}
+
+function hungerProgressRatio(
+  pen: LivestockPenData,
+  def: ReturnType<typeof getLivestockDef>
+): number {
+  if (pen.lifecycleState === 'hungry') return 0;
+  const hungryAfter = Math.max(1, def.hungryAfterMs);
+  const fedMs = pen.hungerSinceFeedMs ?? 0;
+  return Math.max(0, Math.min(1, 1 - fedMs / hungryAfter));
+}
+
+/** Hunger bar + countdown label for world UI above livestock sprites (crop-style). */
+export function getLivestockTimerInfo(
+  pen: LivestockPenData,
+  nowMs: number
+): LivestockTimerInfo | null {
+  if (pen.state === 'unstocked') return null;
+  const ticked = tickLivestockPen(pen, nowMs);
+  const def = getLivestockDef(ticked.animalType);
+  const hungerProgress = hungerProgressRatio(ticked, def);
+
+  if (ticked.state === 'ready') {
+    return { kind: 'ready', hungerProgress, growthTimeText: 'Ready' };
+  }
+  if (ticked.lifecycleState === 'hungry') {
+    return { kind: 'hungry', hungerProgress: 0, growthTimeText: '' };
+  }
+  if (ticked.lifecycleState === 'baby' || ticked.lifecycleState === 'growing') {
+    const duration = Math.max(1, ticked.growthDurationMs ?? def.growthMs);
+    const start = ticked.growthStartAt ?? nowMs;
+    const remainingSec = Math.max(0, (duration - (nowMs - start)) / 1000);
+    return {
+      kind: 'grow',
+      hungerProgress,
+      growthTimeText: formatGrowthTime(remainingSec),
+    };
+  }
+  if (ticked.lifecycleState === 'producing') {
+    const remainingMs = Math.max(0, def.produceMs - (ticked.productionProgressMs ?? 0));
+    return {
+      kind: 'produce',
+      hungerProgress,
+      growthTimeText: formatGrowthTime(remainingMs / 1000),
+    };
+  }
+  return null;
+}
+
 /** Offline-capable lifecycle tick for baby/growing/adult/producing/hungry. */
 export function tickLivestockPen(
   pen: LivestockPenData,
@@ -99,9 +157,9 @@ export function tickLivestockPen(
 
   if (lifecycleState === 'hungry') {
     const hungryMs = Math.max(0, nowMs - (hungrySince ?? nowMs));
-    if (hungryMs > 120 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.5);
-    else if (hungryMs > 60 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.75);
-    else if (hungryMs > 30 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.9);
+    if (hungryMs > 240 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.5);
+    else if (hungryMs > 120 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.75);
+    else if (hungryMs > 60 * 60 * 1000) nextHappiness = clampHappiness(happiness * 0.9);
   } else if (lifecycleState === 'producing') {
     const speedMultiplier = 0.5 + happiness / 200;
     productionProgressMs += elapsed * speedMultiplier;

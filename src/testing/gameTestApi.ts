@@ -230,6 +230,15 @@ export interface FarmerWorldTestApi {
   } | null;
   clickWarehouseSellUse: () => void;
   isFarmSceneReady: () => boolean;
+  showMoveDestinationMarker: (gx: number, gy: number) => void;
+  getMoveDestinationMarkerState: () => {
+    visible: boolean;
+    gx: number;
+    gy: number;
+    depth: number;
+    displayWidth: number;
+    displayHeight: number;
+  } | null;
   /** True when WebGL buffer is capturable and samples show farm art (not blank letterbox). */
   isFarmCanvasCaptureReady: () => boolean;
   openFarmActionPopup: (gx?: number, gy?: number) => void;
@@ -311,8 +320,6 @@ export interface FarmerWorldTestApi {
     mapCenterWorldTargetX: number;
     mapCenterWorldTargetY: number;
     isMapCenterTrueAabb: boolean;
-    mapCenterDotHudDeltaX: number;
-    mapCenterDotHudDeltaY: number;
   } | null;
   getFarmCameraScrollLimits: () => {
     x: { minScroll: number; maxScroll: number; oversize: boolean };
@@ -715,6 +722,11 @@ export function installGameTestApi(game: Phaser.Game): void {
       getUiScene(game)?.inventoryPanel.simulateSellUseClick();
     },
     isFarmSceneReady: () => getFarmScene(game)?.isFarmPopupsReadyForTest() ?? false,
+    showMoveDestinationMarker: (gx, gy) => {
+      getFarmScene(game)?.showMoveDestinationMarkerForTest(gx, gy);
+    },
+    getMoveDestinationMarkerState: () =>
+      getFarmScene(game)?.getMoveDestinationMarkerStateForTest() ?? null,
     isFarmCanvasCaptureReady: () => {
       if (!getFarmScene(game)?.isFarmPopupsReadyForTest()) return false;
       if (!isScreenshotCaptureMode()) return false;

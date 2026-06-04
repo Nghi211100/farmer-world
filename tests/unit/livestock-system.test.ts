@@ -9,11 +9,22 @@ import {
   stockPenWithAnimal,
   tickLivestockPen,
   tickAllLivestockPens,
+  getLivestockTimerInfo,
 } from '../../src/systems/livestockLogic';
-import { livestockPenCapacity } from '../../src/config/LivestockConfig';
+import { getLivestockDef, livestockPenCapacity } from '../../src/config/LivestockConfig';
 import { ITEM_IDS } from '../../src/config/items';
 
 describe('livestockLogic', () => {
+  it('hungryAfterMs is at least ~5× growthMs per species', () => {
+    for (const type of ['cow', 'pig', 'chicken', 'fish', 'goat', 'duck', 'sheep'] as const) {
+      const def = getLivestockDef(type);
+      expect(def.hungryAfterMs).toBeGreaterThanOrEqual(def.growthMs * 5);
+    }
+    expect(getLivestockDef('cow').hungryAfterMs).toBe(275_000);
+    expect(getLivestockDef('chicken').hungryAfterMs).toBe(150_000);
+    expect(getLivestockDef('duck').hungryAfterMs).toBe(160_000);
+  });
+
   it('follows lifecycle baby -> growing -> adult/producing', () => {
     let pen = createNewPen('p1', 'chicken', 3, 4);
     const stocked = stockPenWithAnimal(pen, 'chicken', () => 0);
@@ -24,6 +35,56 @@ describe('livestockLogic', () => {
     expect(half.lifecycleState).toBe('growing');
     const done = tickLivestockPen(pen, start + (pen.growthDurationMs ?? 0) + 1);
     expect(done.lifecycleState).toBe('producing');
+  });
+
+  it('enters hungry after hungryAfterMs since last feed', () => {
+    let pen = stockPenWithAnimal(createNewPen('p2b', 'duck', 1, 1), 'duck', () => 0)!;
+    const start = pen.growthStartAt!;
+    pen = tickLivestockPen(pen, start + (pen.growthDurationMs ?? 0) + 1);
+    const hungryAfter = getLivestockDef('duck').hungryAfterMs;
+    const hungry = tickLivestockPen(pen, (pen.lastUpdatedAt ?? 0) + hungryAfter + 1);
+    expect(hungry.lifecycleState).toBe('hungry');
+  });
+
+  it('getLivestockTimerInfo uses hunger bar and maturation/production labels', () => {
+    let pen = stockPenWithAnimal(createNewPen('t1', 'chicken', 0, 0), 'chicken', () => 0)!;
+    const growInfo = getLivestockTimerInfo(pen, pen.growthStartAt! + 1);
+    expect(growInfo?.kind).toBe('grow');
+    expect(growInfo?.hungerProgress).toBe(1);
+    expect(growInfo?.growthTimeText).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+
+    pen = tickLivestockPen(pen, pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1);
+    const producing = {
+      ...pen,
+      lifecycleState: 'producing' as const,
+      state: 'producing' as const,
+      productionProgressMs: 1000,
+      hungerSinceFeedMs: 50_000,
+    };
+    const produceInfo = getLivestockTimerInfo(producing, producing.lastUpdatedAt! + 1);
+    expect(produceInfo?.kind).toBe('produce');
+    expect(produceInfo?.growthTimeText).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(produceInfo?.hungerProgress).toBeGreaterThan(0);
+    expect(produceInfo?.hungerProgress).toBeLessThan(1);
+
+    const hungry = tickLivestockPen(
+      pen,
+      (pen.lastUpdatedAt ?? 0) + getLivestockDef('chicken').hungryAfterMs + 1
+    );
+    const hungryInfo = getLivestockTimerInfo(hungry, hungry.lastUpdatedAt! + 1);
+    expect(hungryInfo?.kind).toBe('hungry');
+    expect(hungryInfo?.hungerProgress).toBe(0);
+    expect(hungryInfo?.growthTimeText).toBe('');
+
+    const readyPen = {
+      ...producing,
+      state: 'ready' as const,
+      lifecycleState: 'producing' as const,
+      productionProgressMs: getLivestockDef('chicken').produceMs,
+    };
+    const readyInfo = getLivestockTimerInfo(readyPen, readyPen.lastUpdatedAt! + 1);
+    expect(readyInfo?.kind).toBe('ready');
+    expect(readyInfo?.growthTimeText).toBe('Ready');
   });
 
   it('hungry pauses production and feeding resumes', () => {
@@ -62,7 +123,7 @@ describe('livestockLogic', () => {
   it('happiness decreases under prolonged hunger', () => {
     let pen = stockPenWithAnimal(createNewPen('h1', 'sheep', 0, 0), 'sheep', () => 0)!;
     pen = { ...pen, lifecycleState: 'hungry', hungrySince: 0, lastUpdatedAt: 0, happiness: 100 };
-    const ticked = tickLivestockPen(pen, 130 * 60 * 1000);
+    const ticked = tickLivestockPen(pen, 250 * 60 * 1000);
     expect(ticked.happiness).toBeLessThanOrEqual(50);
   });
 

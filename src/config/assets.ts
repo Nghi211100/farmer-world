@@ -20,6 +20,8 @@ export const UI_OBJECT_UPGRADE_TEXTURE_KEY = 'ui_object_upgrade';
 export const UI_OBJECT_FEED_TEXTURE_KEY = 'ui_object_feed';
 /** Object edit remove (see ui/remove.png). */
 export const UI_OBJECT_REMOVE_TEXTURE_KEY = 'ui_object_remove';
+/** Walk-to destination marker (see ui/coming.png). */
+export const UI_COMING_TEXTURE_KEY = 'ui_coming';
 /** Livestock hungry warning indicator (see animals/warning.png). */
 export const LIVESTOCK_WARNING_TEXTURE_KEY = 'livestock_warning';
 /** Non-uniform warning icon scale: keep height, squash width. */
@@ -434,6 +436,13 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     height: 82,
   },
   { key: 'harvest', path: 'ui/harvest.png', placeholderColor: 0xf39c12, width: 32, height: 32 },
+  {
+    key: UI_COMING_TEXTURE_KEY,
+    path: 'ui/coming.png',
+    placeholderColor: 0x27ae60,
+    width: 48,
+    height: 48,
+  },
   { key: 'ui_button', path: 'ui/button.png', placeholderColor: 0xe76f51, width: 150, height: 78 },
   {
     key: 'ui_plus_devide',

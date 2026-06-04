@@ -23,11 +23,18 @@ import {
   visibleLivestockRenderCount,
 } from '../config/livestockPenRenderSlots';
 import type { GridSystem } from '../systems/GridSystem';
-import { isRuminantPen, penStockCount } from '../systems/livestockLogic';
+import {
+  getLivestockTimerInfo,
+  isRuminantPen,
+  penStockCount,
+} from '../systems/livestockLogic';
 import { DISPLAY_SIZE, computeSpriteFitScale } from '../utils/iso';
 
 const READY_TINT = 0xa8e6cf;
-const HUNGRY_TINT = 0xffd3b0;
+const BAR_W = 36;
+const BAR_H = 4;
+const BAR_ABOVE_ANIMAL = 2;
+const TIMER_ABOVE_BAR = 6;
 
 function resolvePenTexture(scene: Phaser.Scene, data: LivestockPenData): string {
   const key = getLivestockPenTextureKeyForPen(data, data.level);
@@ -80,6 +87,9 @@ export class LivestockPenSprite {
   data: LivestockPenData;
   private penImage: Phaser.GameObjects.Image;
   private animalImages: Phaser.GameObjects.Image[] = [];
+  private progressBgs: Phaser.GameObjects.Rectangle[] = [];
+  private progressFills: Phaser.GameObjects.Rectangle[] = [];
+  private timerTexts: Phaser.GameObjects.Text[] = [];
   private hungryWarningImage: Phaser.GameObjects.Image;
 
   constructor(scene: Phaser.Scene, grid: GridSystem, data: LivestockPenData) {
@@ -104,6 +114,7 @@ export class LivestockPenSprite {
     this.container.add([this.penImage, this.hungryWarningImage]);
     this.container.setDepth(grid.getDepth(data.gridX, data.gridY, 'buildings') + 2);
     this.applyStateVisual(scene);
+    this.updateOverlays(scene);
   }
 
   updateData(data: LivestockPenData, grid: GridSystem, scene: Phaser.Scene): void {
@@ -122,6 +133,124 @@ export class LivestockPenSprite {
     }
     this.layoutPenHouse(display.width, display.height);
     this.applyStateVisual(scene);
+    this.updateOverlays(scene);
+  }
+
+  updateOverlays(scene: Phaser.Scene, nowMs: number = Date.now()): void {
+    this.clearGrowthOverlays();
+    if (this.data.state === 'unstocked') return;
+
+    const timerInfo = getLivestockTimerInfo(this.data, nowMs);
+    if (!timerInfo) return;
+
+    const slots = this.resolvedRenderSlots();
+    if (slots.length === 0) return;
+
+    const positions = livestockRenderSlotPositions(
+      slots.length,
+      this.penImage.displayWidth,
+      this.penImage.displayHeight,
+      this.data.animalType
+    );
+
+    this.ensureGrowthOverlayPools(scene, slots.length);
+
+    for (let i = 0; i < slots.length; i++) {
+      const pos = positions[i];
+      const slot = slots[i];
+      if (!pos || !slot) continue;
+      const mappedStage = lifecycleStateToTextureStage(this.data.lifecycleState, slot.stage ?? 'adult');
+      const box = getLivestockAnimalRenderBox(slot.animalType, mappedStage);
+      const anchorX = snapToWholePixel(pos.x);
+      const animalTopY = snapToWholePixel(pos.y - box.height);
+      const barY = animalTopY - BAR_ABOVE_ANIMAL - BAR_H / 2;
+      const timerY = barY - BAR_H / 2 - TIMER_ABOVE_BAR;
+
+      const bg = this.progressBgs[i];
+      const fill = this.progressFills[i];
+      const text = this.timerTexts[i];
+      if (!bg || !fill || !text) continue;
+
+      if (timerInfo.kind === 'ready') {
+        bg.setVisible(false);
+        fill.setVisible(false);
+        text.setText(timerInfo.growthTimeText);
+        text.setColor('#f1c40f');
+        text.setFontStyle('bold');
+        text.setPosition(anchorX, timerY);
+        text.setVisible(true);
+        continue;
+      }
+
+      const ratio = Math.max(0, Math.min(1, timerInfo.hungerProgress));
+      const fillColor =
+        timerInfo.kind === 'hungry' || ratio <= 0.25
+          ? 0xc0392b
+          : ratio <= 0.5
+            ? 0xe67e22
+            : 0x27ae60;
+
+      bg.setPosition(anchorX, barY);
+      bg.setSize(BAR_W, BAR_H);
+      bg.setVisible(true);
+
+      const fillW = Math.max(0, Math.round(BAR_W * ratio));
+      fill.setPosition(anchorX - BAR_W / 2, barY);
+      fill.setSize(fillW, BAR_H - 1);
+      fill.setFillStyle(fillColor, 0.9);
+      fill.setVisible(fillW > 0);
+
+      const label = timerInfo.growthTimeText;
+      if (!label) {
+        text.setVisible(false);
+      } else {
+        text.setText(label);
+        text.setColor('#ecf0f1');
+        text.setFontStyle('');
+        text.setPosition(anchorX, timerY);
+        text.setVisible(true);
+      }
+    }
+  }
+
+  private clearGrowthOverlays(): void {
+    for (const bg of this.progressBgs) bg.setVisible(false);
+    for (const fill of this.progressFills) fill.setVisible(false);
+    for (const text of this.timerTexts) text.setVisible(false);
+  }
+
+  private ensureGrowthOverlayPools(scene: Phaser.Scene, count: number): void {
+    while (this.progressBgs.length < count) {
+      const bg = scene.add.rectangle(0, 0, BAR_W, BAR_H, 0x000000, 0.5).setOrigin(0.5);
+      bg.disableInteractive();
+      this.progressBgs.push(bg);
+      this.container.add(bg);
+    }
+    while (this.progressFills.length < count) {
+      const fill = scene.add.rectangle(0, 0, 1, BAR_H - 1, 0x27ae60, 0.9).setOrigin(0, 0.5);
+      fill.disableInteractive();
+      this.progressFills.push(fill);
+      this.container.add(fill);
+    }
+    while (this.timerTexts.length < count) {
+      const text = scene.add
+        .text(0, 0, '', {
+          fontSize: '10px',
+          color: '#ecf0f1',
+          fontFamily: 'Arial',
+          stroke: '#000000',
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5, 1);
+      text.disableInteractive();
+      this.timerTexts.push(text);
+      this.container.add(text);
+    }
+    for (let i = count; i < this.progressBgs.length; i++) {
+      this.progressBgs[i]?.setVisible(false);
+      this.progressFills[i]?.setVisible(false);
+      this.timerTexts[i]?.setVisible(false);
+    }
   }
 
   private layoutPenHouse(footprintWidth: number, footprintHeight: number): void {
@@ -249,9 +378,7 @@ export class LivestockPenSprite {
       image.setPosition(snapToWholePixel(pos.x), snapToWholePixel(pos.y));
       image.setVisible(true);
     }
-    if (this.data.lifecycleState === 'hungry') {
-      this.penImage.setTint(HUNGRY_TINT);
-    } else if (this.data.state === 'ready') {
+    if (this.data.state === 'ready') {
       this.penImage.setTint(READY_TINT);
     } else {
       this.penImage.clearTint();
@@ -262,6 +389,12 @@ export class LivestockPenSprite {
   }
 
   destroy(): void {
+    for (const bg of this.progressBgs) bg.destroy();
+    for (const fill of this.progressFills) fill.destroy();
+    for (const text of this.timerTexts) text.destroy();
+    this.progressBgs.length = 0;
+    this.progressFills.length = 0;
+    this.timerTexts.length = 0;
     this.container.destroy();
   }
 

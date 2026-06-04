@@ -2,7 +2,6 @@ import {
   getLivestockDef,
   getLivestockPenTextureKey,
   LIVESTOCK_ANIMAL_LIST,
-  LIVESTOCK_PEN_UPGRADE_COST,
   RUMINANT_PEN_COST,
   RUMINANT_PEN_LABEL_VI,
   type AnimalType,
@@ -69,16 +68,8 @@ export const LIVESTOCK_PEN_PLACE_ITEMS: LivestockPenPlaceItemDef[] = [
   },
 ];
 
-export const LIVESTOCK_UPGRADE_ITEM = {
-  kind: 'upgrade' as const,
-  textureKey: getLivestockPenTextureKey('cow', 2),
-  label: 'Nâng cấp chuồng (4×4)',
-  cost: LIVESTOCK_PEN_UPGRADE_COST,
-};
-
 export class LivestockSystem {
   active = false;
-  upgradeMode = false;
   selectedItem: LivestockPenPlaceItemDef | null = null;
   ghostX = 0;
   ghostY = 0;
@@ -100,7 +91,6 @@ export class LivestockSystem {
   }
 
   enterPlaceMode(item: LivestockPenPlaceItemDef): void {
-    this.exitUpgradeMode();
     this.active = true;
     this.selectedItem = item;
     this.previewLocked = false;
@@ -110,15 +100,6 @@ export class LivestockSystem {
     this.active = false;
     this.selectedItem = null;
     this.previewLocked = false;
-  }
-
-  enterUpgradeMode(): void {
-    this.exitPlaceMode();
-    this.upgradeMode = true;
-  }
-
-  exitUpgradeMode(): void {
-    this.upgradeMode = false;
   }
 
   lockPreviewAt(gx: number, gy: number): void {

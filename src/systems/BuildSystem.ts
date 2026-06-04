@@ -1,10 +1,16 @@
 import { buildingTextureKey } from '../config/assets';
-import { ECONOMY } from '../config/gameConfig';
-import type { BuildingData, BuildingType } from '../config/gameConfig';
+import {
+  BUILD_DECOR_COST,
+  ECONOMY,
+  type BuildingData,
+  type BuildingType,
+  type GroundDecorVariant,
+} from '../config/gameConfig';
 import type { GridSystem } from './GridSystem';
 
 export type BuildItemType = BuildingType;
 export type BuildCategory = 'buildings' | 'decor';
+export type BuildPlacementKind = 'building' | 'natural' | 'ground';
 
 export interface BuildItemDef {
   type: BuildItemType;
@@ -13,9 +19,15 @@ export interface BuildItemDef {
   cost: number;
   footprint: { w: number; h: number };
   category: BuildCategory;
+  placement: BuildPlacementKind;
+  /** Ground tile placement only. */
+  groundTile?: 'grass' | 'water' | 'path';
+  groundVariant?: GroundDecorVariant;
   /** When set, card is locked until player level reaches this value. */
   requiredLevel?: number;
 }
+
+const DECOR = BUILD_DECOR_COST;
 
 export const BUILD_ITEMS: BuildItemDef[] = [
   {
@@ -25,6 +37,7 @@ export const BUILD_ITEMS: BuildItemDef[] = [
     cost: 50,
     footprint: { w: 1, h: 1 },
     category: 'buildings',
+    placement: 'building',
   },
   {
     type: 'barn',
@@ -33,16 +46,114 @@ export const BUILD_ITEMS: BuildItemDef[] = [
     cost: 80,
     footprint: { w: 1, h: 1 },
     category: 'buildings',
+    placement: 'building',
+  },
+  {
+    type: 'tree',
+    textureKey: 'grass',
+    label: 'Grass',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'grass',
+  },
+  {
+    type: 'tree',
+    textureKey: 'grass_light',
+    label: 'Light grass',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'grass',
+    groundVariant: 'grass_light',
+  },
+  {
+    type: 'tree',
+    textureKey: 'flower_ground',
+    label: 'Flowers',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'grass',
+    groundVariant: 'flower_ground',
+  },
+  {
+    type: 'tree',
+    textureKey: 'stone_path',
+    label: 'Stone path',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'path',
+  },
+  {
+    type: 'tree',
+    textureKey: 'water',
+    label: 'Water',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'water',
   },
   {
     type: 'tree',
     textureKey: 'tree_01',
-    label: 'Tree',
-    cost: 10,
+    label: 'Tree 1',
+    cost: DECOR,
     footprint: { w: 1, h: 1 },
     category: 'decor',
+    placement: 'natural',
+  },
+  {
+    type: 'tree',
+    textureKey: 'tree_02',
+    label: 'Tree 2',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'natural',
+  },
+  {
+    type: 'tree',
+    textureKey: 'tree_03',
+    label: 'Tree 3',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'natural',
+  },
+  {
+    type: 'tree',
+    textureKey: 'rock_01',
+    label: 'Rock',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'natural',
+  },
+  {
+    type: 'tree',
+    textureKey: 'bush_01',
+    label: 'Bush',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'natural',
   },
 ];
+
+export function isNaturalBuildTexture(textureKey: string): boolean {
+  return (
+    textureKey.startsWith('tree_') ||
+    textureKey.startsWith('rock_') ||
+    textureKey.startsWith('bush_')
+  );
+}
 
 export class BuildSystem {
   active = false;
@@ -112,19 +223,61 @@ export class BuildSystem {
 
   canPlace(gx: number, gy: number): boolean {
     if (!this.selectedItem || !this.grid.inBounds(gx, gy)) return false;
+    if (this.placementBlocked?.(gx, gy)) return false;
+    const item = this.selectedItem;
+    if (item.placement === 'ground') return this.canPlaceGroundTile(gx, gy, item);
+    if (item.placement === 'natural') return this.canPlaceNatural(gx, gy);
+    return this.canPlaceBuilding(gx, gy);
+  }
+
+  private canPlaceBuilding(gx: number, gy: number): boolean {
     const cell = this.grid.getCell(gx, gy);
     if (!cell || !cell.walkable || cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'path') return false;
+    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
-    if (this.placementBlocked?.(gx, gy)) return false;
     return true;
   }
 
-  place(gx: number, gy: number): BuildingData | null {
-    if (!this.selectedItem || !this.canPlace(gx, gy)) return null;
+  private canPlaceNatural(gx: number, gy: number): boolean {
+    const cell = this.grid.getCell(gx, gy);
+    if (!cell || !cell.walkable || cell.object) return false;
+    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
+    if (cell.type === 'soil') return false;
+    if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    return true;
+  }
+
+  private canPlaceGroundTile(gx: number, gy: number, item: BuildItemDef): boolean {
+    const cell = this.grid.getCell(gx, gy);
+    if (!cell || cell.object) return false;
+    if (cell.type === 'soil') return false;
+    if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    if (item.groundTile === 'path' && this.grid.isFarmSoilCell(gx, gy)) return false;
+    if (item.groundTile === 'water' && cell.type === 'path') {
+      return false;
+    }
+    if (cell.type === 'void' || cell.type === 'grass' || cell.type === 'water') return true;
+    if (cell.type === 'path' && item.groundTile !== 'path') return true;
+    if (cell.type === 'path' && item.groundTile === 'path') return true;
+    return false;
+  }
+
+  place(gx: number, gy: number): boolean {
+    if (!this.selectedItem || !this.canPlace(gx, gy)) return false;
+    const item = this.selectedItem;
+    if (item.placement === 'ground') {
+      this.placeGroundTile(gx, gy, item);
+      this.onChange?.();
+      return true;
+    }
+    if (item.placement === 'natural') {
+      this.grid.setObject(gx, gy, item.textureKey);
+      this.onChange?.();
+      return true;
+    }
     const building: BuildingData = {
-      type: this.selectedItem.type,
-      textureKey: this.selectedItem.textureKey,
+      type: item.type,
+      textureKey: item.textureKey,
       gridX: gx,
       gridY: gy,
       level: 1,
@@ -132,7 +285,35 @@ export class BuildSystem {
     this.buildings.push(building);
     this.grid.setObject(gx, gy, building.textureKey);
     this.onChange?.();
-    return building;
+    return true;
+  }
+
+  private placeGroundTile(gx: number, gy: number, item: BuildItemDef): void {
+    const tile = item.groundTile ?? 'grass';
+    if (tile === 'grass') {
+      this.grid.setCell(gx, gy, {
+        type: 'grass',
+        walkable: true,
+        groundVariant: item.groundVariant,
+        object: undefined,
+      });
+      return;
+    }
+    if (tile === 'path') {
+      this.grid.setCell(gx, gy, {
+        type: 'path',
+        walkable: true,
+        groundVariant: undefined,
+        object: undefined,
+      });
+      return;
+    }
+    this.grid.setCell(gx, gy, {
+      type: 'water',
+      walkable: false,
+      groundVariant: undefined,
+      object: undefined,
+    });
   }
 
   findBuildingAt(gx: number, gy: number): BuildingData | null {
@@ -144,7 +325,7 @@ export class BuildSystem {
     if (!this.grid.inBounds(gx, gy)) return false;
     const cell = this.grid.getCell(gx, gy);
     if (!cell || !cell.walkable || cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'path') return false;
+    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
     return true;
   }
@@ -200,7 +381,10 @@ export class BuildSystem {
     this.buildings = data.map((b) => ({
       ...b,
       level: b.level ?? 1,
-      textureKey: buildingTextureKey(b.type, b.level ?? 1),
+      textureKey:
+        b.type === 'tree'
+          ? b.textureKey
+          : buildingTextureKey(b.type, b.level ?? 1),
     }));
     for (const b of this.buildings) {
       this.grid.setObject(b.gridX, b.gridY, b.textureKey);

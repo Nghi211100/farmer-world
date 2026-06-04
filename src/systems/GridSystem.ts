@@ -7,6 +7,7 @@ import {
   INITIAL_UNLOCKED_FARM_TILES,
   soilMoistureTextureKey,
   type GroundDecorVariant,
+  type TileType,
 } from '../config/gameConfig';
 import {
   computeFarmIslandWorldDepth,
@@ -41,7 +42,7 @@ import type { FarmFootprintBounds } from '../farmCameraScroll';
 export type MapLayer = 'ground' | 'objects' | 'crops' | 'buildings' | 'entities';
 
 export interface TileCell {
-  type: 'grass' | 'soil' | 'water' | 'path';
+  type: TileType;
   walkable: boolean;
   object?: string;
   /** Soil only: false = locked until land purchase */
@@ -77,6 +78,8 @@ export class GridSystem {
   mapTopPanOffsetX = 0;
 
   private cells: TileCell[][] = [];
+  /** Extra movement blockers (e.g. pen footprint without a stale grid marker). */
+  private walkBlocked?: (gx: number, gy: number) => boolean;
 
   constructor() {
     this.initEmpty();
@@ -87,7 +90,7 @@ export class GridSystem {
     for (let y = 0; y < this.size; y++) {
       this.cells[y] = [];
       for (let x = 0; x < this.size; x++) {
-        this.cells[y][x] = { type: 'grass', walkable: true };
+        this.cells[y][x] = { type: 'void', walkable: false };
       }
     }
   }
@@ -560,9 +563,15 @@ export class GridSystem {
     return gx >= 0 && gy >= 0 && gx < this.size && gy < this.size;
   }
 
+  setWalkBlocked(fn: ((gx: number, gy: number) => boolean) | undefined): void {
+    this.walkBlocked = fn;
+  }
+
   isWalkable(gx: number, gy: number): boolean {
     const c = this.getCell(gx, gy);
-    return c !== null && c.walkable && !c.object;
+    if (c === null || !c.walkable || c.object) return false;
+    if (this.walkBlocked?.(gx, gy)) return false;
+    return true;
   }
 
   hasObject(gx: number, gy: number): boolean {
@@ -581,7 +590,7 @@ export class GridSystem {
     if (!this.inBounds(gx, gy)) return;
     const cell = this.cells[gy][gx];
     delete cell.object;
-    if (cell.type === 'water') {
+    if (cell.type === 'water' || cell.type === 'void') {
       cell.walkable = false;
     } else if (cell.type === 'soil') {
       cell.walkable = !!cell.unlocked;
@@ -728,28 +737,17 @@ export class GridSystem {
     return isoDepth(maxTileSum, 0, 0) + 20;
   }
 
-  /** Build placeholder map: grass, trees, rocks, soil farm area, spawn */
+  /** Minimal 20×20 map: farm soil patch, stone path ring, void elsewhere (decor from Build). */
   generatePlaceholderMap(): { spawnX: number; spawnY: number } {
     const spawnX = FARM_PLAYER_SPAWN_GX;
     const spawnY = FARM_PLAYER_SPAWN_GY;
 
     for (let y = 0; y < this.size; y++) {
       for (let x = 0; x < this.size; x++) {
-        this.cells[y][x] = { type: 'grass', walkable: true };
+        this.cells[y][x] = { type: 'void', walkable: false };
       }
     }
 
-    // Water border strip
-    for (let x = 0; x < this.size; x++) {
-      this.setCell(x, 0, { type: 'water', walkable: false });
-      this.setCell(x, this.size - 1, { type: 'water', walkable: false });
-    }
-    for (let y = 1; y < this.size - 1; y++) {
-      this.setCell(0, y, { type: 'water', walkable: false });
-      this.setCell(this.size - 1, y, { type: 'water', walkable: false });
-    }
-
-    // Farming soil area (center-left) — only INITIAL_UNLOCKED_FARM_TILES start unlocked
     const soilCoords: { x: number; y: number }[] = [];
     for (let y = FARM_SOIL_BOUNDS.minY; y <= FARM_SOIL_BOUNDS.maxY; y++) {
       for (let x = FARM_SOIL_BOUNDS.minX; x <= FARM_SOIL_BOUNDS.maxX; x++) {
@@ -761,36 +759,7 @@ export class GridSystem {
       this.setCell(x, y, { unlocked: true, soilWaterLevel: 0 });
     }
 
-    // Trees
-    const treeSpots: [number, number, string][] = [
-      [1, 9, 'tree_01'],
-      [1, 10, 'tree_02'],
-      [16, 12, 'tree_01'],
-      [2, 14, 'tree_02'],
-    ];
-    for (const [tx, ty, key] of treeSpots) {
-      if (this.isFarmIslandFootprintCell(tx, ty)) continue;
-      if (isFarmNorthEdgeCell(tx, ty)) continue;
-      this.setCell(tx, ty, { walkable: false });
-      this.setObject(tx, ty, key);
-    }
-
-    // Rocks and bushes
-    const decor: [number, number, string][] = [
-      [5, 15, 'rock_01'],
-      [12, 15, 'bush_01'],
-      // Avoid (17,11): blocks default pig pen 4×4 upgrade ring at anchor (15,8).
-      [18, 13, 'bush_01'],
-    ];
-    for (const [dx, dy, key] of decor) {
-      if (this.isFarmIslandFootprintCell(dx, dy)) continue;
-      if (isFarmNorthEdgeCell(dx, dy)) continue;
-      this.setCell(dx, dy, { walkable: false });
-      this.setObject(dx, dy, key);
-    }
-
     this.applyFarmPathRing();
-    this.assignAllGroundDecorVariants();
 
     return { spawnX, spawnY };
   }
@@ -880,7 +849,8 @@ export class GridSystem {
         if (!this.isAdjacentToFarmSoil(x, y)) continue;
         const cell = this.getCell(x, y);
         if (!cell || cell.type === 'water' || cell.object) continue;
-        this.setCell(x, y, { type: 'path', walkable: true });
+        if (cell.type !== 'void' && cell.type !== 'grass') continue;
+        this.setCell(x, y, { type: 'path', walkable: true, groundVariant: undefined });
       }
     }
   }
@@ -1130,7 +1100,14 @@ export class GridSystem {
     if (cell.type === 'grass') {
       return cell.groundVariant ?? 'grass';
     }
+    if (cell.type === 'void') {
+      return 'grass';
+    }
     return 'grass';
+  }
+
+  isVoidCell(gx: number, gy: number): boolean {
+    return this.getCell(gx, gy)?.type === 'void';
   }
 
   getAllCells(): TileCell[][] {

@@ -2,6 +2,11 @@ import Phaser from 'phaser';
 import { PlayerFarmAction } from '../config/gameConfig';
 import type { GridSystem } from '../systems/GridSystem';
 import { DISPLAY_SIZE, fitSpriteDisplay } from '../utils/iso';
+import {
+  findPlayerWalkPath,
+  isPlayerWalkCell,
+  type GridCoord,
+} from '../utils/playerWalk';
 
 const ACTION_TEXTURES: Partial<Record<PlayerFarmAction, string>> = {
   [PlayerFarmAction.DIGGING]: 'farmer_digging',
@@ -124,6 +129,7 @@ export class Player {
   private actionTimer = 0;
   private actionOnComplete?: () => void;
   private onReachCallback?: () => void;
+  private walkPath: GridCoord[] = [];
   private readonly walkAnimReady = new Set<string>();
 
   constructor(
@@ -154,18 +160,35 @@ export class Player {
   }
 
   moveTo(gx: number, gy: number, grid: GridSystem, onReach?: () => void): boolean {
-    if (!grid.isWalkable(gx, gy)) return false;
+    if (!isPlayerWalkCell(grid, gx, gy)) return false;
 
     const fromX = Math.round(this.gridX);
     const fromY = Math.round(this.gridY);
-    const stepDx = gx - fromX;
-    const stepDy = gy - fromY;
+    const path = findPlayerWalkPath(grid, fromX, fromY, gx, gy);
+    if (path === null) return false;
+
+    if (path.length === 0) {
+      this.gridX = gx;
+      this.gridY = gy;
+      this.targetX = gx;
+      this.targetY = gy;
+      this.walkPath = [];
+      this.moving = false;
+      this.onReachCallback = undefined;
+      onReach?.();
+      return true;
+    }
+
+    const first = path[0];
+    const stepDx = first.gx - fromX;
+    const stepDy = first.gy - fromY;
     const nextFacing = resolveFacingFromDelta(stepDx, stepDy, this.facing);
     const facingChanged = nextFacing !== this.facing;
     const wasMoving = this.moving;
 
-    this.targetX = gx;
-    this.targetY = gy;
+    this.walkPath = path;
+    this.targetX = first.gx;
+    this.targetY = first.gy;
     this.facing = nextFacing;
     this.moving = true;
     this.onReachCallback = onReach;
@@ -178,6 +201,38 @@ export class Player {
 
   clearOnReach(): void {
     this.onReachCallback = undefined;
+    this.walkPath = [];
+  }
+
+  private cancelWalk(grid: GridSystem): void {
+    this.moving = false;
+    this.walkPath = [];
+    this.onReachCallback = undefined;
+    this.applySpriteState(false);
+    this.syncTilePosition(grid);
+  }
+
+  private advanceWalkPath(): void {
+    if (this.walkPath.length === 0) {
+      this.moving = false;
+      this.applySpriteState(false);
+      if (this.onReachCallback) {
+        const cb = this.onReachCallback;
+        this.onReachCallback = undefined;
+        cb();
+      }
+      return;
+    }
+
+    const next = this.walkPath.shift()!;
+    const fromX = Math.round(this.gridX);
+    const fromY = Math.round(this.gridY);
+    const stepDx = next.gx - fromX;
+    const stepDy = next.gy - fromY;
+    this.facing = resolveFacingFromDelta(stepDx, stepDy, this.facing);
+    this.targetX = next.gx;
+    this.targetY = next.gy;
+    this.applySpriteState(true);
   }
 
   update(grid: GridSystem, deltaMs: number): void {
@@ -198,25 +253,39 @@ export class Player {
 
     if (!this.moving) return;
 
+    const nextGx = Math.round(this.targetX);
+    const nextGy = Math.round(this.targetY);
+    if (!isPlayerWalkCell(grid, nextGx, nextGy)) {
+      this.cancelWalk(grid);
+      return;
+    }
+
     const dx = this.targetX - this.gridX;
     const dy = this.targetY - this.gridY;
 
     if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) {
       this.gridX = this.targetX;
       this.gridY = this.targetY;
-      this.moving = false;
-      this.applySpriteState(false);
-      if (this.onReachCallback) {
-        const cb = this.onReachCallback;
-        this.onReachCallback = undefined;
-        cb();
-      }
+      this.advanceWalkPath();
     } else {
       const step = (this.moveSpeed * deltaMs) / 1000;
+      const prevGx = Math.round(this.gridX);
+      const prevGy = Math.round(this.gridY);
       if (Math.abs(dx) >= Math.abs(dy)) {
         this.gridX += Math.sign(dx) * Math.min(step, Math.abs(dx));
       } else {
         this.gridY += Math.sign(dy) * Math.min(step, Math.abs(dy));
+      }
+      const steppedGx = Math.round(this.gridX);
+      const steppedGy = Math.round(this.gridY);
+      if (
+        (steppedGx !== prevGx || steppedGy !== prevGy) &&
+        !isPlayerWalkCell(grid, steppedGx, steppedGy)
+      ) {
+        this.gridX = prevGx;
+        this.gridY = prevGy;
+        this.cancelWalk(grid);
+        return;
       }
     }
 

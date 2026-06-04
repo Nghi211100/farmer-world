@@ -16,7 +16,7 @@ export function countsAsFarmActivity(_kind: FarmActivityKind): boolean {
 
 export interface SoilIdlePlotContext {
   unlocked: boolean;
-  cellType: 'grass' | 'soil' | 'water' | 'path';
+  cellType: 'void' | 'grass' | 'soil' | 'water' | 'path';
   crop: CropTileData | null;
 }
 

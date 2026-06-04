@@ -37,7 +37,18 @@ test.describe('Build modal cards', () => {
     await page.evaluate(() => window.__FARMER_WORLD_TEST__?.setBuildTab('decor'));
     await expect
       .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getBuildCardLabels()))
-      .toEqual(['Tree']);
+      .toEqual([
+        'Grass',
+        'Light grass',
+        'Flowers',
+        'Stone path',
+        'Water',
+        'Tree 1',
+        'Tree 2',
+        'Tree 3',
+        'Rock',
+        'Bush',
+      ]);
 
     await page.evaluate(() => window.__FARMER_WORLD_TEST__?.setBuildTab('livestock'));
     const livestockLabels = await page.evaluate(

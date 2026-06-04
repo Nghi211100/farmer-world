@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatGrowthTime } from '../../src/utils/iso';
 import {
   canSellAllAnimalsInPen,
   collectFromPen,
@@ -7,6 +8,7 @@ import {
   feedPen,
   feedPenAnimalAt,
   canFeedAnimalAtSlot,
+  isAnimalFeedable,
   growthProgressRatio,
   isAnimalHungryAtSlot,
   shouldShowHungryFeedWarningForPen,
@@ -69,15 +71,20 @@ describe('livestockLogic', () => {
     expect(hungry.lifecycleState).toBe('hungry');
   });
 
-  it('getLivestockTimerInfo uses satiation bar and hunger countdown labels', () => {
-    const chickenHungryAfter = getLivestockDef('chicken').hungryAfterMs;
+  it('getLivestockTimerInfo shows growth countdown and hides hunger timer', () => {
+    const chickenDef = getLivestockDef('chicken');
+    const chickenHungryAfter = chickenDef.hungryAfterMs;
     let pen = stockPenWithAnimal(createNewPen('t1', 'chicken', 0, 0), 'chicken', () => 0)!;
     const growNow = pen.growthStartAt! + 1;
     const growInfo = getLivestockTimerInfo(tickLivestockPen(pen, growNow), growNow);
     expect(growInfo?.kind).toBe('grow');
     expect(growInfo?.hungerProgress).toBe(1);
     expect(growInfo?.barProgress).toBe(1);
-    expect(growInfo?.growthTimeText).toBe('00:07:30');
+    const growDurationMs = pen.penAnimals?.[0]?.growthDurationMs ?? chickenDef.growthMs;
+    expect(growInfo?.growthTimeText).toBe(
+      formatGrowthTime((growDurationMs - (growNow - pen.growthStartAt!)) / 1000)
+    );
+    expect(growInfo?.growthTimeText).not.toBe(formatGrowthTime(chickenHungryAfter / 1000));
 
     pen = tickLivestockPen(pen, pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1);
     const animal = pen.penAnimals?.[0];
@@ -106,7 +113,7 @@ describe('livestockLogic', () => {
       1_100_001
     );
     expect(produceInfo?.kind).toBe('produce');
-    expect(produceInfo?.growthTimeText).toBe('00:06:40');
+    expect(produceInfo?.growthTimeText).toBe('');
     expect(produceInfo?.barProgress).toBeCloseTo(1 - 50_000 / chickenHungryAfter, 5);
     expect(produceInfo?.hungerProgress).toBe(produceInfo?.barProgress);
 
@@ -133,7 +140,7 @@ describe('livestockLogic', () => {
     expect(hungryInfo?.kind).toBe('hungry');
     expect(hungryInfo?.hungerProgress).toBe(0);
     expect(hungryInfo?.barProgress).toBe(0);
-    expect(hungryInfo?.growthTimeText).toBe('00:00:00');
+    expect(hungryInfo?.growthTimeText).toBe('');
 
     const produceMs = getLivestockDef('chicken').produceMs;
     const readyAnimal = producing.penAnimals?.[0]
@@ -196,6 +203,92 @@ describe('livestockLogic', () => {
     expect(hungry.lifecycleState).toBe('hungry');
     const fed = feedPen(hungry, hungry.lastUpdatedAt! + 1);
     expect(fed?.lifecycleState).toBe('producing');
+  });
+
+  it('feeding at 90% hunger depletion resets satiation bar not production timer', () => {
+    const def = getLivestockDef('pig');
+    const t0 = 10_000_000;
+    let pen = stockPenWithAnimal(createNewPen('feed-90', 'pig', 2, 2), 'pig', () => 0, t0)!;
+    const growMs = pen.penAnimals![0]!.growthDurationMs ?? def.growthMs;
+    pen = tickLivestockPen(pen, t0 + growMs + 1);
+    const almostAt = (pen.lastUpdatedAt ?? 0) + 5_000;
+    const baseAnimal = pen.penAnimals![0]!;
+    pen = {
+      ...pen,
+      penAnimals: [
+        {
+          ...baseAnimal,
+          lifecycleState: 'producing' as const,
+          productionProgressMs: 5_000,
+          hungerSinceFeedMs: Math.floor(def.hungryAfterMs * 0.9),
+          lastUpdatedAt: almostAt,
+        },
+      ],
+      productionProgressMs: 5_000,
+      hungerSinceFeedMs: Math.floor(def.hungryAfterMs * 0.9),
+      lastUpdatedAt: almostAt,
+    };
+    expect(isAnimalFeedable(pen.penAnimals![0]!, 'pig')).toBe(true);
+    expect(canFeedAnimalAtSlot(pen, 0, almostAt + 1)).toBe(true);
+
+    const feedAt = almostAt + 2;
+    const fed = feedPenAnimalAt(pen, 0, feedAt);
+    expect(fed).not.toBeNull();
+    const info = getLivestockTimerInfoForSlot(tickLivestockPen(fed!, feedAt + 1), 0, feedAt + 1);
+    expect(info?.growthTimeText).toBe('');
+    expect(info?.kind).toBe('produce');
+    expect(info?.hungerProgress).toBeCloseTo(1, 5);
+  });
+
+  it('at 40% satiation uses hunger bar not production and cannot feed yet', () => {
+    const def = getLivestockDef('pig');
+    const t0 = 11_000_000;
+    let pen = stockPenWithAnimal(createNewPen('feed-40', 'pig', 2, 2), 'pig', () => 0, t0)!;
+    const growMs = pen.penAnimals![0]!.growthDurationMs ?? def.growthMs;
+    pen = tickLivestockPen(pen, t0 + growMs + 1);
+    const at = (pen.lastUpdatedAt ?? 0) + 5_000;
+    const hungerMs = Math.floor(def.hungryAfterMs * 0.6);
+    const animal = {
+      ...pen.penAnimals![0]!,
+      lifecycleState: 'producing' as const,
+      productionProgressMs: 5_000,
+      hungerSinceFeedMs: hungerMs,
+      lastUpdatedAt: at,
+    };
+    pen = { ...pen, penAnimals: [animal], hungerSinceFeedMs: hungerMs, lastUpdatedAt: at };
+    expect(isAnimalFeedable(animal, 'pig')).toBe(false);
+    expect(canFeedAnimalAtSlot(pen, 0, at + 1)).toBe(false);
+    const info = getLivestockTimerInfoForSlot(tickLivestockPen(pen, at + 1), 0, at + 1);
+    expect(info?.kind).toBe('produce');
+    expect(info?.growthTimeText).toBe('');
+    expect(info?.hungerProgress).toBeCloseTo(0.4, 2);
+  });
+
+  it('pig satiation at ~25% bar reflects hunger progress without countdown label', () => {
+    const def = getLivestockDef('pig');
+    const t0 = 12_000_000;
+    let pen = stockPenWithAnimal(createNewPen('pig-168', 'pig', 2, 2), 'pig', () => 0, t0)!;
+    const growMs = pen.penAnimals![0]!.growthDurationMs ?? def.growthMs;
+    pen = tickLivestockPen(pen, t0 + growMs + 1);
+    const at = (pen.lastUpdatedAt ?? 0) + 5_000;
+    const hungerMs = def.hungryAfterMs - 168_000;
+    pen = {
+      ...pen,
+      penAnimals: [
+        {
+          ...pen.penAnimals![0]!,
+          lifecycleState: 'producing' as const,
+          productionProgressMs: 0,
+          hungerSinceFeedMs: hungerMs,
+          lastUpdatedAt: at,
+        },
+      ],
+      hungerSinceFeedMs: hungerMs,
+      lastUpdatedAt: at,
+    };
+    const info = getLivestockTimerInfoForSlot(tickLivestockPen(pen, at + 1), 0, at + 1);
+    expect(info?.growthTimeText).toBe('');
+    expect(info?.hungerProgress).toBeCloseTo(0.25, 2);
   });
 
   it('production output uses species product', () => {
@@ -425,7 +518,7 @@ describe('livestockLogic', () => {
     expect(pen.lifecycleState).toBe('hungry');
     expect(pen.penAnimals?.[0]?.lifecycleState).toBe('hungry');
     expect(pen.penAnimals?.[1]?.lifecycleState).toBe('producing');
-    expect(getLivestockTimerInfoForSlot(pen, 1, now)?.growthTimeText).not.toBe('');
+    expect(getLivestockTimerInfoForSlot(pen, 1, now)?.growthTimeText).toBe('Ready');
     expect(shouldShowHungryFeedWarningForPen(pen, now)).toBe(true);
     expect(shouldShowHungryFeedWarningForSlot(pen, 0, now)).toBe(true);
     expect(shouldShowHungryFeedWarningForSlot(pen, 1, now)).toBe(false);
@@ -469,8 +562,8 @@ describe('livestockLogic', () => {
     const infoSecond = getLivestockTimerInfoForAnimal(second, 'chicken', t1);
     expect(infoFirst?.kind).toBe('produce');
     expect(infoSecond?.kind).toBe('grow');
-    expect(infoFirst?.growthTimeText).toMatch(/^\d{2}:\d{2}:\d{2}$/);
-    expect(infoSecond?.growthTimeText).toBe('00:07:30');
+    expect(infoFirst?.growthTimeText).toBe('');
+    expect(infoSecond?.growthTimeText).toBe(formatGrowthTime(growMs / 1000));
     expect(infoFirst?.barProgress).toBe(infoFirst?.hungerProgress);
     expect(infoSecond?.barProgress).toBe(1);
   });

@@ -44,7 +44,10 @@ export const LAND_EXPAND_STRINGS = {
 export const DEFAULT_GEMS = 10;
 export const DEFAULT_ENERGY = 100;
 
-export type TileType = 'grass' | 'soil' | 'water' | 'path';
+export type TileType = 'void' | 'grass' | 'soil' | 'water' | 'path';
+
+/** Build → Decor ground tiles and nature props (coins each). */
+export const BUILD_DECOR_COST = 5;
 
 /** Farm planting soil rectangle (inclusive), matches placeholder map */
 export const FARM_SOIL_BOUNDS = {

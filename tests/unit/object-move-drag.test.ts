@@ -78,18 +78,10 @@ describe('ObjectEditSystem move placement', () => {
     const soilGy = FARM_SOIL_BOUNDS.minY;
     expect(grid.getCell(soilGx, soilGy)?.type).toBe('soil');
 
-    let naturalGx = -1;
-    let naturalGy = -1;
-    outer: for (let gy = 0; gy < grid.size; gy++) {
-      for (let gx = 0; gx < grid.size; gx++) {
-        const cell = grid.getCell(gx, gy);
-        if (cell?.object && cell.type !== 'soil' && !grid.isLockedSoil(gx, gy)) {
-          naturalGx = gx;
-          naturalGy = gy;
-          break outer;
-        }
-      }
-    }
+    grid.setCell(2, 2, { type: 'grass', walkable: true });
+    grid.setObject(2, 2, 'rock_01');
+    const naturalGx = 2;
+    const naturalGy = 2;
     expect(naturalGx).toBeGreaterThanOrEqual(0);
     edit.beginMove(naturalGx, naturalGy);
     expect(edit.canPlaceAt(soilGx, soilGy)).toBe(false);

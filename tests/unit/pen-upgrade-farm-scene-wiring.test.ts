@@ -4,7 +4,10 @@ import { GridSystem } from '../../src/systems/GridSystem';
 import { LivestockSystem, LIVESTOCK_PEN_PLACE_ITEMS } from '../../src/systems/LivestockSystem';
 import { LIVESTOCK_PEN_UPGRADE_COST } from '../../src/config/LivestockConfig';
 import { penFootprintCells } from '../../src/config/livestockAssets';
-import { createDefaultFarmPens } from '../../src/systems/livestockLogic';
+import {
+  createDefaultFarmPens,
+  penUpgradeExpansionCells,
+} from '../../src/systems/livestockLogic';
 
 /** Mirrors FarmScene.create() livestock ↔ build placementBlocked wiring. */
 function farmSceneLivestock(grid: GridSystem) {
@@ -21,6 +24,13 @@ describe('pen upgrade — FarmScene placement wiring', () => {
   it('fresh chicken pen on empty grass upgrades to 4×4 when ring is clear', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
     const { livestock } = farmSceneLivestock(grid);
     livestock.loadPens([]);
 
@@ -54,6 +64,15 @@ describe('pen upgrade — FarmScene placement wiring', () => {
     const upgradeable = new Set(['chicken', 'ruminant', 'cow', 'pig']);
     for (const pen of createDefaultFarmPens()) {
       const label = pen.penKind === 'ruminant' ? 'ruminant' : pen.animalType;
+      if (upgradeable.has(label)) {
+        for (const { gx, gy } of penUpgradeExpansionCells(pen)) {
+          if (!grid.inBounds(gx, gy)) continue;
+          if (grid.getCell(gx, gy)?.type === 'soil' || grid.getCell(gx, gy)?.type === 'path') {
+            continue;
+          }
+          grid.setCell(gx, gy, { type: 'grass', walkable: true });
+        }
+      }
       livestock.loadPens([pen]);
       expect(livestock.canUpgradeAt(pen)).toBe(upgradeable.has(label));
       if (upgradeable.has(label)) {

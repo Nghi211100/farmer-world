@@ -290,6 +290,11 @@ export class FarmScene extends Phaser.Scene {
     this.livestockSystem.setPlacementBlocked((gx, gy) =>
       this.buildSystem.getBuildings().some((b) => b.gridX === gx && b.gridY === gy)
     );
+    this.grid.setWalkBlocked(
+      (gx, gy) =>
+        this.livestockSystem.getPenAt(gx, gy) != null ||
+        this.buildSystem.getBuildings().some((b) => b.gridX === gx && b.gridY === gy)
+    );
     this.objectEditSystem = new ObjectEditSystem(
       this.grid,
       this.buildSystem,
@@ -339,6 +344,7 @@ export class FarmScene extends Phaser.Scene {
 
     this.buildSystem.setOnChange(() => {
       renderBuildings(this, this.grid, this.buildSystem.getBuildings(), this.buildingSprites);
+      this.refreshMapDecorations();
       this.scheduleSave();
     });
     this.livestockSystem.setOnChange(() => {
@@ -782,6 +788,10 @@ export class FarmScene extends Phaser.Scene {
   private applyGroundTileAt(gx: number, gy: number, spr: Phaser.GameObjects.Image): void {
     const cell = this.grid.getCell(gx, gy);
     if (!cell) return;
+    if (cell.type === 'void') {
+      spr.setVisible(false);
+      return;
+    }
     if (this.farming.hidesGroundUnderCrop(gx, gy)) {
       spr.setVisible(false);
       return;
@@ -1900,6 +1910,8 @@ export class FarmScene extends Phaser.Scene {
     const placedGy = ghostY;
     const placed = this.buildSystem.place(placedGx, placedGy);
     if (placed) {
+      this.refreshTileAt(placedGx, placedGy);
+      this.refreshMapDecorations();
       this.emitHud();
       this.scheduleSave();
       this.advanceBuildPreviewAfterPlace(placedGx, placedGy);
@@ -4104,17 +4116,21 @@ export class FarmScene extends Phaser.Scene {
         )
       : null;
     const foot = penLayout ?? this.grid.gridToTileBottom(anchorGx, anchorGy);
+    const buildItem = this.buildSystem.selectedItem;
     const key = moveActive
       ? this.objectEditSystem.ghostTextureKey()
       : livestockActive
         ? (this.livestockSystem.selectedItem?.textureKey ?? 'chicken_house')
-        : (this.buildSystem.selectedItem?.textureKey ?? 'house_lv1');
+        : (buildItem?.textureKey ?? 'house_lv1');
     const canPlace = moveActive
       ? this.objectEditSystem.canPlaceAt(ghostX, ghostY)
       : livestockActive
         ? this.livestockSystem.canPlace(ghostX, ghostY)
         : this.buildSystem.canPlace(ghostX, ghostY);
-    const isNatural = moveActive && this.objectEditSystem.isNaturalTexture(key);
+    const isNatural =
+      (moveActive && this.objectEditSystem.isNaturalTexture(key)) ||
+      (buildActive && buildItem?.placement === 'natural');
+    const isGroundBuild = buildActive && buildItem?.placement === 'ground';
 
     if (!this.ghostSprite) {
       this.ghostSprite = this.add.sprite(
@@ -4128,27 +4144,39 @@ export class FarmScene extends Phaser.Scene {
       }
     }
     this.ghostSprite.setTexture(key);
-    if (isNatural) {
+    if (isGroundBuild) {
+      const top = this.grid.gridToMapScreen(ghostX, ghostY);
+      this.ghostSprite.setOrigin(0.5, 0);
+      this.ghostSprite.setPosition(top.x, top.y);
+      applyIsoTileSprite(this.ghostSprite, GROUND_TILE_SEAM_SCALE);
+      this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 50);
+    } else if (isNatural) {
       const tree = key.startsWith('tree');
+      this.ghostSprite.setOrigin(0.5, 1);
       fitSpriteDisplay(
         this.ghostSprite,
         DISPLAY_SIZE.tileW * (tree ? 1.2 : 0.9) * NATURE_DISPLAY_SCALE,
         (tree ? DISPLAY_SIZE.treeH : DISPLAY_SIZE.rockH) * NATURE_DISPLAY_SCALE
       );
+      this.ghostSprite.setPosition(foot.x, foot.y);
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'objects') + 50);
     } else if (penLayout) {
       this.ghostSprite.setScale(1, 1);
       this.ghostSprite.setDisplaySize(penLayout.displayWidth, penLayout.displayHeight);
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
     } else {
+      this.ghostSprite.setOrigin(0.5, 1);
       fitSpriteDisplay(
         this.ghostSprite,
         DISPLAY_SIZE.tileW * 1.4,
         DISPLAY_SIZE.buildingH
       );
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'buildings') + 50);
+      this.ghostSprite.setPosition(foot.x, foot.y);
     }
-    this.ghostSprite.setPosition(penLayout?.x ?? foot.x, penLayout?.y ?? foot.y);
+    if (!isGroundBuild) {
+      this.ghostSprite.setPosition(penLayout?.x ?? foot.x, penLayout?.y ?? foot.y);
+    }
     this.ghostSprite.setAlpha(0.55);
     this.ghostSprite.setTint(canPlace ? 0x88ff88 : 0xff8888);
     if (moveActive && !penLayout) {

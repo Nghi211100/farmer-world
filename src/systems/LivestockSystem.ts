@@ -235,7 +235,7 @@ export class LivestockSystem {
     }
     if (!cell.walkable) return false;
     if (cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'soil') return false;
+    if (cell.type === 'void' || cell.type === 'water' || cell.type === 'soil') return false;
     if (this.placementBlocked?.(gx, gy)) return false;
     return true;
   }
@@ -530,7 +530,7 @@ export class LivestockSystem {
   getPenAction(pen: LivestockPenData, nowMs: number) {
     return {
       canStock: canStockAnimal(pen),
-      canFeed: canFeedPen(pen),
+      canFeed: canFeedPen(pen, nowMs),
       canCollect: canCollectFromPen(pen, nowMs),
       canUpgrade: canUpgradePen(pen) && this.canUpgradeAt(pen),
       ticked: tickLivestockPen(pen, nowMs),

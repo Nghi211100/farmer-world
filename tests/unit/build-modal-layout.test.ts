@@ -46,6 +46,17 @@ describe('computeBuildModalLayout', () => {
     const buildings = BUILD_ITEMS.filter((i) => i.category === 'buildings');
     const decor = BUILD_ITEMS.filter((i) => i.category === 'decor');
     expect(buildings.map((i) => i.label)).toEqual(['House', 'Barn']);
-    expect(decor.map((i) => i.label)).toEqual(['Tree']);
+    expect(decor.map((i) => i.label)).toEqual([
+      'Grass',
+      'Light grass',
+      'Flowers',
+      'Stone path',
+      'Water',
+      'Tree 1',
+      'Tree 2',
+      'Tree 3',
+      'Rock',
+      'Bush',
+    ]);
   });
 });

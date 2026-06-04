@@ -350,6 +350,7 @@ export function isAnimalProductionReady(
   return (animal.productionProgressMs ?? 0) >= def.produceMs;
 }
 
+/** `produce` = lifecycle producing (timer is still satiation-until-hungry, not product cooldown). */
 export type LivestockTimerKind = 'ready' | 'grow' | 'produce' | 'hungry';
 
 export interface LivestockTimerInfo {
@@ -358,9 +359,12 @@ export interface LivestockTimerInfo {
   hungerProgress: number;
   /** Progress bar fill 0..1 (mirrors hungerProgress — satiation, not growth/production). */
   barProgress: number;
-  /** Label above bar (satiation countdown until hungry, or "Ready"). */
+  /** Label above bar (growth countdown, "Ready", or empty — no hunger HH:MM:SS). */
   growthTimeText: string;
 }
+
+/** Feed when satiation bar ≤ this fraction (85% of hunger window elapsed). */
+export const LIVESTOCK_ALMOST_HUNGRY_SATIATION = 0.15;
 
 function hungerProgressRatioForAnimal(
   animal: LivestockAnimalLifecycle,
@@ -373,26 +377,37 @@ function hungerProgressRatioForAnimal(
   return Math.max(0, Math.min(1, 1 - fedMs / hungryAfter));
 }
 
-/** Seconds until the animal becomes hungry (0 when already hungry). */
-function satiationRemainingSec(
+/** True when hungry or producing with satiation at/below the almost-hungry threshold. */
+export function isAnimalFeedable(
   animal: LivestockAnimalLifecycle,
   animalType: AnimalType
+): boolean {
+  if (animal.lifecycleState === 'hungry') return true;
+  if (animal.lifecycleState !== 'producing') return false;
+  return (
+    hungerProgressRatioForAnimal(animal, animalType) <= LIVESTOCK_ALMOST_HUNGRY_SATIATION
+  );
+}
+
+/** Seconds until maturation (0 when growth window elapsed). */
+function growthRemainingSec(
+  animal: LivestockAnimalLifecycle,
+  animalType: AnimalType,
+  nowMs: number
 ): number {
-  if (animal.lifecycleState === 'hungry') return 0;
   const def = getLivestockDef(animalType);
-  const hungryAfter = Math.max(1, def.hungryAfterMs);
-  const fedMs = animal.hungerSinceFeedMs ?? 0;
-  return Math.max(0, (hungryAfter - fedMs) / 1000);
+  const start = animal.growthStartAt ?? nowMs;
+  const duration = Math.max(1, animal.growthDurationMs ?? def.growthMs);
+  return Math.max(0, (duration - (nowMs - start)) / 1000);
 }
 
 function buildLivestockTimerInfo(
   animal: LivestockAnimalLifecycle,
   animalType: AnimalType,
-  _nowMs: number
+  nowMs: number
 ): LivestockTimerInfo | null {
   const hungerProgress = hungerProgressRatioForAnimal(animal, animalType);
   const barProgress = hungerProgress;
-  const satiationText = formatGrowthTime(satiationRemainingSec(animal, animalType));
 
   if (isAnimalProductionReady(animal, animalType)) {
     return { kind: 'ready', hungerProgress, barProgress, growthTimeText: 'Ready' };
@@ -402,7 +417,7 @@ function buildLivestockTimerInfo(
       kind: 'hungry',
       hungerProgress: 0,
       barProgress: 0,
-      growthTimeText: satiationText,
+      growthTimeText: '',
     };
   }
   if (animal.lifecycleState === 'baby' || animal.lifecycleState === 'growing') {
@@ -410,7 +425,7 @@ function buildLivestockTimerInfo(
       kind: 'grow',
       hungerProgress,
       barProgress,
-      growthTimeText: satiationText,
+      growthTimeText: formatGrowthTime(growthRemainingSec(animal, animalType, nowMs)),
     };
   }
   if (animal.lifecycleState === 'producing') {
@@ -418,7 +433,7 @@ function buildLivestockTimerInfo(
       kind: 'produce',
       hungerProgress,
       barProgress,
-      growthTimeText: satiationText,
+      growthTimeText: '',
     };
   }
   return null;
@@ -530,8 +545,13 @@ export function canStockAnimal(pen: LivestockPenData): boolean {
   return speciesHasAnimalSprites(pen.animalType);
 }
 
-export function canFeedPen(pen: LivestockPenData): boolean {
-  return pen.state !== 'unstocked' && (pen.lifecycleState === 'hungry' || pen.lifecycleState === 'adult');
+export function canFeedPen(pen: LivestockPenData, nowMs: number = Date.now()): boolean {
+  if (pen.state === 'unstocked') return false;
+  const slots = penAnimalSlotCount(pen);
+  for (let i = 0; i < slots; i++) {
+    if (canFeedAnimalAtSlot(pen, i, nowMs)) return true;
+  }
+  return false;
 }
 
 export function canUpgradePen(pen: LivestockPenData): boolean {
@@ -557,22 +577,24 @@ function feedAnimalInstance(
 }
 
 export function feedPen(pen: LivestockPenData, nowMs: number): LivestockPenData | null {
-  if (!canFeedPen(pen)) return null;
-  if (isRuminantPen(pen)) {
-    const occupants = ensureRuminantOccupantLifecycle(
-      pen,
-      normalizeRuminantOccupants(pen),
-      nowMs
-    ).map((o) =>
-      o.lifecycleState === 'hungry' ? { ...o, ...feedAnimalInstance(o, nowMs) } : o
+  if (!canFeedPen(pen, nowMs)) return null;
+  const ticked = tickLivestockPen(pen, nowMs);
+  if (isRuminantPen(ticked)) {
+    const occupants = (ticked.ruminantOccupants ?? []).map((o) =>
+      isAnimalFeedable(o, o.animalType)
+        ? { ...o, ...feedAnimalInstance(o, nowMs) }
+        : o
     );
-    return syncPenAggregateFromAnimals({ ...pen, ruminantOccupants: occupants }, nowMs);
+    if (!occupants.some((o, i) => o !== ticked.ruminantOccupants?.[i])) return null;
+    return syncPenAggregateFromAnimals({ ...ticked, ruminantOccupants: occupants }, nowMs);
   }
-  const prepared = ensureDedicatedPenAnimals(pen, nowMs);
-  const animals = (prepared.penAnimals ?? []).map((a) =>
-    a.lifecycleState === 'hungry' ? { ...a, ...feedAnimalInstance(a, nowMs) } : a
+  const animals = (ticked.penAnimals ?? []).map((a) =>
+    isAnimalFeedable(a, ticked.animalType)
+      ? { ...a, ...feedAnimalInstance(a, nowMs) }
+      : a
   );
-  return syncPenAggregateFromAnimals({ ...prepared, penAnimals: animals }, nowMs);
+  if (!animals.some((a, i) => a !== ticked.penAnimals?.[i])) return null;
+  return syncPenAggregateFromAnimals({ ...ticked, penAnimals: animals }, nowMs);
 }
 
 export function collectFromPen(pen: LivestockPenData, nowMs: number): {
@@ -1117,7 +1139,7 @@ export function canFeedPenAnimalAt(
   return canFeedAnimalAtSlot(pen, slotIndex, nowMs);
 }
 
-/** Per-slot feed (hungry or adult); does not use pen aggregate lifecycle. */
+/** Per-slot feed when hungry or almost hungry (low satiation). */
 export function canFeedAnimalAtSlot(
   pen: LivestockPenData,
   slotIndex: number,
@@ -1125,8 +1147,7 @@ export function canFeedAnimalAtSlot(
 ): boolean {
   const entry = tickedAnimalAtSlot(pen, slotIndex, nowMs);
   if (!entry) return false;
-  const state = entry.animal.lifecycleState;
-  return state === 'hungry' || state === 'adult';
+  return isAnimalFeedable(entry.animal, entry.animalType);
 }
 
 /** True when the animal in this slot is hungry (ignores pen-level hungry flag). */
@@ -1162,32 +1183,23 @@ export function feedPenAnimalAt(
   nowMs: number
 ): LivestockPenData | null {
   if (!canFeedPenAnimalAt(pen, slotIndex, nowMs)) return null;
-  if (isRuminantPen(pen)) {
-    const occupants = ensureRuminantOccupantLifecycle(
-      pen,
-      normalizeRuminantOccupants(pen),
-      nowMs
-    );
+  const ticked = tickLivestockPen(pen, nowMs);
+  if (isRuminantPen(ticked)) {
+    const occupants = ticked.ruminantOccupants ?? [];
     const target = occupants[slotIndex];
-    if (!target) return null;
-    const ticked = tickAnimalInstance(target, target.animalType, nowMs);
-    if (ticked.lifecycleState !== 'hungry' && ticked.lifecycleState !== 'adult') return null;
+    if (!target || !isAnimalFeedable(target, target.animalType)) return null;
     const nextOccupants = occupants.map((o, i) =>
-      i === slotIndex && (o.lifecycleState === 'hungry' || o.lifecycleState === 'adult')
-        ? { ...o, ...feedAnimalInstance(o, nowMs) }
-        : o
+      i === slotIndex ? { ...o, ...feedAnimalInstance(o, nowMs) } : o
     );
-    return syncPenAggregateFromAnimals({ ...pen, ruminantOccupants: nextOccupants }, nowMs);
+    return syncPenAggregateFromAnimals({ ...ticked, ruminantOccupants: nextOccupants }, nowMs);
   }
-  const prepared = ensureDedicatedPenAnimals(pen, nowMs);
-  const animals = prepared.penAnimals ?? [];
-  if (!animals[slotIndex]) return null;
+  const animals = ticked.penAnimals ?? [];
+  const target = animals[slotIndex];
+  if (!target || !isAnimalFeedable(target, ticked.animalType)) return null;
   const nextAnimals = animals.map((a, i) =>
-    i === slotIndex && (a.lifecycleState === 'hungry' || a.lifecycleState === 'adult')
-      ? { ...a, ...feedAnimalInstance(a, nowMs) }
-      : a
+    i === slotIndex ? { ...a, ...feedAnimalInstance(a, nowMs) } : a
   );
-  return syncPenAggregateFromAnimals({ ...prepared, penAnimals: nextAnimals }, nowMs);
+  return syncPenAggregateFromAnimals({ ...ticked, penAnimals: nextAnimals }, nowMs);
 }
 
 export function removeSoldAnimalFromPenAt(

@@ -38,9 +38,31 @@ describe('livestockPenLayout (reference only)', () => {
 });
 
 describe('LivestockSystem — player-placed pens', () => {
-  function emptyFarm() {
+  function addWaterBorder(grid: GridSystem): void {
+    for (let x = 0; x < grid.size; x++) {
+      grid.setCell(x, 0, { type: 'water', walkable: false });
+      grid.setCell(x, grid.size - 1, { type: 'water', walkable: false });
+    }
+    for (let y = 1; y < grid.size - 1; y++) {
+      grid.setCell(0, y, { type: 'water', walkable: false });
+      grid.setCell(grid.size - 1, y, { type: 'water', walkable: false });
+    }
+  }
+
+  function seedVoidAsGrass(grid: GridSystem): void {
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
+  }
+
+  function emptyFarm(seedGrass = true) {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
+    if (seedGrass) seedVoidAsGrass(grid);
     const livestock = new LivestockSystem(grid);
     livestock.loadPens([]);
     return { grid, livestock };
@@ -69,7 +91,7 @@ describe('LivestockSystem — player-placed pens', () => {
   });
 
   it('findFirstValidPenPlacement returns null when no 3×3 grass fits', () => {
-    const { grid, livestock } = emptyFarm();
+    const { grid, livestock } = emptyFarm(false);
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
     for (let gy = 0; gy < grid.size; gy++) {
       for (let gx = 0; gx < grid.size; gx++) {
@@ -392,21 +414,35 @@ describe('LivestockSystem — player-placed pens', () => {
     expect(livestock.tryUpgrade(pen)?.level).toBe(2);
   });
 
-  it('default pig pen can upgrade after decor avoids 4×4 ring', () => {
+  it('default pig pen can upgrade when grass ring is clear', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const livestock = new LivestockSystem(grid);
     const pig = createDefaultFarmPens().find((p) => p.animalType === 'pig')!;
+    for (const { gx, gy } of penUpgradeExpansionCells(pig)) {
+      if (!grid.inBounds(gx, gy)) continue;
+      if (grid.getCell(gx, gy)?.type === 'soil' || grid.getCell(gx, gy)?.type === 'path') {
+        continue;
+      }
+      grid.setCell(gx, gy, { type: 'grass', walkable: true });
+    }
     livestock.loadPens([pig]);
     expect(livestock.canUpgradeAt(pig)).toBe(true);
     expect(livestock.tryUpgrade(pig)?.level).toBe(2);
   });
 
-  it('default ruminant pen can upgrade on placeholder map', () => {
+  it('default ruminant pen can upgrade when grass ring is clear', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const livestock = new LivestockSystem(grid);
     const ruminant = createDefaultFarmPens().find((p) => p.penKind === 'ruminant')!;
+    for (const { gx, gy } of penUpgradeExpansionCells(ruminant)) {
+      if (!grid.inBounds(gx, gy)) continue;
+      if (grid.getCell(gx, gy)?.type === 'soil' || grid.getCell(gx, gy)?.type === 'path') {
+        continue;
+      }
+      grid.setCell(gx, gy, { type: 'grass', walkable: true });
+    }
     livestock.loadPens([ruminant]);
     expect(livestock.canUpgradeAt(ruminant)).toBe(true);
     expect(livestock.tryUpgrade(ruminant)?.level).toBe(2);
@@ -460,6 +496,7 @@ describe('LivestockSystem — player-placed pens', () => {
 
   it('rejects level-1 placement where 4×4 upgrade ring hits water border', () => {
     const { grid, livestock } = emptyFarm();
+    addWaterBorder(grid);
     let footprintOnly: { gx: number; gy: number } | null = null;
     for (let gy = 0; gy < grid.size; gy++) {
       for (let gx = 0; gx < grid.size; gx++) {
@@ -498,6 +535,7 @@ describe('LivestockSystem — player-placed pens', () => {
 
   it('pen near water border stays upgrade-blocked with Vietnamese water message', () => {
     const { grid, livestock } = emptyFarm();
+    addWaterBorder(grid);
     let nearWater: { gx: number; gy: number } | null = null;
     for (let gy = 0; gy < grid.size; gy++) {
       for (let gx = 0; gx < grid.size; gx++) {

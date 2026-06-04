@@ -7,16 +7,19 @@ describe('ObjectEditSystem', () => {
   it('finds naturals and buildings on editable tiles', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
+    grid.setCell(1, 9, { type: 'grass', walkable: true });
+    grid.setObject(1, 9, 'tree_01');
     const build = new BuildSystem(grid);
     const edit = new ObjectEditSystem(grid, build);
 
     expect(edit.findEditableAt(1, 9)?.kind).toBe('natural');
     expect(edit.findEditableAt(99, 99)).toBeNull();
 
+    grid.setCell(2, 2, { type: 'grass', walkable: true });
     build.enterBuildMode(BUILD_ITEMS[0]);
-    const placed = build.place(8, 8);
-    expect(placed).not.toBeNull();
-    expect(edit.findEditableAt(8, 8)?.kind).toBe('building');
+    const placed = build.place(2, 2);
+    expect(placed).toBe(true);
+    expect(edit.findEditableAt(2, 2)?.kind).toBe('building');
   });
 
   it('does not treat locked soil objects as editable', () => {
@@ -39,24 +42,40 @@ describe('ObjectEditSystem', () => {
   it('removes naturals and buildings', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
+    grid.setCell(1, 9, { type: 'grass', walkable: true });
+    grid.setObject(1, 9, 'tree_01');
     const build = new BuildSystem(grid);
     const edit = new ObjectEditSystem(grid, build);
 
     expect(edit.removeAt(1, 9)).toBe(true);
     expect(grid.getCell(1, 9)?.object).toBeUndefined();
 
+    grid.setCell(2, 2, { type: 'grass', walkable: true });
     build.enterBuildMode(BUILD_ITEMS[0]);
-    build.place(6, 6);
-    expect(edit.removeAt(6, 6)).toBe(true);
-    expect(build.findBuildingAt(6, 6)).toBeNull();
+    build.place(2, 2);
+    expect(edit.removeAt(2, 2)).toBe(true);
+    expect(build.findBuildingAt(2, 2)).toBeNull();
   });
 
   it('moves building and natural to a new tile', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
     const build = new BuildSystem(grid);
     const edit = new ObjectEditSystem(grid, build);
 
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        grid.setCell(5 + dx, 15 + dy, { type: 'grass', walkable: true });
+      }
+    }
+    grid.setObject(5, 15, 'rock_01');
     const session = edit.beginMove(5, 15);
     expect(session?.payload.kind).toBe('natural');
     let destGx = -1;
@@ -80,14 +99,16 @@ describe('ObjectEditSystem', () => {
     expect(grid.getCell(destGx, destGy)?.object).toBe('rock_01');
     expect(grid.getCell(5, 15)?.object).toBeUndefined();
 
+    grid.setCell(3, 3, { type: 'grass', walkable: true });
     build.enterBuildMode(BUILD_ITEMS[0]);
-    build.place(9, 9);
-    edit.beginMove(9, 9);
+    build.place(3, 3);
+    edit.beginMove(3, 3);
     let houseDestGx = -1;
     let houseDestGy = -1;
     outer2: for (let gy = 0; gy < grid.size; gy++) {
       for (let gx = 0; gx < grid.size; gx++) {
-        if (gx === 9 && gy === 9) continue;
+        if (gx === 3 && gy === 3) continue;
+        if (grid.getCell(gx, gy)?.type !== 'grass') continue;
         if (edit.canPlaceAt(gx, gy)) {
           houseDestGx = gx;
           houseDestGy = gy;
@@ -100,12 +121,14 @@ describe('ObjectEditSystem', () => {
     edit.updateGhost(houseDestGx, houseDestGy);
     expect(edit.confirmMoveAt(houseDestGx, houseDestGy)).toBe(true);
     expect(build.findBuildingAt(houseDestGx, houseDestGy)?.type).toBe('house');
-    expect(build.findBuildingAt(9, 9)).toBeNull();
+    expect(build.findBuildingAt(3, 3)).toBeNull();
   });
 
   it('finishMoveDrag locks preview at current ghost cell', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
+    grid.setCell(1, 9, { type: 'grass', walkable: true });
+    grid.setObject(1, 9, 'tree_01');
     const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
     edit.beginMove(1, 9);
     edit.startMoveDrag();
@@ -120,6 +143,8 @@ describe('ObjectEditSystem', () => {
   it('cancelMove clears session without changing grid', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
+    grid.setCell(1, 9, { type: 'grass', walkable: true });
+    grid.setObject(1, 9, 'tree_01');
     const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
 
     const before = grid.getCell(1, 9)?.object;

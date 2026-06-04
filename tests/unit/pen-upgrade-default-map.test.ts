@@ -8,8 +8,8 @@ import {
 } from '../../src/systems/livestockLogic';
 import { penFootprintCells } from '../../src/config/livestockAssets';
 
-/** Default anchors on minimal map — duck/fish sit near map edge in the 4×4 ring. */
-const UPGRADEABLE_DEFAULT = new Set(['chicken', 'ruminant', 'cow', 'pig']);
+/** Default anchors — duck/fish upgrade via moat cells that become inner 4×4 tiles. */
+const UPGRADEABLE_DEFAULT = new Set(['chicken', 'ruminant', 'cow', 'duck', 'fish', 'pig']);
 
 function seedGrassForPen(grid: GridSystem, pen: LivestockPenData): void {
   for (const { gx, gy } of penFootprintCells(pen)) {

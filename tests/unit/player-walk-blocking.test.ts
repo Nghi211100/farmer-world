@@ -12,7 +12,11 @@ import {
 function wireFarmWalkBlocking(grid: GridSystem) {
   const build = new BuildSystem(grid);
   const livestock = new LivestockSystem(grid);
-  build.setPlacementBlocked((gx, gy) => livestock.getPenAt(gx, gy) != null);
+  build.setPlacementBlocked((gx, gy) =>
+    livestock.blocksBuildPlacement(gx, gy, {
+      bridge: build.selectedItem?.groundTile === 'bridge',
+    })
+  );
   livestock.setPlacementBlocked((gx, gy) =>
     build.getBuildings().some((b) => b.gridX === gx && b.gridY === gy)
   );

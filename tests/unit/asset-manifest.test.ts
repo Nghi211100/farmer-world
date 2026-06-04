@@ -49,4 +49,34 @@ describe('asset manifest bundling', () => {
     const entry = ASSET_MANIFEST.find((e) => e.key === UI_COMING_TEXTURE_KEY);
     expect(entry?.path).toBe('ui/coming.png');
   });
+
+  it('registers build decor path tiles for preload', () => {
+    const map = getAssetPathToUrlMap();
+    const expected = [
+      ['path', 'tiles/path.png'],
+      ['road_corner', 'tiles/road_corner.png'],
+      ['bridge_tile', 'tiles/bridge_tile.png'],
+      ['field_border', 'tiles/field_border.png'],
+    ] as const;
+    for (const [key, path] of expected) {
+      const entry = ASSET_MANIFEST.find((e) => e.key === key);
+      expect(entry?.path).toBe(path);
+      expect(map.get(path)).toBeTruthy();
+    }
+  });
+
+  it('registers water shore border tiles including bottom-right', () => {
+    const map = getAssetPathToUrlMap();
+    const expected = [
+      ['water', 'tiles/water.png'],
+      ['water_1_border_bottom-right', 'tiles/water_1_border_bottom-right.png'],
+      ['water_1_border_bottom-left', 'tiles/water_1_border_bottom-left.png'],
+      ['water_1_border_top-right', 'tiles/water_1_border_top-right.png'],
+    ] as const;
+    for (const [key, path] of expected) {
+      const entry = ASSET_MANIFEST.find((e) => e.key === key);
+      expect(entry?.path).toBe(path);
+      expect(map.get(path)).toBeTruthy();
+    }
+  });
 });

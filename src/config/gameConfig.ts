@@ -65,6 +65,14 @@ export type MapObjectType = 'tree' | 'rock' | 'bush' | 'house' | 'barn' | 'silo'
 /** Decorative grass on locked soil and outer-map grass tiles */
 export type GroundDecorVariant = 'grass' | 'grass_light' | 'flower_ground';
 
+/** Walkable path ground texture (`type: 'path'`). */
+export type PathGroundVariant =
+  | 'stone_path'
+  | 'path'
+  | 'road_corner'
+  | 'field_border'
+  | 'bridge_tile';
+
 /** Per complete group of eligible decor tiles: 3 / 2 / 5, shuffled within each group */
 export const GROUND_DECOR_MIX = {
   groupSize: 10,

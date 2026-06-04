@@ -7,6 +7,7 @@ import {
   INITIAL_UNLOCKED_FARM_TILES,
   soilMoistureTextureKey,
   type GroundDecorVariant,
+  type PathGroundVariant,
   type TileType,
 } from '../config/gameConfig';
 import {
@@ -29,7 +30,11 @@ import {
   type IsoFootprintScreenBounds,
   type IsoScreenRhombus,
 } from '../utils/iso';
-import { waterTextureKeyAt, type WaterNeighborProbe } from '../utils/waterAutotile';
+import {
+  waterPlacementPreviewProbe,
+  waterTextureKeyAt,
+  type WaterNeighborProbe,
+} from '../utils/waterAutotile';
 import {
   computePlayableFarmViewportLayout,
   FARM_MAP_TOP_INSET_FRAC,
@@ -51,6 +56,8 @@ export interface TileCell {
   soilWaterLevel?: number;
   /** Locked soil / outer grass: decorative ground variant (assigned on new game) */
   groundVariant?: GroundDecorVariant;
+  /** Path tiles: which path texture to draw (defaults to stone_path). */
+  pathVariant?: PathGroundVariant;
 }
 
 export interface GroundTextureOptions {
@@ -60,6 +67,8 @@ export interface GroundTextureOptions {
   dug?: boolean;
   /** Override cell {@link TileCell.soilWaterLevel} for texture pick (e.g. neglect-dry). */
   soilWaterLevel?: number;
+  /** Build ghost: pick shore sprite as if this cell were already water. */
+  waterPlacementPreview?: boolean;
 }
 
 export class GridSystem {
@@ -778,6 +787,66 @@ export class GridSystem {
     return cell?.type === 'soil';
   }
 
+  /** River / placed water tile (`type: 'water'`). Used for bridge placement. */
+  isRiverWaterCell(gx: number, gy: number): boolean {
+    if (!this.inBounds(gx, gy)) return false;
+    return this.getCell(gx, gy)?.type === 'water';
+  }
+
+  /**
+   * Bridge may span river water, a 1-tile-wide crossing (grass/path between opposite water),
+   * or decor path tiles along a river bank (adjacent to water).
+   */
+  canPlaceBridgeAt(gx: number, gy: number): boolean {
+    if (!this.inBounds(gx, gy)) return false;
+    const cell = this.getCell(gx, gy);
+    if (!cell) return false;
+
+    if (cell.type === 'water') return true;
+
+    if (cell.type === 'grass') {
+      return this.isNarrowRiverCrossingCell(gx, gy);
+    }
+
+    if (cell.type === 'path') {
+      const variant = cell.pathVariant ?? 'stone_path';
+      if (variant === 'bridge_tile' || variant === 'stone_path' || variant === 'field_border') {
+        return false;
+      }
+      return (
+        this.isNarrowRiverCrossingCell(gx, gy) || this.hasCardinalRiverWaterNeighbor(gx, gy)
+      );
+    }
+
+    return false;
+  }
+
+  private hasCardinalRiverWaterNeighbor(gx: number, gy: number): boolean {
+    return (
+      this.isRiverWaterCell(gx, gy - 1) ||
+      this.isRiverWaterCell(gx, gy + 1) ||
+      this.isRiverWaterCell(gx + 1, gy) ||
+      this.isRiverWaterCell(gx - 1, gy)
+    );
+  }
+
+  /** Water on two opposite cardinals — land strip or iso-picked shore in a 1-wide river. */
+  private isNarrowRiverCrossingCell(gx: number, gy: number): boolean {
+    const pairs: ReadonlyArray<[[number, number], [number, number]]> = [
+      [[0, -1], [0, 1]],
+      [[-1, 0], [1, 0]],
+    ];
+    for (const [da, db] of pairs) {
+      if (
+        this.isRiverWaterCell(gx + da[0], gy + da[1]) &&
+        this.isRiverWaterCell(gx + db[0], gy + db[1])
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** True when cell lies in the farm planting rectangle and is soil. */
   isFarmPlantingCell(gx: number, gy: number): boolean {
     if (
@@ -850,7 +919,12 @@ export class GridSystem {
         const cell = this.getCell(x, y);
         if (!cell || cell.type === 'water' || cell.object) continue;
         if (cell.type !== 'void' && cell.type !== 'grass') continue;
-        this.setCell(x, y, { type: 'path', walkable: true, groundVariant: undefined });
+        this.setCell(x, y, {
+          type: 'path',
+          walkable: true,
+          groundVariant: undefined,
+          pathVariant: 'stone_path',
+        });
       }
     }
   }
@@ -869,7 +943,7 @@ export class GridSystem {
     this.assignGroundDecorVariants(open, open.length);
   }
 
-  private isAdjacentToFarmSoil(gx: number, gy: number): boolean {
+  isAdjacentToFarmSoil(gx: number, gy: number): boolean {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         if (dx === 0 && dy === 0) continue;
@@ -1080,14 +1154,17 @@ export class GridSystem {
   getGroundTextureKey(gx: number, gy: number, options?: GroundTextureOptions): string {
     const cell = this.getCell(gx, gy);
     if (!cell) return 'grass';
-    if (cell.type === 'water') {
-      const probe: WaterNeighborProbe = (nx, ny) => {
+    if (cell.type === 'water' || options?.waterPlacementPreview) {
+      const baseProbe: WaterNeighborProbe = (nx, ny) => {
         if (!this.inBounds(nx, ny)) return false;
         return this.getCell(nx, ny)?.type === 'water';
       };
+      const probe = options?.waterPlacementPreview
+        ? waterPlacementPreviewProbe(gx, gy, baseProbe)
+        : baseProbe;
       return waterTextureKeyAt(gx, gy, probe);
     }
-    if (cell.type === 'path') return 'stone_path';
+    if (cell.type === 'path') return cell.pathVariant ?? 'stone_path';
     if (cell.type === 'soil') {
       if (!this.isFarmUnlocked(gx, gy)) {
         return cell.groundVariant ?? 'grass';

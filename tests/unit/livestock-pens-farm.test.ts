@@ -20,13 +20,13 @@ import {
   penUpgradeExpansionCells,
   stockPenWithAnimal,
 } from '../../src/systems/livestockLogic';
-import { penFootprintCells } from '../../src/config/livestockAssets';
+import { penFootprintCells, penMoatCells } from '../../src/config/livestockAssets';
 
 describe('livestockPenLayout (reference only)', () => {
   it('documents non-overlapping default anchors for dev maps', () => {
     const occupied = new Set<string>();
     for (const pen of createDefaultFarmPens()) {
-      for (const { gx, gy } of penFootprintCells(pen)) {
+      for (const { gx, gy } of [...penFootprintCells(pen), ...penMoatCells(pen)]) {
         const key = `${gx},${gy}`;
         expect(occupied.has(key)).toBe(false);
         occupied.add(key);

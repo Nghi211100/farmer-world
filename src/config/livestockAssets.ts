@@ -291,13 +291,95 @@ export function penHouseFootprintLayout(
   };
 }
 
-export function penOccupiesCell(
+/** Grid marker for duck/fish moat cells converted from grass (not river water). */
+export const PEN_MOAT_WATER_OBJECT = 'pen_moat_water';
+
+/** Duck/fish pens include a one-cell water moat around the fence footprint. */
+export function penHasWaterMoat(animalType: AnimalType): boolean {
+  return animalType === 'duck' || animalType === 'fish';
+}
+
+export function penHasWaterMoatForPen(pen: {
+  animalType: AnimalType;
+  penKind?: 'ruminant';
+}): boolean {
+  if (pen.penKind === 'ruminant') return false;
+  return penHasWaterMoat(pen.animalType);
+}
+
+/** One-cell ring outside the pen house footprint (duck/fish only). */
+export function penMoatCells(
+  pen: { gridX: number; gridY: number; level?: LivestockPenLevel; animalType: AnimalType; penKind?: 'ruminant' }
+): Array<{ gx: number; gy: number }> {
+  if (!penHasWaterMoatForPen(pen)) return [];
+  const { w, h } = penFootprintTiles(pen.level ?? 1);
+  const cells: Array<{ gx: number; gy: number }> = [];
+  for (let gy = pen.gridY - 1; gy <= pen.gridY + h; gy++) {
+    for (let gx = pen.gridX - 1; gx <= pen.gridX + w; gx++) {
+      if (gx >= pen.gridX && gx < pen.gridX + w && gy >= pen.gridY && gy < pen.gridY + h) {
+        continue;
+      }
+      cells.push({ gx, gy });
+    }
+  }
+  return cells;
+}
+
+export function penMoatOccupiesCell(
+  pen: Parameters<typeof penMoatCells>[0],
+  gx: number,
+  gy: number
+): boolean {
+  return penMoatCells(pen).some((c) => c.gx === gx && c.gy === gy);
+}
+
+/** Pen house fence footprint only (not the duck/fish water moat ring). */
+export function penFootprintOccupiesCell(
   pen: { gridX: number; gridY: number; level?: LivestockPenLevel },
   gx: number,
   gy: number
 ): boolean {
   const { w, h } = penFootprintTiles(pen.level ?? 1);
   return gx >= pen.gridX && gx < pen.gridX + w && gy >= pen.gridY && gy < pen.gridY + h;
+}
+
+/** Moat cell touches river/player water outside this pen's moat ring (bridge junction). */
+export function penMoatTouchesExternalWater(
+  grid: {
+    inBounds(gx: number, gy: number): boolean;
+    getCell(gx: number, gy: number): { type?: string } | null | undefined;
+  },
+  pen: Parameters<typeof penMoatCells>[0],
+  gx: number,
+  gy: number
+): boolean {
+  if (!penMoatOccupiesCell(pen, gx, gy)) return false;
+  const cardinals: ReadonlyArray<readonly [number, number]> = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (const [dx, dy] of cardinals) {
+    const nx = gx + dx;
+    const ny = gy + dy;
+    if (!grid.inBounds(nx, ny)) continue;
+    if (grid.getCell(nx, ny)?.type !== 'water') continue;
+    if (!penMoatOccupiesCell(pen, nx, ny)) return true;
+  }
+  return false;
+}
+
+export function penOccupiesCell(
+  pen: { gridX: number; gridY: number; level?: LivestockPenLevel; animalType?: AnimalType; penKind?: 'ruminant' },
+  gx: number,
+  gy: number
+): boolean {
+  if (penFootprintOccupiesCell(pen, gx, gy)) return true;
+  if (pen.animalType && penHasWaterMoatForPen(pen as { animalType: AnimalType; penKind?: 'ruminant' })) {
+    return penMoatOccupiesCell(pen as Parameters<typeof penMoatCells>[0], gx, gy);
+  }
+  return false;
 }
 
 export function penFootprintCells(

@@ -19,6 +19,8 @@ import {
 } from '../config/LivestockConfig';
 import {
   penFootprintCells,
+  penMoatCells,
+  penHasWaterMoatForPen,
   pickLivestockStage,
   pickLivestockVariantIndex,
   resolveLivestockAnimalTextureKey,
@@ -31,7 +33,7 @@ export function livestockPenKey(gx: number, gy: number): string {
   return `${gx},${gy}`;
 }
 
-export { penFootprintCells };
+export { penFootprintCells, penMoatCells, penHasWaterMoatForPen };
 
 export function isRuminantPen(pen: LivestockPenData): boolean {
   return pen.penKind === 'ruminant';

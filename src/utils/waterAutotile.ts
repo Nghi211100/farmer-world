@@ -173,6 +173,26 @@ export function waterTextureKeyAt(
   return waterTextureKeyFromMask(computeWaterEdgeMask(gx, gy, probe));
 }
 
+/** Probe that treats `(gx, gy)` as water (build ghost / placement preview). */
+export function waterPlacementPreviewProbe(
+  gx: number,
+  gy: number,
+  baseProbe: WaterNeighborProbe
+): WaterNeighborProbe {
+  return (nx, ny) => {
+    if (nx === gx && ny === gy) return true;
+    return baseProbe(nx, ny);
+  };
+}
+
+export function waterTextureKeyForPlacementPreview(
+  gx: number,
+  gy: number,
+  baseProbe: WaterNeighborProbe
+): string {
+  return waterTextureKeyAt(gx, gy, waterPlacementPreviewProbe(gx, gy, baseProbe));
+}
+
 /** Lightweight self-check for slant masks (run via test script). */
 export function runWaterAutotileSelfTest(): void {
   const water = new Set(['5,4', '5,6', '1,0', '0,0', '2,0', '0,1']);
@@ -204,6 +224,31 @@ export function runWaterAutotileSelfTest(): void {
   expectMask(computeWaterEdgeMask(9, 9, probe), 15, 'isolated cell');
   expectKey(waterTextureKeyFromMask(15), 'water_2_borders_bottom');
 
+  // Land to grid north only → screen bottom-right bank (mask 2)
+  const landNorthProbe2: WaterNeighborProbe = (x, y) => {
+    if (x === 5 && y === 5) return true;
+    if (x === 5 && y === 4) return false;
+    if (x === 5 && y === 6) return true;
+    if (x === 4 && y === 5) return true;
+    if (x === 6 && y === 5) return true;
+    return false;
+  };
+  expectMask(computeWaterEdgeMask(5, 5, landNorthProbe2), 2, 'land north → BR shore');
+  expectKey(waterTextureKeyFromMask(2), 'water_1_border_bottom-right');
+
+  const grassNorthBase: WaterNeighborProbe = (x, y) => {
+    if (x === 5 && y === 5) return false;
+    if (x === 5 && y === 4) return false;
+    if (x === 5 && y === 6) return true;
+    if (x === 4 && y === 5) return true;
+    if (x === 6 && y === 5) return true;
+    return false;
+  };
+  expectKey(
+    waterTextureKeyForPlacementPreview(5, 5, grassNorthBase),
+    'water_1_border_bottom-right'
+  );
+
   const topLeft = getWaterLeftCornerDisplayOffset(6);
   if (!topLeft || topLeft.dx <= 0 || topLeft.dy <= 0) {
     throw new Error('mask 6 nudge should shift bottom-right (positive dx, positive dy)');
@@ -214,8 +259,8 @@ export function runWaterAutotileSelfTest(): void {
   }
 
   const bottomTextureOffset = getWaterTextureDisplayOffset('water_2_borders_bottom');
-  if (!bottomTextureOffset || bottomTextureOffset.dx >= 0 || bottomTextureOffset.dy >= 0) {
-    throw new Error('bottom-border texture offset should move top-left');
+  if (!bottomTextureOffset || bottomTextureOffset.dx <= 0 || bottomTextureOffset.dy >= 0) {
+    throw new Error('bottom-border texture offset should nudge toward top-right (positive dx, negative dy)');
   }
 
 }

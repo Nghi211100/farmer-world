@@ -49,6 +49,9 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'farm_plot', path: 'tiles/farm_plot.png', placeholderColor: 0x7a5c1e, width: 64, height: 32 },
   { key: 'field_border', path: 'tiles/field_border.png', placeholderColor: 0x6b8e23, width: 64, height: 32 },
   { key: 'stone_path', path: 'tiles/stone_path.png', placeholderColor: 0x9e9e9e, width: 64, height: 32 },
+  { key: 'path', path: 'tiles/path.png', placeholderColor: 0x8d6e63, width: 64, height: 32 },
+  { key: 'road_corner', path: 'tiles/road_corner.png', placeholderColor: 0x757575, width: 64, height: 32 },
+  { key: 'bridge_tile', path: 'tiles/bridge_tile.png', placeholderColor: 0x795548, width: 64, height: 32 },
   { key: 'water', path: 'tiles/water.png', placeholderColor: 0x3498db, width: 64, height: 32 },
   {
     key: 'water_1_border_top',

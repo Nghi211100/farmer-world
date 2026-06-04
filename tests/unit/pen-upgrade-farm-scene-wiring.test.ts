@@ -13,7 +13,11 @@ import {
 function farmSceneLivestock(grid: GridSystem) {
   const build = new BuildSystem(grid);
   const livestock = new LivestockSystem(grid);
-  build.setPlacementBlocked((gx, gy) => livestock.getPenAt(gx, gy) != null);
+  build.setPlacementBlocked((gx, gy) =>
+    livestock.blocksBuildPlacement(gx, gy, {
+      bridge: build.selectedItem?.groundTile === 'bridge',
+    })
+  );
   livestock.setPlacementBlocked((gx, gy) =>
     build.getBuildings().some((b) => b.gridX === gx && b.gridY === gy)
   );
@@ -61,7 +65,7 @@ describe('pen upgrade — FarmScene placement wiring', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const { livestock } = farmSceneLivestock(grid);
-    const upgradeable = new Set(['chicken', 'ruminant', 'cow', 'pig']);
+    const upgradeable = new Set(['chicken', 'ruminant', 'cow', 'duck', 'fish', 'pig']);
     for (const pen of createDefaultFarmPens()) {
       const label = pen.penKind === 'ruminant' ? 'ruminant' : pen.animalType;
       if (upgradeable.has(label)) {

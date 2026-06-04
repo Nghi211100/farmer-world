@@ -10,7 +10,14 @@ import {
 } from '../config/LivestockConfig';
 import {
   penFootprintTiles,
+  penHasWaterMoat,
+  penHasWaterMoatForPen,
+  penFootprintOccupiesCell,
+  penMoatCells,
+  penMoatOccupiesCell,
+  penMoatTouchesExternalWater,
   penOccupiesCell,
+  PEN_MOAT_WATER_OBJECT,
   type LivestockPenLevel,
 } from '../config/livestockAssets';
 import type { GridSystem } from './GridSystem';
@@ -178,6 +185,25 @@ export class LivestockSystem {
     return this.pens.find((p) => penOccupiesCell(p, gx, gy));
   }
 
+  /** Pen house footprint only (excludes duck/fish moat ring) — for taps and edit popups. */
+  getPenAtFootprint(gx: number, gy: number): LivestockPenData | undefined {
+    return this.pens.find((p) => penFootprintOccupiesCell(p, gx, gy));
+  }
+
+  /**
+   * Livestock/build collision for decor placement. Footprint always blocks;
+   * moat blocks except bridge tiles on moat cells that connect to external river water.
+   */
+  blocksBuildPlacement(gx: number, gy: number, opts?: { bridge?: boolean }): boolean {
+    for (const p of this.pens) {
+      if (penFootprintOccupiesCell(p, gx, gy)) return true;
+      if (!penMoatOccupiesCell(p, gx, gy)) continue;
+      if (opts?.bridge && penMoatTouchesExternalWater(this.grid, p, gx, gy)) continue;
+      return true;
+    }
+    return false;
+  }
+
   getPenByType(animalType: AnimalType): LivestockPenData | undefined {
     return getPenForSpecies(this.pens, animalType);
   }
@@ -226,10 +252,13 @@ export class LivestockSystem {
       : undefined;
     const isIgnoredPenFootprint =
       ignoredPen !== undefined && penOccupiesCell(ignoredPen, gx, gy);
+    const isIgnoredPenMoat =
+      ignoredPen !== undefined && penMoatOccupiesCell(ignoredPen, gx, gy);
     const cell = this.grid.getCell(gx, gy);
     if (!cell) return false;
     if (isIgnoredPenFootprint) {
-      if (cell.type === 'water' || cell.type === 'soil') return false;
+      if (cell.type === 'soil') return false;
+      if (cell.type === 'water' && !isIgnoredPenMoat) return false;
       if (this.placementBlocked?.(gx, gy)) return false;
       return true;
     }
@@ -263,10 +292,39 @@ export class LivestockSystem {
   ): boolean {
     const footprint = penFootprintTiles(level);
     if (!this.canPlaceFootprint(gx, gy, footprint, ignorePenId)) return false;
+    const probePen = this.pens.find((p) => p.id === ignorePenId);
+    const moatSpecies =
+      this.selectedItem?.placeTarget !== 'ruminant'
+        ? this.selectedItem?.placeTarget
+        : probePen && !isRuminantPen(probePen)
+          ? probePen.animalType
+          : undefined;
+    if (moatSpecies && penHasWaterMoat(moatSpecies)) {
+      const moatProbe = {
+        animalType: moatSpecies,
+        gridX: gx,
+        gridY: gy,
+        level,
+      };
+      for (const { gx: mx, gy: my } of penMoatCells(moatProbe)) {
+        if (!this.canPlaceMoatCell(mx, my, ignorePenId)) return false;
+      }
+    }
     if (level === 1 && this.getUpgradeRingBlockAtAnchor(gx, gy, ignorePenId ?? '__placement_probe__')) {
       return false;
     }
     return true;
+  }
+
+  private canPlaceMoatCell(gx: number, gy: number, ignorePenId?: string): boolean {
+    if (!this.grid.inBounds(gx, gy)) return false;
+    if (this.penBlocksCell(gx, gy, ignorePenId)) return false;
+    const cell = this.grid.getCell(gx, gy);
+    if (!cell) return false;
+    if (this.placementBlocked?.(gx, gy)) return false;
+    if (cell.object) return false;
+    if (cell.type === 'void' || cell.type === 'soil' || cell.type === 'water') return false;
+    return cell.walkable;
   }
 
   canPlace(gx: number, gy: number): boolean {
@@ -325,6 +383,12 @@ export class LivestockSystem {
       return 'Vùng 4×4 bị chặn — có công trình trên ô mở rộng';
     }
     const objectId = cell.object;
+    if (objectId === PEN_MOAT_WATER_OBJECT) {
+      const ignoredPen = this.pens.find((p) => p.id === ignorePenId);
+      if (ignoredPen && penMoatOccupiesCell(ignoredPen, gx, gy)) {
+        return null;
+      }
+    }
     if (objectId) {
       const isPenMarker = objectId.startsWith('livestock_pen_');
       if (!isPenMarker || this.penBlocksCell(gx, gy, ignorePenId)) {
@@ -338,6 +402,10 @@ export class LivestockSystem {
       }
     }
     if (cell.type === 'water') {
+      const ignoredPen = this.pens.find((p) => p.id === ignorePenId);
+      if (ignoredPen && penMoatOccupiesCell(ignoredPen, gx, gy)) {
+        return null;
+      }
       return 'Không thể mở rộng ra vùng nước — đặt chuồng xa mép nước';
     }
     if (
@@ -492,9 +560,35 @@ export class LivestockSystem {
       for (const { gx, gy } of penFootprintCells({ ...pen, level })) {
         this.grid.setObject(gx, gy, marker);
       }
+      if (penHasWaterMoatForPen(pen)) {
+        for (const { gx, gy } of penMoatCells({ ...pen, level })) {
+          const cell = this.grid.getCell(gx, gy);
+          if (!cell) continue;
+          if (cell.type === 'water') continue;
+          if (cell.type !== 'grass' && cell.type !== 'void') continue;
+          this.grid.setCell(gx, gy, {
+            type: 'water',
+            walkable: false,
+            object: PEN_MOAT_WATER_OBJECT,
+            groundVariant: undefined,
+            pathVariant: undefined,
+          });
+        }
+      }
       return;
     }
     for (const level of [1, 2] as const) {
+      if (penHasWaterMoatForPen(pen)) {
+        for (const { gx, gy } of penMoatCells({ ...pen, level })) {
+          if (!this.grid.inBounds(gx, gy)) continue;
+          if (this.grid.getCell(gx, gy)?.object !== PEN_MOAT_WATER_OBJECT) continue;
+          this.grid.setCell(gx, gy, {
+            type: 'grass',
+            walkable: true,
+            object: undefined,
+          });
+        }
+      }
       for (const { gx, gy } of penFootprintCells({ ...pen, level })) {
         if (this.grid.getCell(gx, gy)?.object === marker) {
           this.grid.clearObject(gx, gy);
@@ -714,6 +808,7 @@ export class LivestockSystem {
     const out: Array<{ gx: number; gy: number }> = [];
     for (const p of this.pens) {
       out.push(...penFootprintCells(p));
+      out.push(...penMoatCells(p));
     }
     return out;
   }

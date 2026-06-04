@@ -1,5 +1,5 @@
 import { FARM_SOIL_BOUNDS } from '../config/gameConfig';
-import { penOccupiesCell } from '../config/livestockAssets';
+import { penFootprintOccupiesCell } from '../config/livestockAssets';
 import type { MoveSession } from '../systems/ObjectEditSystem';
 
 /** Hold duration before object follows the pointer (ms); near-immediate pickup. */
@@ -29,14 +29,14 @@ export function isGridOnMoveSessionOrigin(
   const { originGx, originGy, payload } = session;
   if (payload.kind === 'pen') {
     const level = payload.pen.level;
-    if (penOccupiesCell({ gridX: originGx, gridY: originGy, level }, gx, gy)) {
+    if (penFootprintOccupiesCell({ gridX: originGx, gridY: originGy, level }, gx, gy)) {
       return true;
     }
     if (
       previewGx !== undefined &&
       previewGy !== undefined &&
       (previewGx !== originGx || previewGy !== originGy) &&
-      penOccupiesCell({ gridX: previewGx, gridY: previewGy, level }, gx, gy)
+      penFootprintOccupiesCell({ gridX: previewGx, gridY: previewGy, level }, gx, gy)
     ) {
       return true;
     }

@@ -37,7 +37,7 @@ export class ObjectEditSystem {
   ) {}
 
   findEditableAt(gx: number, gy: number): EditableObject | null {
-    const pen = this.livestock?.getPenAt(gx, gy);
+    const pen = this.livestock?.getPenAtFootprint(gx, gy);
     if (pen) return { kind: 'pen', pen };
     const building = this.build.findBuildingAt(gx, gy);
     if (building) return { kind: 'building', building };

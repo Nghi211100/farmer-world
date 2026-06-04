@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { penFootprintCells, penMoatCells } from '../../src/config/livestockAssets';
+import { createNewPen } from '../../src/systems/livestockLogic';
 import {
-  pickLivestockPenAtWorldPoint,
+  pickLivestockPenAtGridCell,
   type LivestockPenHitCandidate,
 } from '../../src/utils/livestockPenHitTest';
 
@@ -9,68 +11,69 @@ function candidate(
 ): LivestockPenHitCandidate {
   return {
     id: partial.id,
-    gridX: partial.gridX ?? 0,
-    gridY: partial.gridY ?? 0,
+    gridX: partial.gridX ?? 8,
+    gridY: partial.gridY ?? 8,
+    level: partial.level ?? 1,
     depth: partial.depth ?? 0,
     visible: partial.visible ?? true,
     alpha: partial.alpha ?? 1,
-    bounds: partial.bounds ?? { x: 100, y: 100, width: 80, height: 60 },
-    footprintBounds: partial.footprintBounds,
   };
 }
 
-describe('pickLivestockPenAtWorldPoint', () => {
-  it('selects visible pen by world bounds', () => {
-    const hit = pickLivestockPenAtWorldPoint([candidate({ id: 'pen-a' })], 120, 120);
-    expect(hit?.id).toBe('pen-a');
+describe('pickLivestockPenAtGridCell', () => {
+  it('hits footprint cells only (level 1 = 3×3)', () => {
+    const pen = createNewPen('duck-pen', 'duck', 8, 8, 1);
+    const hits = candidate({ id: pen.id, gridX: 8, gridY: 8, level: 1 });
+    const inner = penFootprintCells(pen)[0]!;
+    expect(pickLivestockPenAtGridCell([hits], inner.gx, inner.gy)?.id).toBe(pen.id);
+    expect(pickLivestockPenAtGridCell([hits], 8, 8)?.id).toBe(pen.id);
   });
 
-  it('prefers higher depth when overlap', () => {
-    const hit = pickLivestockPenAtWorldPoint(
-      [candidate({ id: 'pen-back', depth: 10 }), candidate({ id: 'pen-front', depth: 20 })],
-      130,
-      130
+  it('does not hit moat ring cells', () => {
+    const pen = createNewPen('duck-pen', 'duck', 8, 8, 1);
+    const hits = candidate({ id: pen.id, gridX: 8, gridY: 8, level: 1 });
+    const moat = penMoatCells(pen)[0]!;
+    expect(pickLivestockPenAtGridCell([hits], moat.gx, moat.gy)).toBeUndefined();
+  });
+
+  it('does not hit adjacent grass outside footprint', () => {
+    const pen = createNewPen('sheep-pen', 'sheep', 8, 8, 1);
+    const hits = candidate({ id: pen.id, gridX: 8, gridY: 8, level: 1 });
+    expect(pickLivestockPenAtGridCell([hits], 7, 8)).toBeUndefined();
+    expect(pickLivestockPenAtGridCell([hits], 11, 8)).toBeUndefined();
+    expect(pickLivestockPenAtGridCell([hits], 8, 7)).toBeUndefined();
+    expect(pickLivestockPenAtGridCell([hits], 8, 11)).toBeUndefined();
+  });
+
+  it('level 2 pen uses 4×4 footprint (16 cells)', () => {
+    const pen = createNewPen('cow-pen', 'cow', 5, 5, 2);
+    const hits = candidate({ id: pen.id, gridX: 5, gridY: 5, level: 2 });
+    expect(penFootprintCells(pen)).toHaveLength(16);
+    expect(pickLivestockPenAtGridCell([hits], 8, 8)?.id).toBe(pen.id);
+    expect(pickLivestockPenAtGridCell([hits], 4, 5)).toBeUndefined();
+  });
+
+  it('prefers higher depth when footprints overlap', () => {
+    const hit = pickLivestockPenAtGridCell(
+      [
+        candidate({ id: 'pen-back', depth: 10, gridX: 8, gridY: 8 }),
+        candidate({ id: 'pen-front', depth: 20, gridX: 8, gridY: 8 }),
+      ],
+      8,
+      8
     );
     expect(hit?.id).toBe('pen-front');
   });
 
   it('ignores hidden and transparent pens', () => {
-    const hit = pickLivestockPenAtWorldPoint(
+    const hit = pickLivestockPenAtGridCell(
       [
         candidate({ id: 'hidden', visible: false }),
         candidate({ id: 'transparent', alpha: 0 }),
       ],
-      120,
-      120
+      8,
+      8
     );
     expect(hit).toBeUndefined();
-  });
-
-  it('uses footprint bounds so art outside grid does not steal clicks', () => {
-    const hit = pickLivestockPenAtWorldPoint(
-      [
-        candidate({
-          id: 'pen-wide-art',
-          bounds: { x: 50, y: 50, width: 200, height: 200 },
-          footprintBounds: { x: 100, y: 100, width: 40, height: 40 },
-        }),
-      ],
-      60,
-      60
-    );
-    expect(hit).toBeUndefined();
-
-    const inside = pickLivestockPenAtWorldPoint(
-      [
-        candidate({
-          id: 'pen-wide-art',
-          bounds: { x: 50, y: 50, width: 200, height: 200 },
-          footprintBounds: { x: 100, y: 100, width: 40, height: 40 },
-        }),
-      ],
-      120,
-      120
-    );
-    expect(inside?.id).toBe('pen-wide-art');
   });
 });

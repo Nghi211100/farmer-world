@@ -6,12 +6,16 @@ import {
   LIVESTOCK_HOUSE_KEYS,
   penFootprintCells,
   penFootprintTiles,
+  penHasWaterMoat,
+  penMoatCells,
   PEN_HOUSE_FOOTPRINT_FIT_PADDING,
   PEN_HOUSE_VISUAL_HEIGHT_SCALE,
   PEN_HOUSE_VISUAL_SCALE,
   penHouseDisplaySize,
   penHouseFootprintLayout,
   penHouseFootprintFitBox,
+  penFootprintOccupiesCell,
+  penMoatTouchesExternalWater,
   penOccupiesCell,
   pickLivestockVariantIndex,
   resolveLivestockAnimalTextureKey,
@@ -94,6 +98,21 @@ describe('livestockAssets', () => {
     expect(penFootprintCells(createNewPen('p', 'cow', 5, 6, 1))).toHaveLength(9);
     const upgraded = upgradePen(createNewPen('p', 'cow', 5, 6, 1))!;
     expect(penFootprintCells(upgraded)).toHaveLength(16);
+  });
+
+  it('duck/fish moat ring is one cell outside footprint', () => {
+    expect(penHasWaterMoat('duck')).toBe(true);
+    const duck = createNewPen('d', 'duck', 4, 4, 1);
+    expect(penMoatCells(duck)).toHaveLength(16);
+    expect(penOccupiesCell(duck, 3, 4)).toBe(true);
+    expect(penOccupiesCell(createNewPen('c', 'chicken', 4, 4, 1), 3, 4)).toBe(false);
+  });
+
+  it('penFootprintOccupiesCell excludes moat ring', () => {
+    const duck = createNewPen('d', 'duck', 4, 4, 1);
+    expect(penFootprintOccupiesCell(duck, 4, 4)).toBe(true);
+    expect(penFootprintOccupiesCell(duck, 3, 4)).toBe(false);
+    expect(penOccupiesCell(duck, 3, 4)).toBe(true);
   });
 
   it('penOccupiesCell covers full footprint', () => {

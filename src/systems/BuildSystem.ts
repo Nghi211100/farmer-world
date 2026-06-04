@@ -5,7 +5,9 @@ import {
   type BuildingData,
   type BuildingType,
   type GroundDecorVariant,
+  type PathGroundVariant,
 } from '../config/gameConfig';
+import { PEN_MOAT_WATER_OBJECT } from '../config/livestockAssets';
 import type { GridSystem } from './GridSystem';
 
 export type BuildItemType = BuildingType;
@@ -21,8 +23,11 @@ export interface BuildItemDef {
   category: BuildCategory;
   placement: BuildPlacementKind;
   /** Ground tile placement only. */
-  groundTile?: 'grass' | 'water' | 'path';
+  groundTile?: 'grass' | 'water' | 'path' | 'bridge';
   groundVariant?: GroundDecorVariant;
+  pathVariant?: PathGroundVariant;
+  /** Field border: must be adjacent to farm soil, not on soil. */
+  requireAdjacentFarmSoil?: boolean;
   /** When set, card is locked until player level reaches this value. */
   requiredLevel?: number;
 }
@@ -89,6 +94,52 @@ export const BUILD_ITEMS: BuildItemDef[] = [
     category: 'decor',
     placement: 'ground',
     groundTile: 'path',
+    pathVariant: 'stone_path',
+  },
+  {
+    type: 'tree',
+    textureKey: 'field_border',
+    label: 'Field border',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'path',
+    pathVariant: 'field_border',
+    requireAdjacentFarmSoil: true,
+  },
+  {
+    type: 'tree',
+    textureKey: 'path',
+    label: 'Path',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'path',
+    pathVariant: 'path',
+  },
+  {
+    type: 'tree',
+    textureKey: 'road_corner',
+    label: 'Road corner',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'path',
+    pathVariant: 'road_corner',
+  },
+  {
+    type: 'tree',
+    textureKey: 'bridge_tile',
+    label: 'Bridge',
+    cost: DECOR,
+    footprint: { w: 1, h: 1 },
+    category: 'decor',
+    placement: 'ground',
+    groundTile: 'bridge',
+    pathVariant: 'bridge_tile',
   },
   {
     type: 'tree',
@@ -249,16 +300,29 @@ export class BuildSystem {
 
   private canPlaceGroundTile(gx: number, gy: number, item: BuildItemDef): boolean {
     const cell = this.grid.getCell(gx, gy);
-    if (!cell || cell.object) return false;
+    if (!cell) return false;
+    if (
+      cell.object &&
+      !(item.groundTile === 'bridge' && cell.object === PEN_MOAT_WATER_OBJECT)
+    ) {
+      return false;
+    }
     if (cell.type === 'soil') return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    if (item.requireAdjacentFarmSoil) {
+      if (this.grid.isFarmSoilCell(gx, gy) || !this.grid.isAdjacentToFarmSoil(gx, gy)) {
+        return false;
+      }
+    }
+    if (item.groundTile === 'bridge') {
+      return this.grid.canPlaceBridgeAt(gx, gy);
+    }
     if (item.groundTile === 'path' && this.grid.isFarmSoilCell(gx, gy)) return false;
     if (item.groundTile === 'water' && cell.type === 'path') {
       return false;
     }
     if (cell.type === 'void' || cell.type === 'grass' || cell.type === 'water') return true;
-    if (cell.type === 'path' && item.groundTile !== 'path') return true;
-    if (cell.type === 'path' && item.groundTile === 'path') return true;
+    if (cell.type === 'path') return item.groundTile === 'path';
     return false;
   }
 
@@ -299,11 +363,12 @@ export class BuildSystem {
       });
       return;
     }
-    if (tile === 'path') {
+    if (tile === 'path' || tile === 'bridge') {
       this.grid.setCell(gx, gy, {
         type: 'path',
         walkable: true,
         groundVariant: undefined,
+        pathVariant: item.pathVariant ?? 'stone_path',
         object: undefined,
       });
       return;

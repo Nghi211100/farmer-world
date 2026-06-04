@@ -1,63 +1,60 @@
+import {
+  penFootprintOccupiesCell,
+  type LivestockPenLevel,
+} from '../config/livestockAssets';
+
 export interface LivestockPenHitCandidate {
   id: string;
   gridX: number;
   gridY: number;
+  level?: LivestockPenLevel;
   depth: number;
   visible: boolean;
   alpha: number;
-  /** Full pen-house sprite AABB (may extend past footprint). */
-  bounds: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  /** Grid footprint AABB; when set, only interior tiles are clickable. */
-  footprintBounds?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
 }
 
-function pickBounds(candidate: LivestockPenHitCandidate): LivestockPenHitCandidate['bounds'] {
-  return candidate.footprintBounds ?? candidate.bounds;
-}
-
-function containsPoint(
-  bounds: LivestockPenHitCandidate['bounds'],
-  worldX: number,
-  worldY: number
+function footprintHit(
+  candidate: LivestockPenHitCandidate,
+  gx: number,
+  gy: number
 ): boolean {
-  return (
-    worldX >= bounds.x &&
-    worldX <= bounds.x + bounds.width &&
-    worldY >= bounds.y &&
-    worldY <= bounds.y + bounds.height
+  return penFootprintOccupiesCell(
+    { gridX: candidate.gridX, gridY: candidate.gridY, level: candidate.level },
+    gx,
+    gy
   );
 }
 
 /**
- * Resolve pen target from world coordinates using rendered pen-house bounds.
+ * Resolve pen target from grid cell — only footprint tiles (3×3 or 4×4), not moat or sprite bounds.
  * Prefers top-most depth so overlapping pens remain deterministic.
+ */
+export function pickLivestockPenAtGridCell(
+  candidates: LivestockPenHitCandidate[],
+  gx: number,
+  gy: number
+): LivestockPenHitCandidate | undefined {
+  const hits = candidates.filter(
+    (candidate) =>
+      candidate.visible &&
+      candidate.alpha > 0 &&
+      footprintHit(candidate, gx, gy)
+  );
+  if (hits.length === 0) return undefined;
+  hits.sort((a, b) => b.depth - a.depth || b.gridY - a.gridY || b.gridX - a.gridX);
+  return hits[0];
+}
+
+/**
+ * @deprecated Use pickLivestockPenAtGridCell after world→grid conversion.
+ * Kept as alias for callers that still pass world coords with a grid resolver.
  */
 export function pickLivestockPenAtWorldPoint(
   candidates: LivestockPenHitCandidate[],
   worldX: number,
-  worldY: number
+  worldY: number,
+  worldToGrid: (worldX: number, worldY: number) => { x: number; y: number }
 ): LivestockPenHitCandidate | undefined {
-  const hits = candidates.filter((candidate) => {
-    const bounds = pickBounds(candidate);
-    return (
-      candidate.visible &&
-      candidate.alpha > 0 &&
-      bounds.width > 0 &&
-      bounds.height > 0 &&
-      containsPoint(bounds, worldX, worldY)
-    );
-  });
-  if (hits.length === 0) return undefined;
-  hits.sort((a, b) => b.depth - a.depth || b.gridY - a.gridY || b.gridX - a.gridX);
-  return hits[0];
+  const { x, y } = worldToGrid(worldX, worldY);
+  return pickLivestockPenAtGridCell(candidates, x, y);
 }

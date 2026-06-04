@@ -134,7 +134,7 @@ import {
   objectMovePickupScale,
 } from '../utils/objectMoveDrag';
 import { penIdAfterConfirmedMove } from '../utils/objectMoveReveal';
-import { pickLivestockPenAtWorldPoint } from '../utils/livestockPenHitTest';
+import { pickLivestockPenAtGridCell } from '../utils/livestockPenHitTest';
 import {
   clampScrollToFarmPlayable,
   clampScrollSoFootprintOverlapsViewport,
@@ -286,7 +286,11 @@ export class FarmScene extends Phaser.Scene {
     this.farming = new FarmingSystem(this.grid);
     this.buildSystem = new BuildSystem(this.grid);
     this.livestockSystem = new LivestockSystem(this.grid);
-    this.buildSystem.setPlacementBlocked((gx, gy) => this.livestockSystem.getPenAt(gx, gy) != null);
+    this.buildSystem.setPlacementBlocked((gx, gy) =>
+      this.livestockSystem.blocksBuildPlacement(gx, gy, {
+        bridge: this.buildSystem.selectedItem?.groundTile === 'bridge',
+      })
+    );
     this.livestockSystem.setPlacementBlocked((gx, gy) =>
       this.buildSystem.getBuildings().some((b) => b.gridX === gx && b.gridY === gy)
     );
@@ -865,6 +869,19 @@ export class FarmScene extends Phaser.Scene {
     const spr = this.tileSprites[idx];
     if (!spr) return;
     this.applyGroundTileAt(gx, gy, spr);
+  }
+
+  /** Refresh placed ground tile and neighbors (water shores, path corners, moisture). */
+  private refreshGroundTileNeighborhood(gx: number, gy: number): void {
+    this.refreshTileAt(gx, gy);
+    for (const [ax, ay] of [
+      [gx + 1, gy],
+      [gx - 1, gy],
+      [gx, gy + 1],
+      [gx, gy - 1],
+    ]) {
+      if (this.grid.inBounds(ax, ay)) this.refreshTileAt(ax, ay);
+    }
   }
 
   /** Refresh purchased tile and orthogonal neighbors (locked decor / moisture edges). */
@@ -1647,7 +1664,7 @@ export class FarmScene extends Phaser.Scene {
           return;
         }
       }
-      const penAtCell = this.livestockSystem.getPenAt(x, y);
+      const penAtCell = this.resolvePenFromPointer(pointer);
       const editableOnCell = this.objectEditSystem.findEditableAt(x, y);
       if (penAtCell) {
         this.dismissFarmPopups();
@@ -1657,12 +1674,6 @@ export class FarmScene extends Phaser.Scene {
       if (editableOnCell) {
         this.dismissFarmPopups();
         this.showObjectEditPopup(x, y);
-        return;
-      }
-      const penFromPointer = this.resolvePenFromPointer(pointer);
-      if (penFromPointer) {
-        this.dismissFarmPopups();
-        this.showObjectEditPopup(penFromPointer.gridX, penFromPointer.gridY, true);
         return;
       }
     }
@@ -1758,7 +1769,6 @@ export class FarmScene extends Phaser.Scene {
 
       if (
         this.objectEditSystem.active &&
-        this.objectEditSystem.moveDragging &&
         !this.objectEditSystem.previewLocked
       ) {
         const { x, y } = this.screenPointToGrid(pointer);
@@ -1910,7 +1920,7 @@ export class FarmScene extends Phaser.Scene {
     const placedGy = ghostY;
     const placed = this.buildSystem.place(placedGx, placedGy);
     if (placed) {
-      this.refreshTileAt(placedGx, placedGy);
+      this.refreshGroundTileNeighborhood(placedGx, placedGy);
       this.refreshMapDecorations();
       this.emitHud();
       this.scheduleSave();
@@ -2256,7 +2266,7 @@ export class FarmScene extends Phaser.Scene {
 
   private showObjectEditPopup(gx: number, gy: number, penOnly = false): void {
     this.objectEditAnimalSlot = undefined;
-    const pen = penOnly ? this.livestockSystem.getPenAt(gx, gy) : undefined;
+    const pen = penOnly ? this.livestockSystem.getPenAtFootprint(gx, gy) : undefined;
     const now = Date.now();
     const disabledActions: ObjectEditAction[] = [];
     const hiddenActions: ObjectEditAction[] = [];
@@ -2377,12 +2387,13 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
     this.setObjectOriginHidden(session.originGx, session.originGy, true);
+    this.objectEditSystem.startMoveDrag();
     this.updateGhostSprite();
     this.showObjectMovePlacementConfirm();
     const hint =
       session.payload.kind === 'pen'
-        ? 'Chạm chuồng để kéo · Lưu / Hủy'
-        : 'Chạm vật thể để kéo · Lưu / Hủy';
+        ? 'Giữ và kéo chuồng · Lưu / Hủy'
+        : 'Giữ và kéo vật thể · Lưu / Hủy';
     this.events.emit('mode-hint', { text: hint, prominent: false });
   }
 
@@ -2410,6 +2421,8 @@ export class FarmScene extends Phaser.Scene {
     }
     if (this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
       this.revealObjectAfterConfirmedMove(session, penId, ghostX, ghostY);
+      this.refreshGroundTileNeighborhood(session.originGx, session.originGy);
+      this.refreshGroundTileNeighborhood(ghostX, ghostY);
       this.buildPlacementConfirm.hide();
       this.ghostSprite?.setVisible(false);
       this.events.emit('mode-hint', { text: '', prominent: false });
@@ -2562,6 +2575,9 @@ export class FarmScene extends Phaser.Scene {
     const session = this.objectEditSystem.getSession();
     if (session) {
       this.setObjectOriginHidden(session.originGx, session.originGy, false);
+      if (session.payload.kind === 'pen') {
+        this.refreshGroundTileNeighborhood(session.originGx, session.originGy);
+      }
     }
     this.objectEditSystem.cancelMove();
     this.buildPlacementConfirm.hide();
@@ -3291,50 +3307,28 @@ export class FarmScene extends Phaser.Scene {
     return px === gx && py === gy;
   }
 
-  /** Pen pick uses grid footprint only (art may extend; clicks pass through to tiles behind). */
+  /** Pen pick: grid cell under pointer must be a footprint tile (not moat / sprite bleed). */
   private resolvePenFromPointer(pointer: Phaser.Input.Pointer): LivestockPenData | undefined {
-    const cam = this.cameras.main;
-    const world = cam.getWorldPoint(pointer.x, pointer.y);
+    const { x, y } = this.screenPointToGrid(pointer);
     const moveSession = this.objectEditSystem.getSession();
     const movingPenId =
       moveSession?.payload.kind === 'pen' ? moveSession.payload.pen.id : undefined;
     const candidates = [...this.livestockPenSprites.values()]
       .filter((spr) => spr.data.id !== movingPenId)
-      .map((spr) => {
-        const bounds = spr.getHouseBounds();
-        const { w, h } = penFootprintTiles(spr.data.level ?? 1);
-        const footprint = this.grid.getRectMapFootprintScreenBounds(
-          spr.data.gridX,
-          spr.data.gridY,
-          w,
-          h
-        );
-        return {
-          id: spr.data.id,
-          gridX: spr.data.gridX,
-          gridY: spr.data.gridY,
-          depth: spr.container.depth,
-          visible: spr.container.visible,
-          alpha: spr.container.alpha,
-          bounds: {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-          },
-          footprintBounds: {
-            x: footprint.minX,
-            y: footprint.minY,
-            width: footprint.width,
-            height: footprint.height,
-          },
-        };
-      });
-    const hit = pickLivestockPenAtWorldPoint(candidates, world.x, world.y);
+      .map((spr) => ({
+        id: spr.data.id,
+        gridX: spr.data.gridX,
+        gridY: spr.data.gridY,
+        level: spr.data.level,
+        depth: spr.container.depth,
+        visible: spr.container.visible,
+        alpha: spr.container.alpha,
+      }));
+    const hit = pickLivestockPenAtGridCell(candidates, x, y);
     if (!hit) return undefined;
     return (
       this.livestockSystem.getPens().find((p) => p.id === hit.id) ??
-      this.livestockSystem.getPenAt(hit.gridX, hit.gridY)
+      this.livestockSystem.getPenAtFootprint(x, y)
     );
   }
 
@@ -4117,11 +4111,26 @@ export class FarmScene extends Phaser.Scene {
       : null;
     const foot = penLayout ?? this.grid.gridToTileBottom(anchorGx, anchorGy);
     const buildItem = this.buildSystem.selectedItem;
-    const key = moveActive
+    const waterGroundPreview =
+      buildActive &&
+      buildItem?.placement === 'ground' &&
+      buildItem.groundTile === 'water';
+    const bridgeOnRiverWater =
+      buildActive &&
+      buildItem?.placement === 'ground' &&
+      buildItem.groundTile === 'bridge' &&
+      this.grid.canPlaceBridgeAt(ghostX, ghostY);
+    const waterStyleGroundGhost = waterGroundPreview || bridgeOnRiverWater;
+    let key = moveActive
       ? this.objectEditSystem.ghostTextureKey()
       : livestockActive
         ? (this.livestockSystem.selectedItem?.textureKey ?? 'chicken_house')
         : (buildItem?.textureKey ?? 'house_lv1');
+    if (waterGroundPreview) {
+      key = this.grid.getGroundTextureKey(anchorGx, anchorGy, {
+        waterPlacementPreview: true,
+      });
+    }
     const canPlace = moveActive
       ? this.objectEditSystem.canPlaceAt(ghostX, ghostY)
       : livestockActive
@@ -4145,10 +4154,34 @@ export class FarmScene extends Phaser.Scene {
     }
     this.ghostSprite.setTexture(key);
     if (isGroundBuild) {
-      const top = this.grid.gridToMapScreen(ghostX, ghostY);
+      let top = this.grid.gridToMapScreen(ghostX, ghostY);
+      if (waterGroundPreview) {
+        const probe: WaterNeighborProbe = (nx, ny) => {
+          if (!this.grid.inBounds(nx, ny)) return false;
+          if (nx === ghostX && ny === ghostY) return true;
+          return this.grid.getCell(nx, ny)?.type === 'water';
+        };
+        const nudge = getWaterCornerDisplayOffset(ghostX, ghostY, probe);
+        if (nudge) {
+          top = { x: top.x + nudge.dx, y: top.y + nudge.dy };
+        }
+        const textureNudge = getWaterTextureDisplayOffset(key);
+        if (textureNudge) {
+          top = { x: top.x + textureNudge.dx, y: top.y + textureNudge.dy };
+        }
+      }
       this.ghostSprite.setOrigin(0.5, 0);
       this.ghostSprite.setPosition(top.x, top.y);
-      applyIsoTileSprite(this.ghostSprite, GROUND_TILE_SEAM_SCALE);
+      if (waterGroundPreview && key === WATER_TOP_BORDER_TEXTURE_KEY) {
+        applyIsoTopBorderWaterSprite(this.ghostSprite);
+      } else if (waterGroundPreview && key === WATER_BOTTOM_BORDER_TEXTURE_KEY) {
+        applyIsoBottomBorderWaterSprite(this.ghostSprite);
+      } else {
+        const ghostScale = waterStyleGroundGhost
+          ? getWaterGroundDisplayScale()
+          : GROUND_TILE_SEAM_SCALE;
+        applyIsoTileSprite(this.ghostSprite, ghostScale);
+      }
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 50);
     } else if (isNatural) {
       const tree = key.startsWith('tree');

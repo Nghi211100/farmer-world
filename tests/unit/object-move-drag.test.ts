@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { LivestockPenData } from '../../src/config/LivestockConfig';
+import { penMoatCells } from '../../src/config/livestockAssets';
 import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { BuildSystem } from '../../src/systems/BuildSystem';
 import { GridSystem } from '../../src/systems/GridSystem';
+import { LivestockSystem, LIVESTOCK_PEN_PLACE_ITEMS } from '../../src/systems/LivestockSystem';
 import { ObjectEditSystem } from '../../src/systems/ObjectEditSystem';
 import {
   isCellInFarmSoilBounds,
@@ -49,6 +51,25 @@ describe('objectMoveDrag', () => {
     expect(isGridOnMoveSessionOrigin(session, 7, 12)).toBe(false);
   });
 
+  it('duck pen long-press drag uses footprint only, not moat ring', () => {
+    const pen: LivestockPenData = {
+      id: 'pen-duck-1',
+      animalType: 'duck',
+      gridX: 8,
+      gridY: 8,
+      state: 'idle',
+      level: 1,
+    };
+    const session = {
+      originGx: 8,
+      originGy: 8,
+      payload: { kind: 'pen' as const, pen },
+    };
+    const moat = penMoatCells(pen)[0]!;
+    expect(isGridOnMoveSessionOrigin(session, moat.gx, moat.gy)).toBe(false);
+    expect(isGridOnMoveSessionOrigin(session, 8, 8)).toBe(true);
+  });
+
   it('matches ghost preview footprint after drag without save', () => {
     const pen: LivestockPenData = {
       id: 'pen-sheep-1',
@@ -70,6 +91,33 @@ describe('objectMoveDrag', () => {
 });
 
 describe('ObjectEditSystem move placement', () => {
+  it('finds pen on footprint but not on moat ring', () => {
+    const grid = new GridSystem();
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
+    for (let dy = -1; dy <= 3; dy++) {
+      for (let dx = -1; dx <= 3; dx++) {
+        grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });
+      }
+    }
+    const livestock = new LivestockSystem(grid);
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid), livestock);
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'duck')!;
+    livestock.enterPlaceMode(item);
+    const placed = livestock.place(8, 8);
+    livestock.exitPlaceMode();
+    expect(placed).not.toBeNull();
+    const moat = penMoatCells(placed!)[0]!;
+    expect(edit.findEditableAt(8, 8)?.kind).toBe('pen');
+    expect(edit.findEditableAt(moat.gx, moat.gy)).toBeNull();
+    expect(livestock.getPenAtFootprint(moat.gx, moat.gy)).toBeUndefined();
+    expect(livestock.getPenAt(moat.gx, moat.gy)?.id).toBe(placed!.id);
+  });
   it('rejects moving naturals onto farm soil', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();

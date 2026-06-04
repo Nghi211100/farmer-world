@@ -22,6 +22,14 @@ const config: CapacitorConfig = {
   android: {
     versionCode: 2,
     versionName: '1.0.1',
+    backgroundColor: '#1b2e16',
+  },
+  plugins: {
+    StatusBar: {
+      overlaysWebView: true,
+      style: 'DARK',
+      backgroundColor: '#00000000',
+    },
   },
   server: liveUrl
     ? {

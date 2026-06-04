@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import {
+  computeCanvasCssSize,
   getDisplayPixelRatio,
   getLogicalViewportSize,
   getScaleZoomForPixelRatio,
@@ -52,12 +53,16 @@ gameInstance = new Phaser.Game(config);
 installGameTestApi(gameInstance);
 
 /** Phaser NONE+resize skips canvas CSS when zoom=1 (DPR=1 tablets); keep CSS at logical size. */
-const syncCanvasDisplaySize = (logicalW: number, logicalH: number, zoom: number): void => {
+const syncCanvasDisplaySize = (logicalW: number, logicalH: number, pixelRatio: number): void => {
   const canvas = gameInstance.canvas;
-  const cssW = Math.max(1, Math.floor(logicalW * zoom));
-  const cssH = Math.max(1, Math.floor(logicalH * zoom));
+  const { width: cssW, height: cssH } = computeCanvasCssSize(
+    logicalW,
+    logicalH,
+    pixelRatio
+  );
   canvas.style.width = `${cssW}px`;
   canvas.style.height = `${cssH}px`;
+  canvas.style.margin = '0';
 };
 
 const syncViewport = (): void => {
@@ -69,7 +74,7 @@ const syncViewport = (): void => {
   const scale = gameInstance.scale;
   scale.setZoom(zoom);
   scale.resize(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
-  syncCanvasDisplaySize(width, height, zoom);
+  syncCanvasDisplaySize(width, height, pixelRatio);
 };
 
 gameInstance.events.once(Phaser.Core.Events.READY, syncViewport);

@@ -16,9 +16,16 @@
         padding: 0;
         box-sizing: border-box;
       }
-      html,
-      body,
-      #game-container {
+      html {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        background: #1b2e16;
+      }
+      body {
+        position: fixed;
+        inset: 0;
         width: 100%;
         height: 100%;
         overflow: hidden;
@@ -27,16 +34,21 @@
       }
       #game-container {
         position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
       }
       #game-container canvas {
         display: block;
-        margin: 0 auto;
+        position: absolute;
+        top: 0;
+        left: 0;
         /* Pixel-art: avoid browser smoothing when canvas CSS size ≠ backing store */
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }
-      /* Supplement for mobile browsers; native APK uses manifest + MainActivity. */
-      @media (orientation: portrait) {
+      /* Mobile browser dev only; APK is landscape-locked (manifest + Screen Orientation). */
+      @media (orientation: portrait) and (display-mode: browser) {
         html {
           transform: rotate(90deg);
           transform-origin: left top;

@@ -30,6 +30,24 @@ export function getScaleZoomForPixelRatio(pixelRatio: number): number {
   return pixelRatio > 0 ? 1 / pixelRatio : 1;
 }
 
+/**
+ * Canvas element CSS size (logical px) for Phaser Scale.NONE + zoom = 1/DPR.
+ * Must be `logicalW × logicalH`, not `logical × zoom` (that shrinks the canvas on hi-DPI phones).
+ */
+export function computeCanvasCssSize(
+  logicalW: number,
+  logicalH: number,
+  pixelRatio: number
+): { width: number; height: number } {
+  const zoom = getScaleZoomForPixelRatio(pixelRatio);
+  const backingW = Math.round(logicalW * pixelRatio);
+  const backingH = Math.round(logicalH * pixelRatio);
+  return {
+    width: Math.max(1, Math.floor(backingW * zoom)),
+    height: Math.max(1, Math.floor(backingH * zoom)),
+  };
+}
+
 /** CSS layout viewport — prefer #game-container so canvas matches the visible play area. */
 export function getLogicalViewportSize(): { width: number; height: number } {
   if (typeof document !== 'undefined') {

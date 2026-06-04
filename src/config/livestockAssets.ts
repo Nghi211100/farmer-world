@@ -1,7 +1,7 @@
-import { TILE_HEIGHT, TILE_WIDTH } from '../utils/iso';
-import type { AnimalType } from './LivestockConfig';
+import { DISPLAY_SIZE, TILE_HEIGHT, TILE_WIDTH } from '../utils/iso';
+import type { AnimalLifecycleState, AnimalType } from './LivestockConfig';
 
-/** Life stage art folders use `ault` for adult in filenames. */
+/** Some keys keep legacy `ault` naming for save compatibility. */
 export type LivestockStage = 'child' | 'young' | 'adult';
 
 export type LivestockTextureEntry = {
@@ -15,43 +15,43 @@ export type LivestockTextureEntry = {
 
 const ANIMALS_DIR = 'animals';
 
-/** Raw files under `src/assets/animals` (see docs/LIVESTOCK_PLAN.md). `ault` in filenames = adult stage. */
+/** Raw files under `src/assets/animals` (see docs/LIVESTOCK_PLAN.md). */
 export const LIVESTOCK_TEXTURE_ENTRIES: LivestockTextureEntry[] = [
   { key: 'chicken_child', path: `${ANIMALS_DIR}/chicken_child.png`, species: 'chicken', stage: 'child', variant: 0 },
-  { key: 'chicken_ault', path: `${ANIMALS_DIR}/chicken_ault.png`, species: 'chicken', stage: 'adult', variant: 0 },
-  { key: 'chicken_ault_1', path: `${ANIMALS_DIR}/chicken_ault_1.png`, species: 'chicken', stage: 'adult', variant: 1 },
-  { key: 'chicken_ault_2', path: `${ANIMALS_DIR}/chicken_ault_2.png`, species: 'chicken', stage: 'adult', variant: 2 },
-  { key: 'chicken_ault_3', path: `${ANIMALS_DIR}/chicken_ault_3.png`, species: 'chicken', stage: 'adult', variant: 3 },
+  { key: 'chicken_ault', path: `${ANIMALS_DIR}/chicken_adult.png`, species: 'chicken', stage: 'adult', variant: 0 },
+  { key: 'chicken_ault_1', path: `${ANIMALS_DIR}/chicken_adult_1.png`, species: 'chicken', stage: 'adult', variant: 1 },
+  { key: 'chicken_ault_2', path: `${ANIMALS_DIR}/chicken_adult_2.png`, species: 'chicken', stage: 'adult', variant: 2 },
+  { key: 'chicken_ault_3', path: `${ANIMALS_DIR}/chicken_adult_3.png`, species: 'chicken', stage: 'adult', variant: 3 },
 
   { key: 'cow_child', path: `${ANIMALS_DIR}/cow_child.png`, species: 'cow', stage: 'child', variant: 0 },
-  { key: 'cow_ault', path: `${ANIMALS_DIR}/cow_ault.png`, species: 'cow', stage: 'adult', variant: 0 },
-  { key: 'cow_ault_2', path: `${ANIMALS_DIR}/cow_ault_2.png`, species: 'cow', stage: 'adult', variant: 2 },
+  { key: 'cow_ault', path: `${ANIMALS_DIR}/cow_adult.png`, species: 'cow', stage: 'adult', variant: 0 },
+  { key: 'cow_ault_2', path: `${ANIMALS_DIR}/cow_adult_2.png`, species: 'cow', stage: 'adult', variant: 2 },
 
   { key: 'duck_child', path: `${ANIMALS_DIR}/duck_child.png`, species: 'duck', stage: 'child', variant: 0 },
-  { key: 'duck_ault_1', path: `${ANIMALS_DIR}/duck_ault_1.png`, species: 'duck', stage: 'adult', variant: 1 },
-  { key: 'duck_ault_2', path: `${ANIMALS_DIR}/duck_ault_2.png`, species: 'duck', stage: 'adult', variant: 2 },
-  { key: 'duck_ault_3', path: `${ANIMALS_DIR}/duck_ault_3.png`, species: 'duck', stage: 'adult', variant: 3 },
+  { key: 'duck_ault_1', path: `${ANIMALS_DIR}/duck_adult_1.png`, species: 'duck', stage: 'adult', variant: 1 },
+  { key: 'duck_ault_2', path: `${ANIMALS_DIR}/duck_adult_2.png`, species: 'duck', stage: 'adult', variant: 2 },
+  { key: 'duck_ault_3', path: `${ANIMALS_DIR}/duck_adult_3.png`, species: 'duck', stage: 'adult', variant: 3 },
 
+  { key: 'pig_child', path: `${ANIMALS_DIR}/pig_child.png`, species: 'pig', stage: 'child', variant: 0 },
   { key: 'pig_child_1', path: `${ANIMALS_DIR}/pig_child_1.png`, species: 'pig', stage: 'child', variant: 1 },
-  { key: 'pig_child_2', path: `${ANIMALS_DIR}/pig_child_2.png`, species: 'pig', stage: 'child', variant: 2 },
-  { key: 'pig_young', path: `${ANIMALS_DIR}/pig_young.png`, species: 'pig', stage: 'young', variant: 0 },
-  { key: 'pig_ault', path: `${ANIMALS_DIR}/pick_ault.png`, species: 'pig', stage: 'adult', variant: 0 },
+  { key: 'pig_adult', path: `${ANIMALS_DIR}/pig_adult.png`, species: 'pig', stage: 'adult', variant: 0 },
+  { key: 'pig_adult_1', path: `${ANIMALS_DIR}/pig_adult_1.png`, species: 'pig', stage: 'adult', variant: 1 },
 
   { key: 'fish_child', path: `${ANIMALS_DIR}/fish_child.png`, species: 'fish', stage: 'child', variant: 0 },
-  { key: 'fish_1', path: `${ANIMALS_DIR}/fish_1.png`, species: 'fish', stage: 'adult', variant: 1 },
-  { key: 'fish_2', path: `${ANIMALS_DIR}/fish_2.png`, species: 'fish', stage: 'adult', variant: 2 },
-  { key: 'fish_3', path: `${ANIMALS_DIR}/fish_3.png`, species: 'fish', stage: 'adult', variant: 3 },
-  { key: 'fish_4', path: `${ANIMALS_DIR}/fish_4.png`, species: 'fish', stage: 'adult', variant: 4 },
+  { key: 'fish_1', path: `${ANIMALS_DIR}/fish_adult.png`, species: 'fish', stage: 'adult', variant: 1 },
+  { key: 'fish_2', path: `${ANIMALS_DIR}/fish_adult_1.png`, species: 'fish', stage: 'adult', variant: 2 },
+  { key: 'fish_3', path: `${ANIMALS_DIR}/fish_adult_2.png`, species: 'fish', stage: 'adult', variant: 3 },
+  { key: 'fish_4', path: `${ANIMALS_DIR}/fish_adult_3.png`, species: 'fish', stage: 'adult', variant: 4 },
 
   { key: 'sheep_child', path: `${ANIMALS_DIR}/sheep_child.png`, species: 'sheep', stage: 'child', variant: 0 },
-  { key: 'sheep_ault', path: `${ANIMALS_DIR}/sheep_ault.png`, species: 'sheep', stage: 'adult', variant: 0 },
-  { key: 'sheep_ault_1', path: `${ANIMALS_DIR}/sheep_ault_1.png`, species: 'sheep', stage: 'adult', variant: 1 },
-  { key: 'sheep_ault_2', path: `${ANIMALS_DIR}/sheep_ault_2.png`, species: 'sheep', stage: 'adult', variant: 2 },
+  { key: 'sheep_ault', path: `${ANIMALS_DIR}/sheep_adult.png`, species: 'sheep', stage: 'adult', variant: 0 },
+  { key: 'sheep_ault_1', path: `${ANIMALS_DIR}/sheep_adult_1.png`, species: 'sheep', stage: 'adult', variant: 1 },
+  { key: 'sheep_ault_2', path: `${ANIMALS_DIR}/sheep_adult_2.png`, species: 'sheep', stage: 'adult', variant: 2 },
 
   { key: 'goat_child', path: `${ANIMALS_DIR}/goat_child.png`, species: 'goat', stage: 'child', variant: 0 },
-  { key: 'goat_ault', path: `${ANIMALS_DIR}/goat_ault.png`, species: 'goat', stage: 'adult', variant: 0 },
-  { key: 'goat_ault_1', path: `${ANIMALS_DIR}/goat_ault_1.png`, species: 'goat', stage: 'adult', variant: 1 },
-  { key: 'goat_ault_2', path: `${ANIMALS_DIR}/goat_ault_2.png`, species: 'goat', stage: 'adult', variant: 2 },
+  { key: 'goat_ault', path: `${ANIMALS_DIR}/goat_adult.png`, species: 'goat', stage: 'adult', variant: 0 },
+  { key: 'goat_ault_1', path: `${ANIMALS_DIR}/goat_adult_1.png`, species: 'goat', stage: 'adult', variant: 1 },
+  { key: 'goat_ault_2', path: `${ANIMALS_DIR}/goat_adult_2.png`, species: 'goat', stage: 'adult', variant: 2 },
 ];
 
 /** Species pen/house sprites (`src/assets/animals/*_house.png`). */
@@ -82,6 +82,39 @@ export function getLivestockHouseTextureKey(species: AnimalType): string {
 
 /** Multiplier on iso footprint AABB (1 = full magenta debug span). */
 export const PEN_HOUSE_FOOTPRINT_FIT_PADDING = 1;
+/** Visual-only up-scale for pen house art (does not change placement footprint). */
+export const PEN_HOUSE_VISUAL_SCALE = 1.1;
+/** Visual-only Y scale for pen house art (allows aspect tuning without footprint changes). */
+export const PEN_HOUSE_VISUAL_HEIGHT_SCALE = 1.0;
+/** Species-specific visual X-scale overrides for pen/house art. */
+export const PEN_HOUSE_VISUAL_SCALE_BY_SPECIES: Partial<Record<AnimalType, number>> = {
+  chicken: 1.0,
+  duck: 1.0,
+  fish: 1.0,
+  pig: 1.0,
+  cow: 1.0,
+  sheep: 1.0,
+  goat: 1.0,
+};
+/** Species-specific visual Y-scale overrides for pen/house art. */
+export const PEN_HOUSE_VISUAL_HEIGHT_SCALE_BY_SPECIES: Partial<Record<AnimalType, number>> = {
+  chicken: 1.25,
+  duck: 1.05,
+  fish: 0.95,
+  pig: 1.1,
+  cow: 1.1,
+  sheep: 1.1,
+  goat: 1.1,
+};
+/** Visual-only vertical offset fraction relative to pen footprint display height (negative = up). */
+export const PEN_HOUSE_Y_OFFSET_FRAC = -0.03;
+
+const HOUSE_TEXTURE_TO_SPECIES: Partial<Record<string, AnimalType>> = Object.fromEntries(
+  (Object.entries(LIVESTOCK_HOUSE_KEYS) as Array<[AnimalType, string]>).map(([species, texture]) => [
+    texture,
+    species,
+  ])
+) as Partial<Record<string, AnimalType>>;
 
 /**
  * Fit box for pen house art — iso AABB of N×N diamonds × {@link PEN_HOUSE_FOOTPRINT_FIT_PADDING}.
@@ -91,23 +124,48 @@ export function penHouseDisplaySize(
   level: LivestockPenLevel,
   tileW: number = TILE_WIDTH,
   tileH: number = TILE_HEIGHT,
-  fitPadding: number = PEN_HOUSE_FOOTPRINT_FIT_PADDING
+  fitPadding: number = PEN_HOUSE_FOOTPRINT_FIT_PADDING,
+  visualScaleX: number = PEN_HOUSE_VISUAL_SCALE,
+  visualScaleY: number = PEN_HOUSE_VISUAL_HEIGHT_SCALE,
+  species?: AnimalType
 ): { width: number; height: number } {
   const tiles = LIVESTOCK_PEN_LEVELS[level].size;
+  const speciesVisualScaleX = species
+    ? PEN_HOUSE_VISUAL_SCALE_BY_SPECIES[species] ?? visualScaleX
+    : visualScaleX;
+  const speciesVisualScaleY = species
+    ? PEN_HOUSE_VISUAL_HEIGHT_SCALE_BY_SPECIES[species] ?? visualScaleY
+    : visualScaleY;
+  const scaledX = fitPadding * speciesVisualScaleX;
+  const scaledY = fitPadding * speciesVisualScaleY;
   return {
-    width: tiles * tileW * fitPadding,
-    height: tiles * tileH * fitPadding,
+    width: tiles * tileW * scaledX,
+    height: tiles * tileH * scaledY,
   };
+}
+
+export function penHouseYOffsetPx(
+  level: LivestockPenLevel,
+  tileW: number = TILE_WIDTH,
+  tileH: number = TILE_HEIGHT,
+  species?: AnimalType
+): number {
+  const display = penHouseDisplaySize(level, tileW, tileH, PEN_HOUSE_FOOTPRINT_FIT_PADDING, PEN_HOUSE_VISUAL_SCALE, PEN_HOUSE_VISUAL_HEIGHT_SCALE, species);
+  return display.height * PEN_HOUSE_Y_OFFSET_FRAC;
 }
 
 /** @deprecated Use {@link penHouseDisplaySize}; species no longer changes fit box. */
 export function penHouseFootprintFitBox(
   level: LivestockPenLevel,
-  _species?: AnimalType,
+  species?: AnimalType,
   tileW: number = TILE_WIDTH,
   tileH: number = TILE_HEIGHT
 ): { width: number; height: number } {
-  return penHouseDisplaySize(level, tileW, tileH);
+  return penHouseDisplaySize(level, tileW, tileH, PEN_HOUSE_FOOTPRINT_FIT_PADDING, PEN_HOUSE_VISUAL_SCALE, PEN_HOUSE_VISUAL_HEIGHT_SCALE, species);
+}
+
+export function getAnimalTypeForHouseTextureKey(textureKey: string): AnimalType | undefined {
+  return HOUSE_TEXTURE_TO_SPECIES[textureKey];
 }
 
 export function speciesHasAnimalSprites(species: AnimalType): boolean {
@@ -171,7 +229,23 @@ export function resolveLivestockAnimalTextureKey(
   const exact = entries.find((e) => e.variant === variant);
   if (exact) return exact.key;
   if (entries.length > 0) return entries[0]!.key;
-  return `animal_${species}_${stage}`;
+  const availableStages = getLivestockStagesForSpecies(species);
+  for (const fallbackStage of availableStages) {
+    const fallbackEntries = getLivestockTexturesFor(species, fallbackStage);
+    if (fallbackEntries.length > 0) return fallbackEntries[0]!.key;
+  }
+  return getLivestockHouseTextureKey(species);
+}
+
+export function lifecycleStateToTextureStage(
+  lifecycleState: AnimalLifecycleState | undefined,
+  fallbackStage: LivestockStage = 'adult'
+): LivestockStage {
+  if (lifecycleState === 'baby' || lifecycleState === 'growing') return 'child';
+  if (lifecycleState === 'adult' || lifecycleState === 'producing' || lifecycleState === 'hungry') {
+    return 'adult';
+  }
+  return fallbackStage === 'young' ? 'child' : fallbackStage;
 }
 
 export function penFootprintTiles(level: LivestockPenLevel = 1): { w: number; h: number } {
@@ -208,4 +282,60 @@ export function penFootprintCenterGrid(pen: {
 }): { gx: number; gy: number } {
   const { w, h } = penFootprintTiles(pen.level ?? 1);
   return { gx: pen.gridX + (w - 1) / 2, gy: pen.gridY + (h - 1) / 2 };
+}
+
+export type LivestockAnimalRenderBox = {
+  width: number;
+  height: number;
+  yRatio: number;
+};
+
+const DEFAULT_ANIMAL_RENDER_BOX: LivestockAnimalRenderBox = {
+  width: TILE_WIDTH * 0.9,
+  height: DISPLAY_SIZE.buildingH * 0.5,
+  yRatio: 0.42,
+};
+
+const SPECIES_ANIMAL_RENDER_BOX: Partial<Record<AnimalType, LivestockAnimalRenderBox>> = {
+  goat: {
+    width: TILE_WIDTH * 0.66,
+    height: DISPLAY_SIZE.buildingH * 0.36,
+    yRatio: 0.36,
+  },
+  sheep: {
+    width: TILE_WIDTH * 0.66,
+    height: DISPLAY_SIZE.buildingH * 0.36,
+    yRatio: 0.36,
+  },
+};
+
+const SPECIES_STAGE_RENDER_MULTIPLIER: Partial<
+  Record<AnimalType, Partial<Record<LivestockStage, number>>>
+> = {
+  chicken: { child: 0.5, adult: 0.6 },
+  cow: { child: 0.7, adult: 0.8 },
+  duck: { child: 0.5, adult: 0.6 },
+  fish: { child: 0.5, adult: 0.6 },
+  pig: { child: 0.7, adult: 0.8 },
+};
+
+export function getLivestockAnimalRenderMultiplier(
+  species: AnimalType,
+  stage?: LivestockStage
+): number {
+  if (!stage) return 1;
+  return SPECIES_STAGE_RENDER_MULTIPLIER[species]?.[stage] ?? 1;
+}
+
+export function getLivestockAnimalRenderBox(
+  species: AnimalType,
+  stage?: LivestockStage
+): LivestockAnimalRenderBox {
+  const base = SPECIES_ANIMAL_RENDER_BOX[species] ?? DEFAULT_ANIMAL_RENDER_BOX;
+  const mul = getLivestockAnimalRenderMultiplier(species, stage);
+  return {
+    width: base.width * mul,
+    height: base.height * mul,
+    yRatio: base.yRatio,
+  };
 }

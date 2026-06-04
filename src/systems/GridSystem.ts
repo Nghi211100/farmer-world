@@ -1,4 +1,6 @@
 import {
+  FARM_PLAYER_SPAWN_GX,
+  FARM_PLAYER_SPAWN_GY,
   FARM_SOIL_BOUNDS,
   GRID_SIZE,
   GROUND_DECOR_MIX,
@@ -28,9 +30,7 @@ import {
 } from '../utils/iso';
 import { waterTextureKeyAt, type WaterNeighborProbe } from '../utils/waterAutotile';
 import {
-  FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN,
   computePlayableFarmViewportLayout,
-  getFarmMapLeftShiftScreenPx,
   FARM_MAP_TOP_INSET_FRAC,
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
   getFarmMapTopTargetScreenY,
@@ -119,6 +119,29 @@ export class GridSystem {
    * Lay out the grid so the farm footprint iso rhombus center sits at the HUD-balanced viewport
    * center (camera scroll 0, zoom 1 baseline). See {@link computePlayableFarmViewportLayout}.
    */
+  /**
+   * Move farm world origin so a camera scroll of (0,0) matches a prior scroll offset.
+   * Does not reset {@link mapTopPanOffsetX} / {@link mapTopPanOffsetY} (screen-relative offsets).
+   */
+  shiftFarmWorldBy(dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return;
+    this.originX += dx;
+    this.originY += dy;
+  }
+
+  /**
+   * Analytical hard placement: set {@link originX}/{@link originY} so tile `(gx, gy)` diamond center
+   * equals `(worldX, worldY)` on the map layer. Clears virtual {@link mapTopPanOffsetX/Y}.
+   */
+  setMapTileCenterWorld(gx: number, gy: number, worldX: number, worldY: number): void {
+    this.mapTopPanOffsetX = 0;
+    this.mapTopPanOffsetY = 0;
+    const cx = gx + 0.5;
+    const cy = gy + 0.5;
+    this.originX = worldX - (cx - cy) * (this.tileWidth / 2);
+    this.originY = worldY - (cx + cy) * (this.tileHeight / 2);
+  }
+
   centerInViewport(
     viewW: number,
     viewH: number,
@@ -170,25 +193,34 @@ export class GridSystem {
   alignMapTopToPanBoundsInset(
     panBounds: FarmFootprintBounds,
     _scrollY: number,
-    zoom: number,
+    _zoom: number,
     frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC
   ): void {
     const panH = panBounds.maxY - panBounds.minY;
     const targetMapMinY = panBounds.minY + panH * frac;
-    const visualMinY = this.getVisualMapScreenBounds().minY;
-    this.mapTopPanOffsetY = targetMapMinY - visualMinY;
+    const currentMapMinY = this.getMapScreenBounds().minY;
+    this.mapTopPanOffsetY += targetMapMinY - currentMapMinY;
 
-    // Apply the map-only left shift in screen space, then convert back to world units.
+    // Center full map AABB horizontally in pan bounds (scroll-zero bake → map center at viewport center world).
     const panW = panBounds.maxX - panBounds.minX;
-    const shiftPx = getFarmMapLeftShiftScreenPx(
-      panW,
-      zoom,
-      FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN
-    );
-    const mapCenterX = this.getVisualMapScreenBounds().centerX;
-    const panCenterX = (panBounds.minX + panBounds.maxX) / 2;
-    const centerBiasWorld = panCenterX - mapCenterX;
-    this.mapTopPanOffsetX = centerBiasWorld - shiftPx / zoom;
+    const visual = this.getVisualMapScreenBounds();
+    const mapW = visual.maxX - visual.minX;
+    const targetMapMinX = panBounds.minX + (panW - mapW) / 2;
+    this.mapTopPanOffsetX = targetMapMinX - visual.minX;
+  }
+
+  /**
+   * Align map-layer top Y to pan-bounds inset at camera scroll (0,0) without changing
+   * {@link mapTopPanOffsetX} (preserves horizontal pan-target after scroll-zero bake).
+   */
+  alignMapTopYToPanBoundsInset(
+    panBounds: FarmFootprintBounds,
+    frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC
+  ): void {
+    const panH = panBounds.maxY - panBounds.minY;
+    const targetMapMinY = panBounds.minY + panH * frac;
+    const currentMapMinY = this.getMapScreenBounds().minY;
+    this.mapTopPanOffsetY += targetMapMinY - currentMapMinY;
   }
 
   /** Screen center of the farm soil + path ring AABB (iso diamond bounds). */
@@ -217,6 +249,39 @@ export class GridSystem {
       out.minY = Math.min(out.minY, top.y);
       out.maxY = Math.max(out.maxY, bottom.y);
     }
+  }
+
+  /** Screen center of the full 20×20 map AABB ({@link getMapScreenBounds}). */
+  getFarmMapCenterScreen(): { x: number; y: number } {
+    const b = this.getMapScreenBounds();
+    return { x: b.centerX, y: b.centerY };
+  }
+
+  /**
+   * Visual / playable map center for bake, zoom keyframes, and HUD red dot: default farmer spawn
+   * (where the character stands at the viewport center), not the iso AABB centroid on water.
+   */
+  getFarmPlayableMapCenterScreen(): { x: number; y: number } {
+    return this.getFarmPlayerSpawnScreen();
+  }
+
+  /**
+   * True when {@link getFarmMapCenterScreen} matches the AABB center from corner tiles
+   * [0,0], [size−1,0], [0,size−1], [size−1,size−1] (iso diamond extents), not grid (9.5, 9.5).
+   */
+  isFarmMapCenterTrueAabb(): boolean {
+    const corners: [number, number][] = [
+      [0, 0],
+      [this.size - 1, 0],
+      [0, this.size - 1],
+      [this.size - 1, this.size - 1],
+    ];
+    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    this.accumulateIsoBounds(corners, box, true);
+    const c = this.getFarmMapCenterScreen();
+    const cx = (box.minX + box.maxX) / 2;
+    const cy = (box.minY + box.maxY) / 2;
+    return Math.abs(c.x - cx) < 1e-4 && Math.abs(c.y - cy) < 1e-4;
   }
 
   /** Full 20×20 map AABB including {@link mapTopPanOffsetY} (camera virtual layer). */
@@ -473,6 +538,14 @@ export class GridSystem {
     return this.getFarmSoilPatchCenterScreen();
   }
 
+  /** Default farmer spawn in world/map space (not the scroll-zero layout anchor; see farmWorldScrollAnchor). */
+  getFarmPlayerSpawnScreen(
+    gx: number = FARM_PLAYER_SPAWN_GX,
+    gy: number = FARM_PLAYER_SPAWN_GY
+  ): { x: number; y: number } {
+    return this.gridToPlayerTile(gx, gy);
+  }
+
   getCell(gx: number, gy: number): TileCell | null {
     if (!this.inBounds(gx, gy)) return null;
     return this.cells[gy][gx];
@@ -652,8 +725,8 @@ export class GridSystem {
 
   /** Build placeholder map: grass, trees, rocks, soil farm area, spawn */
   generatePlaceholderMap(): { spawnX: number; spawnY: number } {
-    const spawnX = 10;
-    const spawnY = 10;
+    const spawnX = FARM_PLAYER_SPAWN_GX;
+    const spawnY = FARM_PLAYER_SPAWN_GY;
 
     for (let y = 0; y < this.size; y++) {
       for (let x = 0; x < this.size; x++) {

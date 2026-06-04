@@ -1,6 +1,7 @@
 import type { GridSystem } from './systems/GridSystem';
 import {
   computeFarmCameraScrollForMapTopAndPanCenter,
+  computeFarmCameraScrollLimits,
   farmFootprintCenter,
   type FarmFootprintBounds,
   type PlayableBandRect,
@@ -12,10 +13,12 @@ import {
 
 /** Hooks for map-top + pan-bounds camera layout (FarmScene or unit tests). */
 export type MapTopPanBoundsLayoutHooks = {
-  alignMapTop: (panBounds: FarmFootprintBounds, scrollY: number, zoom: number) => void;
+  alignMapTop: (panBounds: FarmFootprintBounds, scrollY: number, z: number) => void;
   getPanBounds: () => FarmFootprintBounds;
   /** Full map top including {@link mapTopPanOffsetY}; drives scroll Y. */
   getMapBounds: () => { minY: number };
+  /** Horizontal center anchor (20×20 map center); defaults to pan-bounds center. */
+  getCenterAnchor?: () => { x: number; y: number };
   repositionWorld: () => void;
   scrollPlayable: PlayableBandRect;
   panTargetCenter: { x: number; y: number };
@@ -50,9 +53,11 @@ export function runMapTopPanBoundsCameraPasses(
       hooks.zoom,
       frac
     );
+    const centerAnchor =
+      hooks.getCenterAnchor?.() ?? farmFootprintCenter(farmAfter);
     const next = computeFarmCameraScrollForMapTopAndPanCenter(
       visualMapMinY,
-      farmFootprintCenter(farmAfter),
+      centerAnchor,
       farmAfter,
       hooks.scrollPlayable,
       mapTopTargetScreenY,
@@ -74,12 +79,19 @@ export function syncFarmMapTopCameraScroll(
   getPanBounds: () => FarmFootprintBounds,
   scrollY: number,
   zoom: number,
-  frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC
+  frac: number = FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+  scrollPlayable?: PlayableBandRect
 ): { scrollY: number; panBounds: FarmFootprintBounds } {
   let pan = getPanBounds();
   grid.alignMapTopToPanBoundsInset(pan, scrollY, zoom, frac);
   pan = getPanBounds();
   grid.alignMapTopToPanBoundsInset(pan, scrollY, zoom, frac);
+  if (scrollPlayable) {
+    const limits = computeFarmCameraScrollLimits(pan, scrollPlayable, zoom);
+    if (limits.y.oversize) {
+      return { scrollY, panBounds: pan };
+    }
+  }
   let scrollYOut = scrollY;
   for (let i = 0; i < 3; i++) {
     const mapMinY = grid.getMapScreenBounds().minY;

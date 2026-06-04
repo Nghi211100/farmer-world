@@ -53,6 +53,10 @@ export const FARM_SOIL_BOUNDS = {
   minY: 6,
   maxY: 13,
 } as const;
+
+/** Default farmer spawn on the path ring (matches placeholder map + {@link FarmScene} player). */
+export const FARM_PLAYER_SPAWN_GX = 10;
+export const FARM_PLAYER_SPAWN_GY = 10;
 export type MapObjectType = 'tree' | 'rock' | 'bush' | 'house' | 'barn' | 'silo' | 'coop';
 
 /** Decorative grass on locked soil and outer-map grass tiles */
@@ -191,6 +195,21 @@ export function isDebugMode(): boolean {
 }
 
 /**
+ * Playwright / capture scripts: keep the WebGL color buffer so canvas screenshots
+ * are not blank letterbox (#1b2e16). Enable with `?screenshot=1`.
+ */
+export function isScreenshotCaptureMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('screenshot') === '1';
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
  * Farm debug overlays. Off by default; enable with `?debugGrid=1` (or global `?debug=1`).
  * - World-space full map grid + iso tile outlines (GRID_SIZE²; grass/water/moat included)
  * - Screen-fixed viewport HUD outlines ({@link computePlayableFarmViewportLayout})
@@ -224,6 +243,13 @@ export function isPersistentToolBarEnabled(): boolean {
 }
 
 /**
+ * Farm map/scroll center red dots (`?debugCamera=1`, `?debugGrid=1`, or `?debug=1`).
+ */
+export function isFarmCenterDebugMarkers(): boolean {
+  return isFarmGridDebug() || isFarmCameraDebug();
+}
+
+/**
  * Farm camera pan/zoom HUD (`?debugCamera=1` or global `?debug=1`).
  */
 export function isFarmCameraDebug(): boolean {
@@ -236,6 +262,26 @@ export function isFarmCameraDebug(): boolean {
     /* ignore */
   }
   return false;
+}
+
+/**
+ * Dev experiment: lock tile (10,10) world at all zooms.
+ * Enable with `?forceSpawnWorld=878.3,535.4` (comma-separated world x,y).
+ */
+export function getFarmForceSpawnWorld(): { x: number; y: number } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('forceSpawnWorld');
+    if (!raw) return null;
+    const parts = raw.split(',').map((s) => parseFloat(s.trim()));
+    if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+      return { x: parts[0], y: parts[1] };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 /** Warehouse modal slot grid overlay (`?debugWarehouse=1` or global `?debug=1`). */

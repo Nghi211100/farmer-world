@@ -16,14 +16,27 @@ export type AnimalType =
   | 'goat';
 
 export type LivestockPenState = 'unstocked' | 'idle' | 'producing' | 'ready';
+export type AnimalLifecycleState =
+  | 'baby'
+  | 'growing'
+  | 'adult'
+  | 'producing'
+  | 'hungry';
 
 /** Goat + sheep share one buildable pen (house art until stocked). */
 export type LivestockPenKind = 'ruminant';
 
+export interface RuminantOccupantData {
+  animalType: 'goat' | 'sheep';
+  stage?: LivestockStage;
+  variant?: number;
+  animalTextureKey?: string;
+}
+
 export interface LivestockPenData {
   id: string;
   animalType: AnimalType;
-  /** When set, pen accepts one goat or sheep from the shop. */
+  /** When set, pen accepts goat/sheep in shared slots up to level capacity. */
   penKind?: LivestockPenKind;
   /** Anchor tile (top-left of footprint rectangle in grid coords). */
   gridX: number;
@@ -32,9 +45,22 @@ export interface LivestockPenData {
   /** Pen footprint: level 1 = 3×3, level 2 = 4×4. */
   level: LivestockPenLevel;
   readyAt?: number;
+  /** True stocked animals in this pen (state derives from this value). */
+  stockCount?: number;
   stage?: LivestockStage;
   variant?: number;
   animalTextureKey?: string;
+  /** Shared-pen occupants for goat/sheep rendering + persistence. */
+  ruminantOccupants?: RuminantOccupantData[];
+  lifecycleState?: AnimalLifecycleState;
+  growthStartAt?: number;
+  growthDurationMs?: number;
+  productionStartAt?: number;
+  productionProgressMs?: number;
+  hungrySince?: number;
+  hungerSinceFeedMs?: number;
+  happiness?: number;
+  lastUpdatedAt?: number;
 }
 
 /** Per-species pen/house texture keys (same art for Lv1/Lv2; scale differs in render). */
@@ -43,6 +69,10 @@ export const LIVESTOCK_TEXTURE_KEYS: Record<AnimalType, string> = {
 };
 
 export const LIVESTOCK_PEN_UPGRADE_COST = 150;
+export const LIVESTOCK_PEN_CAPACITY_BY_LEVEL: Record<LivestockPenLevel, number> = {
+  1: 4,
+  2: 8,
+};
 
 export const RUMINANT_PEN_LABEL_VI = 'Chuồng Dê/Cừu';
 
@@ -57,6 +87,11 @@ export interface LivestockAnimalDef {
   feedCost: number;
   produceMs: number;
   productSellPrice: number;
+  growthMs: number;
+  hungryAfterMs: number;
+  feedItemId: string;
+  feedRequired: number;
+  sellBasePrice: number;
   /** Pen placeable; animal purchase disabled until PNGs exist. */
   houseOnly?: boolean;
 }
@@ -73,6 +108,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 15,
     produceMs: 45_000,
     productSellPrice: 12,
+    growthMs: 55_000,
+    hungryAfterMs: 150_000,
+    feedItemId: ITEM_IDS.GRASS,
+    feedRequired: 2,
+    sellBasePrice: 80,
   },
   pig: {
     type: 'pig',
@@ -85,6 +125,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 12,
     produceMs: 40_000,
     productSellPrice: 18,
+    growthMs: 45_000,
+    hungryAfterMs: 135_000,
+    feedItemId: ITEM_IDS.PUMPKIN,
+    feedRequired: 2,
+    sellBasePrice: 70,
   },
   chicken: {
     type: 'chicken',
@@ -97,6 +142,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 8,
     produceMs: 25_000,
     productSellPrice: 10,
+    growthMs: 30_000,
+    hungryAfterMs: 90_000,
+    feedItemId: ITEM_IDS.CORN,
+    feedRequired: 1,
+    sellBasePrice: 40,
   },
   fish: {
     type: 'fish',
@@ -109,6 +159,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 10,
     produceMs: 35_000,
     productSellPrice: 14,
+    growthMs: 35_000,
+    hungryAfterMs: 105_000,
+    feedItemId: ITEM_IDS.FISH_FEED,
+    feedRequired: 1,
+    sellBasePrice: 55,
   },
   goat: {
     type: 'goat',
@@ -121,6 +176,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 12,
     produceMs: 38_000,
     productSellPrice: 15,
+    growthMs: 40_000,
+    hungryAfterMs: 120_000,
+    feedItemId: ITEM_IDS.GRASS,
+    feedRequired: 1,
+    sellBasePrice: 65,
   },
   duck: {
     type: 'duck',
@@ -133,6 +193,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 9,
     produceMs: 28_000,
     productSellPrice: 11,
+    growthMs: 32_000,
+    hungryAfterMs: 95_000,
+    feedItemId: ITEM_IDS.CORN,
+    feedRequired: 1,
+    sellBasePrice: 45,
   },
   sheep: {
     type: 'sheep',
@@ -145,6 +210,11 @@ export const LIVESTOCK_ANIMALS: Record<AnimalType, LivestockAnimalDef> = {
     feedCost: 10,
     produceMs: 32_000,
     productSellPrice: 13,
+    growthMs: 42_000,
+    hungryAfterMs: 120_000,
+    feedItemId: ITEM_IDS.GRASS,
+    feedRequired: 1,
+    sellBasePrice: 50,
   },
 };
 
@@ -167,6 +237,10 @@ export function getLivestockDef(type: AnimalType): LivestockAnimalDef {
   return LIVESTOCK_ANIMALS[type];
 }
 
+export function livestockPenCapacity(level: LivestockPenLevel = 1): number {
+  return LIVESTOCK_PEN_CAPACITY_BY_LEVEL[level] ?? LIVESTOCK_PEN_CAPACITY_BY_LEVEL[1];
+}
+
 /** House/pen sprite for species (level only affects footprint scale in scene). */
 export function getLivestockPenTextureKey(
   animalType: AnimalType,
@@ -175,12 +249,12 @@ export function getLivestockPenTextureKey(
   return getLivestockHouseTextureKey(animalType);
 }
 
-/** House sprite for a placed pen row (ruminant uses sheep_house — no goat_house PNG). */
+/** House sprite for a placed pen row (ruminant always uses shared sheep_house art). */
 export function getLivestockPenTextureKeyForPen(
   pen: LivestockPenData,
   _level: LivestockPenLevel = 1
 ): string {
-  if (pen.penKind === 'ruminant' && pen.state === 'unstocked') {
+  if (pen.penKind === 'ruminant') {
     return 'sheep_house';
   }
   return getLivestockHouseTextureKey(pen.animalType);

@@ -4,6 +4,13 @@ import {
   computeLeftMenuLayout,
   FARM_MAP_TOP_INSET_FRAC,
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET,
+  FARM_MAP_LEFT_PAN_BOUNDS_COL_COUNT,
+  FARM_MAP_LEFT_PAN_BOUNDS_COL_INDEX,
+  FARM_MAP_LEFT_PAN_BOUNDS_COL_OFFSET,
+  FARM_MAP_LEFT_PAN_BOUNDS_FRAC,
   getFarmMapTopTargetScreenY,
   getFarmMapTopTargetScreenYFromPanBounds,
   FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
@@ -11,6 +18,8 @@ import {
   FARM_VISUAL_CENTER_OFFSET_X_FRAC,
   FARM_VISUAL_CENTER_OFFSET_Y_FRAC,
   computePlayableFarmViewportLayout,
+  getFarmCameraScreenCenter,
+  getFarmPanBoundsScrollTargetScreen,
   getPlayableBandPanBoundsCenter,
   computeRightMenuLayout,
   computeTopHudSlots,
@@ -240,22 +249,34 @@ describe('map top inset', () => {
     expect(getFarmMapTopTargetScreenY(68, 692, 0)).toBe(68);
   });
 
-  it('targets map top 16.5% down pan bounds height when frac is 0.165', () => {
-    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.165);
+  it('maps row 7 (1-based) to 6/20 pan-bounds height', () => {
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX).toBe(7);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET).toBe(6);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT).toBe(20);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.3);
     const pan = { minY: 100, maxY: 500 };
     const scrollY = 40;
     const zoom = 1.7;
     const target = getFarmMapTopTargetScreenYFromPanBounds(pan, scrollY, zoom);
     const panTopScreen = (pan.minY - scrollY) * zoom;
     const panHeightScreen = (pan.maxY - pan.minY) * zoom;
-    expect(target).toBeCloseTo(panTopScreen + panHeightScreen * 0.165, 5);
+    expect(target).toBeCloseTo(panTopScreen + panHeightScreen * (6 / 20), 5);
+  });
+
+  it('maps column 8 (1-based) to 7/20 pan-bounds width', () => {
+    expect(FARM_MAP_LEFT_PAN_BOUNDS_COL_INDEX).toBe(8);
+    expect(FARM_MAP_LEFT_PAN_BOUNDS_COL_OFFSET).toBe(7);
+    expect(FARM_MAP_LEFT_PAN_BOUNDS_COL_COUNT).toBe(20);
+    expect(FARM_MAP_LEFT_PAN_BOUNDS_FRAC).toBe(0.35);
   });
 });
 
 describe('pan bounds center offset', () => {
-  it('uses 45% right and 50% down of geometric playable center', () => {
-    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC).toBe(0.45);
+  it('maps 0.5 offset to viewport camera center (not playable geometric center)', () => {
+    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC).toBe(0.5);
     expect(FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC).toBe(0.5);
+    const viewW = 390;
+    const viewH = 844;
     const playable = {
       playableLeft: 80,
       playableTop: 68,
@@ -264,11 +285,14 @@ describe('pan bounds center offset', () => {
     };
     const geomX = (playable.playableLeft + playable.playableRight) / 2;
     const geomY = (playable.playableTop + playable.playableBottom) / 2;
-    const playableW = playable.playableRight - playable.playableLeft;
-    const playableH = playable.playableBottom - playable.playableTop;
-    const pan = getPlayableBandPanBoundsCenter(playable);
-    expect(pan.x - geomX).toBeCloseTo(playableW * 0.45, 5);
-    expect(pan.y - geomY).toBeCloseTo(playableH * 0.5, 5);
+    const band = getPlayableBandPanBoundsCenter(playable);
+    const pan = getFarmPanBoundsScrollTargetScreen(viewW, viewH, playable);
+    const camera = getFarmCameraScreenCenter(viewW, viewH);
+    expect(band.x).toBeCloseTo(geomX, 5);
+    expect(band.y).toBeCloseTo(geomY, 5);
+    expect(pan.x).toBeCloseTo(camera.x, 5);
+    expect(pan.y).toBeCloseTo(camera.y, 5);
+    expect(pan.y).toBeGreaterThan(geomY);
   });
 });
 

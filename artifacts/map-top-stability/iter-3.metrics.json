@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-06-02T14:41:06.971Z",
+  "label": "iter-3",
+  "url": "http://127.0.0.1:5173/?debugGrid=1",
+  "screenshot": "artifacts/map-top-stability/iter-3.png",
+  "metrics": {
+    "mapTopErrorY": -104.37999999999988,
+    "soilFootprintAlignError": 0,
+    "panBoundsErrorX": 1.2920000000002574,
+    "panBoundsErrorY": -89.85199999999986,
+    "mapTopScreenY": 1011.2280000000001,
+    "mapTopTargetScreenY": 1115.608,
+    "panBoundsTopScreenY": 537.778,
+    "mapTopAbovePanPx": -473.45000000000005,
+    "mapBounds": {
+      "minX": -129.13999999999987,
+      "minY": 532.84,
+      "maxX": 1150.8600000000001,
+      "maxY": 1172.8400000000001,
+      "centerX": 510.8600000000001,
+      "centerY": 852.8400000000001
+    },
+    "footprint": {
+      "minX": 126.86000000000013,
+      "minY": 660.84,
+      "maxX": 766.8600000000001,
+      "maxY": 980.84,
+      "centerX": 446.8600000000001,
+      "centerY": 820.84
+    },
+    "panBounds": {
+      "minX": -667.6399999999999,
+      "minY": 254.34000000000003,
+      "maxX": 1561.3600000000001,
+      "maxY": 1387.3400000000001
+    },
+    "containment": {
+      "footprintInsideMap": true,
+      "footprintInsidePanBounds": true
+    }
+  }
+}

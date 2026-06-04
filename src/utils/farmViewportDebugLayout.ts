@@ -128,3 +128,96 @@ export function farmBackgroundOnlyHudLabel(
   }
   return 'background-only zone (outside map — ui_background only)';
 }
+
+/** World-space distance below which map center (A) and viewport center (C) share one dot. */
+export const FARM_DEBUG_CENTER_DOT_MERGE_EPS = 0.5;
+
+export function formatFarmDebugCoord(n: number): string {
+  return (Math.round(n * 10) / 10).toFixed(1);
+}
+
+export function farmDebugWorldPointsCoincide(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  eps = FARM_DEBUG_CENTER_DOT_MERGE_EPS
+): boolean {
+  return Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
+}
+
+export function farmCenterDebugMarkerLabelBlock(options: {
+  title: string;
+  worldX: number;
+  worldY: number;
+  screenX: number;
+  screenY: number;
+  scrollX?: number;
+  scrollY?: number;
+  targetScreenX?: number;
+  targetScreenY?: number;
+  worldOffsetX?: number;
+  worldOffsetY?: number;
+  zoom?: number;
+}): string {
+  const lines = [options.title];
+  if (options.scrollX !== undefined && options.scrollY !== undefined) {
+    lines.push(
+      `scroll: (${formatFarmDebugCoord(options.scrollX)}, ${formatFarmDebugCoord(options.scrollY)})`
+    );
+  }
+  const worldLine =
+    options.worldOffsetX !== undefined &&
+    options.worldOffsetY !== undefined &&
+    options.zoom !== undefined
+      ? `world: (${formatFarmDebugCoord(options.worldX)}, ${formatFarmDebugCoord(options.worldY)}) Δ(${formatFarmDebugCoord(options.worldOffsetX)}, ${formatFarmDebugCoord(options.worldOffsetY)}) z=${formatFarmDebugCoord(options.zoom)}`
+      : `world: (${formatFarmDebugCoord(options.worldX)}, ${formatFarmDebugCoord(options.worldY)})`;
+  lines.push(worldLine, `screen: (${formatFarmDebugCoord(options.screenX)}, ${formatFarmDebugCoord(options.screenY)})`);
+  if (options.targetScreenX !== undefined && options.targetScreenY !== undefined) {
+    lines.push(
+      `target: (${formatFarmDebugCoord(options.targetScreenX)}, ${formatFarmDebugCoord(options.targetScreenY)})`
+    );
+  }
+  return lines.join('\n');
+}
+
+export function farmCenterDebugMapViewportMergedTitle(): string {
+  return 'map + viewport center';
+}
+
+/** World position under the map-center HUD screen target at the given scroll and zoom. */
+export function farmViewportCenterWorldAtScroll(
+  viewW: number,
+  viewH: number,
+  zoom: number,
+  scrollX: number,
+  scrollY: number,
+  screenTarget?: { x: number; y: number }
+): { x: number; y: number } {
+  const screen = screenTarget ?? { x: viewW / 2, y: viewH / 2 };
+  return {
+    x: scrollX + screen.x / zoom,
+    y: scrollY + screen.y / zoom,
+  };
+}
+
+/** Minimal camera fields for world ↔ screen (matches Phaser main-camera rendering). */
+export type FarmCameraScreenTransform = {
+  scrollX: number;
+  scrollY: number;
+  zoom: number;
+  x?: number;
+  y?: number;
+};
+
+/** Scene world point → screen pixels (same transform as scrollFactor-0 HUD). */
+export function farmWorldToScreen(
+  cam: FarmCameraScreenTransform,
+  worldX: number,
+  worldY: number
+): { x: number; y: number } {
+  const ox = cam.x ?? 0;
+  const oy = cam.y ?? 0;
+  return {
+    x: (worldX - cam.scrollX) * cam.zoom + ox,
+    y: (worldY - cam.scrollY) * cam.zoom + oy,
+  };
+}

@@ -342,12 +342,15 @@ export const FARM_VISUAL_CENTER_OFFSET_X_FRAC = 0.1;
 export const FARM_VISUAL_CENTER_OFFSET_Y_FRAC = 0;
 
 /**
- * Camera / orange pan-bounds centering: shift right as a fraction of playable width.
+ * Camera / orange pan-bounds center X as a fraction across the playable band width (`0.5` = midpoint).
  * Independent from {@link FARM_VISUAL_CENTER_OFFSET_X_FRAC} (grid tile placement).
  */
-export const FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC = 0.45;
+export const FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC = 0.5;
 
-/** Vertical pan-bounds center correction (fraction of playable height; positive = down on screen). */
+/**
+ * Camera / orange pan-bounds center Y as a fraction down the playable band height (`0.5` = midpoint).
+ * Oversize axes use {@link computeCenteredFarmCameraScroll} with {@link shiftPlayableBandForPanBoundsCenter}.
+ */
 export const FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC = 0.5;
 
 /**
@@ -357,29 +360,44 @@ export const FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC = 0.5;
 export const FARM_MAP_TOP_INSET_FRAC = -0.5;
 
 /**
- * Map 20×20 top target as a fraction down the orange **pan bounds** AABB height
- * (`getFarmCameraScrollBounds()` / island screen AABB), not the yellow HUD playable band.
- * `0` = flush with pan top; positive = lower on screen; **negative = above pan top**.
+ * Map-top target row in the 20×20 pan-bounds debug grid (1-based from top).
+ * Row 1 is flush with pan top, row 7 means 6 row steps down from pan top.
  */
-export const FARM_MAP_TOP_PAN_BOUNDS_FRAC = 0.165;
+export const FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX = 7;
+/** Total vertical row steps used for pan-bounds map-top mapping (20×20 grid). */
+export const FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT = 20;
+/** Zero-based row offset from pan top: `rowIndex - 1`. */
+export const FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET = FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX - 1;
+/**
+ * Map 20×20 top target as a fraction down the orange **pan bounds** AABB height.
+ * Exact formula: `targetY = panMinY + panHeight * ((rowIndex - 1) / rowCount)`.
+ */
+export const FARM_MAP_TOP_PAN_BOUNDS_FRAC =
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET / FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT;
 
 /**
- * Horizontal map-top (20×20) shift: move the full map layer left as a fraction of the
- * orange pan-bounds AABB width.
- *
- * Single X-shift source of truth for the farm world: WORLD ENDS bounds, soil/path footprint,
- * island art anchoring, crops/buildings/entities, and debug overlays all consume this delta via
- * `GridSystem.mapTopPanOffsetX` so every 20×20 element moves together.
+ * Map-left target column in the 20×20 pan-bounds debug grid (1-based from left).
+ * Column 1 is flush with pan left; column 8 means 7 column steps from pan left.
  */
-export const FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN = -0.005;
-/** @deprecated Use {@link FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN}. */
-export const FARM_MAP_LEFT_PAN_BOUNDS_FRAC = FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN;
+export const FARM_MAP_LEFT_PAN_BOUNDS_COL_INDEX = 8;
+/** Total horizontal column steps used for pan-bounds map-left mapping (20×20 grid). */
+export const FARM_MAP_LEFT_PAN_BOUNDS_COL_COUNT = 20;
+/** Zero-based column offset from pan left: `colIndex - 1`. */
+export const FARM_MAP_LEFT_PAN_BOUNDS_COL_OFFSET = FARM_MAP_LEFT_PAN_BOUNDS_COL_INDEX - 1;
+/**
+ * Map 20×20 left target as a fraction across the orange **pan bounds** AABB width.
+ * Exact formula: `targetX = panMinX + panWidth * ((colIndex - 1) / colCount)`.
+ */
+export const FARM_MAP_LEFT_PAN_BOUNDS_FRAC =
+  FARM_MAP_LEFT_PAN_BOUNDS_COL_OFFSET / FARM_MAP_LEFT_PAN_BOUNDS_COL_COUNT;
+/** @deprecated Use {@link FARM_MAP_LEFT_PAN_BOUNDS_FRAC}. */
+export const FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN = FARM_MAP_LEFT_PAN_BOUNDS_FRAC;
 
 /** Screen-space left shift (px) for the full farm map relative to pan-bounds width. */
 export function getFarmMapLeftShiftScreenPx(
   panBoundsWidth: number,
   zoom: number,
-  frac: number = FARM_MAP_LEFT_SCREEN_SHIFT_FRAC_OF_PAN
+  frac: number = FARM_MAP_LEFT_PAN_BOUNDS_FRAC
 ): number {
   return panBoundsWidth * zoom * frac;
 }
@@ -427,31 +445,62 @@ export function getPlayableBandGeometricCenter(playable: PlayableBandRect): {
   };
 }
 
-/** Screen target for camera scroll / orange pan-bounds centering. */
+/** Screen target along playable band edges (fraction of band width/height). */
 export function getPlayableBandPanBoundsCenter(playable: PlayableBandRect): {
   x: number;
   y: number;
 } {
-  const geom = getPlayableBandGeometricCenter(playable);
   const playableW = playable.playableRight - playable.playableLeft;
   const playableH = playable.playableBottom - playable.playableTop;
   return {
-    x: geom.x + playableW * FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
-    y: geom.y + playableH * FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC,
+    x: playable.playableLeft + playableW * FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
+    y: playable.playableTop + playableH * FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC,
   };
 }
 
+/** Main camera optical center in screen space (viewport midpoint). */
+export function getFarmCameraScreenCenter(
+  viewportW: number,
+  viewportH: number
+): { x: number; y: number } {
+  return { x: viewportW / 2, y: viewportH / 2 };
+}
+
 /**
- * Playable band shifted so its geometric center matches {@link getPlayableBandPanBoundsCenter}.
+ * Screen point where orange pan-bounds AABB center should sit.
+ * At {@link FARM_PAN_BOUNDS_CENTER_OFFSET_*_FRAC} `0.5`, uses {@link getFarmCameraScreenCenter}
+ * (not the HUD playable geometric center).
+ */
+export function getFarmPanBoundsScrollTargetScreen(
+  viewportW: number,
+  viewportH: number,
+  playable: PlayableBandRect
+): { x: number; y: number } {
+  if (
+    FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC === 0.5 &&
+    FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC === 0.5
+  ) {
+    return getFarmCameraScreenCenter(viewportW, viewportH);
+  }
+  return getPlayableBandPanBoundsCenter(playable);
+}
+
+/**
+ * Playable band shifted so its geometric center matches {@link getFarmPanBoundsScrollTargetScreen}.
  * Use with the same band for {@link computeFarmCameraScrollLimits} when pan axes are oversize.
  */
 export function shiftPlayableBandForPanBoundsCenter(
-  playable: PlayableBandRect
+  playable: PlayableBandRect,
+  viewportW?: number,
+  viewportH?: number
 ): PlayableBandRect {
-  const playableW = playable.playableRight - playable.playableLeft;
-  const playableH = playable.playableBottom - playable.playableTop;
-  const dx = playableW * FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC;
-  const dy = playableH * FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC;
+  const geom = getPlayableBandGeometricCenter(playable);
+  const pan =
+    viewportW != null && viewportH != null
+      ? getFarmPanBoundsScrollTargetScreen(viewportW, viewportH, playable)
+      : getPlayableBandPanBoundsCenter(playable);
+  const dx = pan.x - geom.x;
+  const dy = pan.y - geom.y;
   return {
     playableLeft: playable.playableLeft + dx,
     playableTop: playable.playableTop + dy,
@@ -495,7 +544,7 @@ export type PlayableFarmViewportLayout = {
  * Playable inset rect for farm fit/clamp/centering (inset already accounts for HUD chrome).
  * Target center is the geometric midpoint plus {@link FARM_VISUAL_CENTER_OFFSET_*_FRAC} so the
  * farm reads visually balanced. Camera pan/clamp targets
- * {@link getPlayableBandPanBoundsCenter} ({@link FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC}).
+ * {@link getFarmPanBoundsScrollTargetScreen} ({@link FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC}).
  */
 export function computePlayableFarmViewportLayout(
   viewportW: number,

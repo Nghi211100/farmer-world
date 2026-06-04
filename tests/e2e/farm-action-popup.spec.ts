@@ -290,3 +290,70 @@ test.describe('Farm action popup — laptop viewport', () => {
     );
   });
 });
+
+test.describe('Object edit popup actions', () => {
+  test('clicking pen in normal mode opens pen actions popup', async ({ page }) => {
+    await waitForGame(page);
+    const tapped = await page.evaluate(() => window.__FARMER_WORLD_TEST__?.tapPenAt(7, 9) ?? false);
+    expect(tapped).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
+      .toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getObjectEditPopupActions()))
+      .toEqual(['move', 'upgrade', 'feed', 'sell']);
+  });
+
+  test('pen popup shows movement, upgrade, feed, sell', async ({ page }) => {
+    await waitForGame(page);
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(7, 9, true));
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
+      .toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getObjectEditPopupActions()))
+      .toEqual(['move', 'upgrade', 'feed', 'sell']);
+  });
+
+  test('non-pen popup keeps movement/remove actions', async ({ page }) => {
+    await waitForGame(page);
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(7, 9, false));
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
+      .toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.getObjectEditPopupActions()))
+      .toEqual(['move', 'remove']);
+  });
+
+  test('hungry pen shows world + feed warning and clears after feed-state reset', async ({ page }) => {
+    await waitForGame(page);
+    const forcedHungry = await page.evaluate(
+      () => window.__FARMER_WORLD_TEST__?.forcePenHungryState(7, 9, true) ?? false
+    );
+    expect(forcedHungry).toBe(true);
+
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(7, 9)))
+      .toBe(true);
+
+    await page.evaluate(() => window.__FARMER_WORLD_TEST__?.openObjectEditPopup(7, 9, true));
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditPopupOpen()))
+      .toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditFeedWarningVisible()))
+      .toBe(true);
+
+    const clearedHungry = await page.evaluate(
+      () => window.__FARMER_WORLD_TEST__?.forcePenHungryState(7, 9, false) ?? false
+    );
+    expect(clearedHungry).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isPenHungryWarningVisible(7, 9)))
+      .toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => window.__FARMER_WORLD_TEST__?.isObjectEditFeedWarningVisible()))
+      .toBe(false);
+  });
+});

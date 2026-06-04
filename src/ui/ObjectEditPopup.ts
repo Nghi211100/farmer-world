@@ -1,17 +1,21 @@
 import Phaser from 'phaser';
 import {
+  LIVESTOCK_WARNING_TEXTURE_KEY,
+  LIVESTOCK_WARNING_WIDTH_SCALE,
+  UI_OBJECT_FEED_TEXTURE_KEY,
   UI_OBJECT_MOVE_TEXTURE_KEY,
   UI_OBJECT_REMOVE_TEXTURE_KEY,
+  UI_OBJECT_UPGRADE_TEXTURE_KEY,
 } from '../config/assets';
 import type { GridSystem } from '../systems/GridSystem';
 import { placePopupAboveTile } from '../utils/popupPosition';
 
-export type ObjectEditAction = 'move' | 'remove';
+export type ObjectEditAction = 'move' | 'remove' | 'upgrade' | 'feed' | 'sell';
 
 const PANEL_DEPTH = 11940;
 const BTN_SIZE = Math.round(44 * (2 / 3));
 const BTN_GAP = 12;
-const PANEL_W = BTN_SIZE * 2 + BTN_GAP;
+const PANEL_W_TWO = BTN_SIZE * 2 + BTN_GAP;
 const PANEL_H = BTN_SIZE;
 const ABOVE_OFFSET_PX = 48;
 
@@ -25,10 +29,12 @@ export class ObjectEditPopup {
   private container: Phaser.GameObjects.Container;
   private hitTargets: Phaser.GameObjects.GameObject[] = [];
   private visible = false;
+  private visibleActions: ObjectEditAction[] = [];
   private tileGx = 0;
   private tileGy = 0;
   private onAction?: (action: ObjectEditAction, gx: number, gy: number) => void;
   private onDismiss?: () => void;
+  private showHungryWarningBadge = false;
 
   constructor(
     private scene: Phaser.Scene,
@@ -48,34 +54,46 @@ export class ObjectEditPopup {
     this.onDismiss = cb;
   }
 
-  show(gx: number, gy: number, options?: { hideRemove?: boolean }): void {
+  show(gx: number, gy: number, options?: { hideRemove?: boolean; showHungryWarning?: boolean }): void {
     this.hide(false);
     this.tileGx = gx;
     this.tileGy = gy;
 
-    const moveBtn = this.createButton(0, UI_OBJECT_MOVE_TEXTURE_KEY, () => {
-      this.fireAction('move');
-    });
-    this.hitTargets = [moveBtn.hit, moveBtn.root];
-    const children: Phaser.GameObjects.GameObject[] = [moveBtn.hit, moveBtn.root];
+    const isPenPopup = Boolean(options?.hideRemove);
+    this.showHungryWarningBadge = Boolean(options?.showHungryWarning);
+    const buttonSpecs: ReadonlyArray<{ action: ObjectEditAction; texture: string }> = isPenPopup
+      ? [
+          { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
+          { action: 'upgrade', texture: UI_OBJECT_UPGRADE_TEXTURE_KEY },
+          { action: 'feed', texture: UI_OBJECT_FEED_TEXTURE_KEY },
+          { action: 'sell', texture: UI_OBJECT_REMOVE_TEXTURE_KEY },
+        ]
+      : [
+          { action: 'move', texture: UI_OBJECT_MOVE_TEXTURE_KEY },
+          { action: 'remove', texture: UI_OBJECT_REMOVE_TEXTURE_KEY },
+        ];
 
-    if (!options?.hideRemove) {
-      const halfGap = BTN_GAP / 2;
-      moveBtn.root.setX(-BTN_SIZE / 2 - halfGap);
-      const removeBtn = this.createButton(
-        BTN_SIZE / 2 + halfGap,
-        UI_OBJECT_REMOVE_TEXTURE_KEY,
-        () => {
-          this.fireAction('remove');
-        }
-      );
-      this.hitTargets.push(removeBtn.hit, removeBtn.root);
-      children.push(removeBtn.hit, removeBtn.root);
-    }
+    const children: Phaser.GameObjects.GameObject[] = [];
+    this.hitTargets = [];
+    this.visibleActions = buttonSpecs.map((s) => s.action);
+    const startX = -((buttonSpecs.length - 1) * (BTN_SIZE + BTN_GAP)) / 2;
+    buttonSpecs.forEach((spec, index) => {
+      const x = startX + index * (BTN_SIZE + BTN_GAP);
+      const btn = this.createButton(x, spec.texture, () => this.fireAction(spec.action));
+      this.hitTargets.push(btn.hit, btn.root);
+      children.push(btn.hit, btn.root);
+      if (
+        spec.action === 'feed' &&
+        this.showHungryWarningBadge &&
+        this.scene.textures.exists(LIVESTOCK_WARNING_TEXTURE_KEY)
+      ) {
+        children.push(this.createFeedWarningBadge(x));
+      }
+    });
 
     this.container.add(children);
 
-    this.layout();
+    this.layout(isPenPopup, buttonSpecs.length);
     this.container.setVisible(true);
     this.visible = true;
   }
@@ -84,6 +102,8 @@ export class ObjectEditPopup {
     const wasVisible = this.visible;
     this.container.removeAll(true);
     this.hitTargets = [];
+    this.visibleActions = [];
+    this.showHungryWarningBadge = false;
     this.container.setVisible(false);
     this.visible = false;
     if (wasVisible && notify) this.onDismiss?.();
@@ -93,9 +113,18 @@ export class ObjectEditPopup {
     return this.visible;
   }
 
+  getVisibleActionsForTest(): ObjectEditAction[] {
+    return [...this.visibleActions];
+  }
+
+  isFeedWarningBadgeVisibleForTest(): boolean {
+    return this.showHungryWarningBadge && this.visible && this.visibleActions.includes('feed');
+  }
+
   refreshLayout(): void {
     if (!this.visible) return;
-    this.layout();
+    const count = this.hitTargets.length / 2;
+    this.layout(count >= 3, count);
   }
 
   hitsPointer(pointer: Phaser.Input.Pointer): boolean {
@@ -153,9 +182,24 @@ export class ObjectEditPopup {
     return { root: img, hit };
   }
 
-  private layout(): void {
+  private createFeedWarningBadge(feedButtonX: number): Phaser.GameObjects.Image {
+    const badge = this.scene.add
+      .image(
+        feedButtonX + BTN_SIZE / 2 - Math.round(BTN_SIZE * 0.18),
+        -BTN_SIZE / 2 + Math.round(BTN_SIZE * 0.18),
+        LIVESTOCK_WARNING_TEXTURE_KEY
+      )
+      .setScrollFactor(0);
+    const badgeHeight = Math.max(12, Math.round(BTN_SIZE * 0.48 * 0.7));
+    const badgeWidth = Math.max(1, Math.round(badgeHeight * LIVESTOCK_WARNING_WIDTH_SCALE));
+    badge.setDisplaySize(badgeWidth, badgeHeight);
+    return badge;
+  }
+
+  private layout(isPenPopup = false, count = 2): void {
+    const panelW = isPenPopup ? BTN_SIZE * count + BTN_GAP * (count - 1) : PANEL_W_TWO;
     const { cx, cy } = placePopupAboveTile(this.scene, this.grid, this.tileGx, this.tileGy, {
-      panelW: PANEL_W,
+      panelW,
       panelH: PANEL_H,
       containerVisualScale: 1,
       aboveOffsetPx: ABOVE_OFFSET_PX,

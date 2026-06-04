@@ -14,8 +14,16 @@ export const UI_BUILD_CHECK_TEXTURE_KEY = 'ui_build_check';
 export const UI_BUILD_CANCEL_TEXTURE_KEY = 'ui_build_cancel';
 /** Object edit move (see ui/movement-icon.png). */
 export const UI_OBJECT_MOVE_TEXTURE_KEY = 'ui_object_move';
+/** Object edit upgrade (see ui/upgrade.png). */
+export const UI_OBJECT_UPGRADE_TEXTURE_KEY = 'ui_object_upgrade';
+/** Object edit feed (see ui/feed.png). */
+export const UI_OBJECT_FEED_TEXTURE_KEY = 'ui_object_feed';
 /** Object edit remove (see ui/remove.png). */
 export const UI_OBJECT_REMOVE_TEXTURE_KEY = 'ui_object_remove';
+/** Livestock hungry warning indicator (see animals/warning.png). */
+export const LIVESTOCK_WARNING_TEXTURE_KEY = 'livestock_warning';
+/** Non-uniform warning icon scale: keep height, squash width. */
+export const LIVESTOCK_WARNING_WIDTH_SCALE = 0.5;
 
 /** Asset manifest: key -> relative path under src/assets */
 export interface AssetEntry {
@@ -155,34 +163,34 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'sheep_house', path: 'animals/sheep_house.png', placeholderColor: 0xe0e0e0, width: 112, height: 96 },
   { key: 'goat_house', path: 'animals/goat_house.png', placeholderColor: 0xd7ccc8, width: 112, height: 96 },
   { key: 'chicken_child', path: 'animals/chicken_child.png', placeholderColor: 0xffe082, width: 48, height: 40 },
-  { key: 'chicken_ault', path: 'animals/chicken_ault.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
-  { key: 'chicken_ault_1', path: 'animals/chicken_ault_1.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
-  { key: 'chicken_ault_2', path: 'animals/chicken_ault_2.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
-  { key: 'chicken_ault_3', path: 'animals/chicken_ault_3.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'chicken_ault', path: 'animals/chicken_adult.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'chicken_ault_1', path: 'animals/chicken_adult_1.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'chicken_ault_2', path: 'animals/chicken_adult_2.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'chicken_ault_3', path: 'animals/chicken_adult_3.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
   { key: 'cow_child', path: 'animals/cow_child.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
-  { key: 'cow_ault', path: 'animals/cow_ault.png', placeholderColor: 0x8d6e63, width: 56, height: 48 },
-  { key: 'cow_ault_2', path: 'animals/cow_ault_2.png', placeholderColor: 0x8d6e63, width: 56, height: 48 },
+  { key: 'cow_ault', path: 'animals/cow_adult.png', placeholderColor: 0x8d6e63, width: 56, height: 48 },
+  { key: 'cow_ault_2', path: 'animals/cow_adult_2.png', placeholderColor: 0x8d6e63, width: 56, height: 48 },
   { key: 'duck_child', path: 'animals/duck_child.png', placeholderColor: 0xffe0b2, width: 44, height: 38 },
-  { key: 'duck_ault_1', path: 'animals/duck_ault_1.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
-  { key: 'duck_ault_2', path: 'animals/duck_ault_2.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
-  { key: 'duck_ault_3', path: 'animals/duck_ault_3.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'duck_ault_1', path: 'animals/duck_adult_1.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'duck_ault_2', path: 'animals/duck_adult_2.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'duck_ault_3', path: 'animals/duck_adult_3.png', placeholderColor: 0xffcc80, width: 48, height: 40 },
+  { key: 'pig_child', path: 'animals/pig_child.png', placeholderColor: 0xf8bbd0, width: 44, height: 38 },
   { key: 'pig_child_1', path: 'animals/pig_child_1.png', placeholderColor: 0xf8bbd0, width: 44, height: 38 },
-  { key: 'pig_child_2', path: 'animals/pig_child_2.png', placeholderColor: 0xf8bbd0, width: 44, height: 38 },
-  { key: 'pig_young', path: 'animals/pig_young.png', placeholderColor: 0xf48fb1, width: 48, height: 42 },
-  { key: 'pig_ault', path: 'animals/pick_ault.png', placeholderColor: 0xf06292, width: 52, height: 46 },
-  { key: 'fish_1', path: 'animals/fish_1.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
-  { key: 'fish_2', path: 'animals/fish_2.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
-  { key: 'fish_3', path: 'animals/fish_3.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
-  { key: 'fish_4', path: 'animals/fish_4.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
+  { key: 'pig_adult', path: 'animals/pig_adult.png', placeholderColor: 0xf06292, width: 52, height: 46 },
+  { key: 'pig_adult_1', path: 'animals/pig_adult_1.png', placeholderColor: 0xf06292, width: 52, height: 46 },
+  { key: 'fish_1', path: 'animals/fish_adult.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
+  { key: 'fish_2', path: 'animals/fish_adult_1.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
+  { key: 'fish_3', path: 'animals/fish_adult_2.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
+  { key: 'fish_4', path: 'animals/fish_adult_3.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
   { key: 'fish_child', path: 'animals/fish_child.png', placeholderColor: 0x4fc3f7, width: 40, height: 32 },
   { key: 'sheep_child', path: 'animals/sheep_child.png', placeholderColor: 0xe0e0e0, width: 48, height: 40 },
-  { key: 'sheep_ault', path: 'animals/sheep_ault.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
-  { key: 'sheep_ault_1', path: 'animals/sheep_ault_1.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
-  { key: 'sheep_ault_2', path: 'animals/sheep_ault_2.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
+  { key: 'sheep_ault', path: 'animals/sheep_adult.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
+  { key: 'sheep_ault_1', path: 'animals/sheep_adult_1.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
+  { key: 'sheep_ault_2', path: 'animals/sheep_adult_2.png', placeholderColor: 0xe0e0e0, width: 52, height: 44 },
   { key: 'goat_child', path: 'animals/goat_child.png', placeholderColor: 0xd7ccc8, width: 48, height: 40 },
-  { key: 'goat_ault', path: 'animals/goat_ault.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
-  { key: 'goat_ault_1', path: 'animals/goat_ault_1.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
-  { key: 'goat_ault_2', path: 'animals/goat_ault_2.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
+  { key: 'goat_ault', path: 'animals/goat_adult.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
+  { key: 'goat_ault_1', path: 'animals/goat_adult_1.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
+  { key: 'goat_ault_2', path: 'animals/goat_adult_2.png', placeholderColor: 0xbcaaa4, width: 52, height: 44 },
   { key: 'wheat_stage1', path: 'crops/wheat_stage1.png', placeholderColor: 0xc9a227, width: 32, height: 24 },
   { key: 'wheat_stage2', path: 'crops/wheat_stage2.png', placeholderColor: 0xd4af37, width: 32, height: 32 },
   { key: 'wheat_stage3', path: 'crops/wheat_stage3.png', placeholderColor: 0xe6c229, width: 36, height: 36 },
@@ -377,11 +385,32 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     height: 48,
   },
   {
+    key: UI_OBJECT_UPGRADE_TEXTURE_KEY,
+    path: 'ui/upgrade.png',
+    placeholderColor: 0xe0b04a,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_OBJECT_FEED_TEXTURE_KEY,
+    path: 'ui/feed.png',
+    placeholderColor: 0x6fbf73,
+    width: 48,
+    height: 48,
+  },
+  {
     key: UI_OBJECT_REMOVE_TEXTURE_KEY,
     path: 'ui/remove.png',
     placeholderColor: 0xc0392b,
     width: 48,
     height: 48,
+  },
+  {
+    key: LIVESTOCK_WARNING_TEXTURE_KEY,
+    path: 'animals/warning.png',
+    placeholderColor: 0xff6b6b,
+    width: 40,
+    height: 40,
   },
   {
     key: 'ui_tab_materials_active',

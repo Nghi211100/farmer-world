@@ -4,7 +4,7 @@ import { chromium } from '@playwright/test';
 
 const ARTIFACT_DIR = path.resolve('artifacts/left-shift-verify');
 const VIEWPORT = { width: 1920, height: 1080 };
-const TARGET_FRAC = -0.005;
+const TARGET_FRAC = 7 / 20;
 const PX_TOLERANCE = 1;
 const BASE_URL = 'http://localhost:5173/?debugGrid=1';
 
@@ -27,23 +27,23 @@ async function collectMetrics(page) {
   return page.evaluate(({ targetFrac }) => {
     const api = window.__FARMER_WORLD_TEST__;
     const center = api?.getFarmCameraCenterMetrics();
-    const viewport = api?.getFarmViewportDebugMetrics();
+    const bounds = api?.getFarmBoundsMetrics();
     const soil = api?.getSoilFootprintAlignMetrics();
-    if (!center || !viewport || !soil) return null;
+    if (!center || !bounds || !soil) return null;
     const panBoundsWidth = center.panBoundsWidth;
     const zoom = center.zoom;
     const expectedPx = panBoundsWidth * zoom * targetFrac;
-    const mapCenterScreenX = (viewport.mapBounds.centerX - center.scrollX) * zoom;
-    const footprintCenterScreenX = center.patchScreenX;
-    const actualPx = footprintCenterScreenX - mapCenterScreenX;
+    const mapLeftScreenX = (bounds.mapBounds.minX - center.scrollX) * zoom;
+    const panLeftScreenX = (bounds.panBounds.minX - center.scrollX) * zoom;
+    const actualPx = mapLeftScreenX - panLeftScreenX;
     return {
       panBoundsWidth,
       zoom,
       expectedPx,
       actualPx,
       deltaPx: actualPx - expectedPx,
-      mapCenterScreenX,
-      footprintCenterScreenX,
+      mapLeftScreenX,
+      panLeftScreenX,
       soilFootprintAlignError: soil.soilFootprintAlignError,
       centerAlignErrorPx: soil.centerAlignErrorPx,
       maxTileOutsideAabbPx: soil.maxTileOutsideAabbPx,

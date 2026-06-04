@@ -1,5 +1,5 @@
 {
-  "targetFraction": 0.03,
+  "targetFraction": 0.35,
   "tolerancePx": 1,
   "viewport": {
     "width": 1920,
@@ -10,11 +10,11 @@
     "metrics": {
       "panBoundsWidth": 2229,
       "zoom": 1.7,
-      "expectedPx": 113.67899999999999,
-      "actualPx": -1221.1949999999993,
-      "deltaPx": -1334.8739999999993,
-      "mapCenterScreenX": 2416.141999999999,
-      "footprintCenterScreenX": 1194.9469999999997,
+      "expectedPx": 1326.2549999999999,
+      "actualPx": 915.45,
+      "deltaPx": -410.80499999999984,
+      "mapLeftScreenX": 661.3679999999999,
+      "panLeftScreenX": -254.08200000000005,
       "soilFootprintAlignError": 0,
       "centerAlignErrorPx": 0,
       "maxTileOutsideAabbPx": 0,
@@ -26,18 +26,18 @@
     "metrics": {
       "panBoundsWidth": 2229,
       "zoom": 1.7,
-      "expectedPx": 113.67899999999999,
-      "actualPx": 113.67899999999986,
-      "deltaPx": -1.2789769243681803e-13,
-      "mapCenterScreenX": 1081.2679999999998,
-      "footprintCenterScreenX": 1194.9469999999997,
+      "expectedPx": 1326.2549999999999,
+      "actualPx": 915.45,
+      "deltaPx": -410.80499999999984,
+      "mapLeftScreenX": 661.3679999999999,
+      "panLeftScreenX": -254.08200000000005,
       "soilFootprintAlignError": 0,
       "centerAlignErrorPx": 0,
       "maxTileOutsideAabbPx": 0,
       "maxSpriteDriftPx": 0
     },
-    "pass": true,
+    "pass": false,
     "soilAlignmentIntact": true
   },
-  "generatedAt": "2026-06-02T09:39:27.171Z"
+  "generatedAt": "2026-06-02T15:13:55.277Z"
 }

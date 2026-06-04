@@ -118,7 +118,7 @@ export class CropSprite {
     farming: FarmingSystem
   ): void {
     const crop = farming.getCrop(this.gridX, this.gridY);
-    const tileTop = grid.gridToScreen(this.gridX, this.gridY);
+    const tileTop = grid.gridToMapScreen(this.gridX, this.gridY);
     const anchorX = tileTop.x;
     const tileTopY = tileTop.y;
     const depth = grid.getDepth(this.gridX, this.gridY, 'crops') + 20;

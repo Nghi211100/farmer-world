@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { applyViewportCoverBackground } from '../backgroundLayout';
 import {
+  computeFarmIslandScreenBounds,
   computeFarmIslandWorldDepth,
   FARM_ISLAND_SCALE_BOOST,
   isFarmNorthEdgeCell,
@@ -11,10 +12,13 @@ import {
   DEFAULT_COINS,
   DEFAULT_ENERGY,
   DEFAULT_GEMS,
-  FARM_SOIL_BOUNDS,
+  FARM_PLAYER_SPAWN_GX,
+  FARM_PLAYER_SPAWN_GY,
   FarmTool,
   isDebugMode,
   isFarmCameraDebug,
+  isFarmCenterDebugMarkers,
+  getFarmForceSpawnWorld,
   isFarmGridDebug,
   isPersistentToolBarEnabled,
   LAND_EXPAND_STRINGS,
@@ -45,7 +49,6 @@ import {
   DISPLAY_SIZE,
   drawIsoTileClickPick,
   drawIsoTileDebug,
-  drawIsoTileDebugDashed,
   FARM_NORTH_EDGE_GROUND_SCALE,
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
@@ -53,19 +56,17 @@ import {
   NATURE_DISPLAY_SCALE,
   tileCenterFromTop,
 } from '../utils/iso';
+import { penFootprintTiles, penHouseDisplaySize } from '../config/livestockAssets';
 import {
-  penFootprintCells,
-  penFootprintCenterGrid,
-  penFootprintTiles,
-  penHouseDisplaySize,
-} from '../config/livestockAssets';
-import {
+  buildFarmCenterDebugMarkers,
   buildFarmViewportHudDebugOverlay,
   buildFarmWorldDebugGridOverlay,
+  farmViewportCenterWorldAtScroll,
   refreshFarmViewportHudVoidHint,
+  type FarmCenterDebugMarkersOverlay,
   type FarmViewportHudDebugOverlay,
 } from '../utils/farmViewportDebug';
-import { screenBoundsToFootprint } from '../utils/farmViewportDebugLayout';
+import { farmWorldToScreen, screenBoundsToFootprint } from '../utils/farmViewportDebugLayout';
 import {
   getWaterCornerDisplayOffset,
   getWaterGroundDisplayScale,
@@ -83,7 +84,7 @@ import { LivestockSystem, type LivestockPenPlaceItemDef } from '../systems/Lives
 import {
   getLivestockDef,
   LIVESTOCK_PEN_UPGRADE_COST,
-  penFootprintDebugLabel,
+  RUMINANT_PEN_LABEL_VI,
   type AnimalType,
   type LivestockPenData,
 } from '../config/LivestockConfig';
@@ -92,21 +93,25 @@ import type { BuildingData } from '../config/gameConfig';
 import {
   computePlayableFarmViewportLayout,
   expandSelectHintToastFontSize,
+  FARM_MAP_TOP_PAN_BOUNDS_FRAC,
   getFarmMapTopTargetScreenYFromPanBounds,
   getPlayableBandGeometricCenter,
-  getPlayableBandPanBoundsCenter,
+  getFarmPanBoundsScrollTargetScreen,
   shiftPlayableBandForPanBoundsCenter,
-  topHudBandHeight,
 } from '../ui/hudLayout';
 import type { UIScene } from './UIScene';
 import { ToolBar } from '../ui/ToolBar';
 import { exceedsDragThreshold } from '../utils/pointerGesture';
 import {
   clampScrollToFarmPlayable,
+  clampScrollSoFootprintOverlapsViewport,
   computeCenteredFarmCameraScroll,
-  computeFarmCameraScrollLimits,
+  computeFarmViewportVoidMargins,
+  resolveFarmPanClampBounds,
+  mergeFarmCameraScrollWithOversizeCenter,
+  getConfiguredFarmCameraScrollLimits,
+  snapFarmOversizeScrollToLimitsMidpoint,
   computeFarmPlayableScreenMargins,
-  farmFootprintCenter,
   type FarmFootprintBounds,
   type FarmCameraScrollLimits,
   type PlayableBandRect,
@@ -115,18 +120,38 @@ import {
   runMapTopPanBoundsCameraPasses,
   syncFarmMapTopCameraScroll,
 } from '../farmMapTopCamera';
-import { penIdAfterConfirmedMove } from '../utils/objectMoveReveal';
+import {
+  computeScrollForMapCenterScreenTarget,
+  enforceFarmMapCenterWorldAnchor,
+  FARM_SPAWN_WORLD_ANCHOR_TOLERANCE_PX,
+  getFarmMapCenterScreenTargetAtScrollZero,
+  getFarmMapCenterWorldOffsetDelta,
+  getFarmMapCenterWorldTargetAtDefaultScroll,
+  logFarmMapCenterWorldAnchorDeviation,
+  type FarmMapCenterWorldEnforceResult,
+} from '../farmWorldScrollAnchor';
+import {
+  clampFarmCameraZoom,
+  FARM_CAMERA_DEFAULT_ZOOM,
+  FARM_CAMERA_INERTIA_MS,
+  FARM_CAMERA_MAX_ZOOM,
+  FARM_CAMERA_MIN_ZOOM,
+  FARM_CAMERA_PINCH_ZOOM_SCALE,
+  FARM_CAMERA_WHEEL_ZOOM_SCALE,
+  getFarmDefaultScrollAtZoom,
+  getFarmMapCenterWorldOffsets,
+} from '../config/farmCameraConfig';
+import {
+  decayPanVelocity,
+  panInertiaIsSettled,
+  stepSmoothZoomAtAnchor,
+  stepSmoothZoomAtMapCenter,
+} from '../farmCameraMotion';
 
 type FarmMode = 'normal' | 'build' | 'livestock' | 'expand' | 'plant';
-
-/** Farm camera zoom limits (wheel dy×0.001, pinch dist×0.005). Default / min zoom ~1.7. */
-const MIN_CAMERA_ZOOM = 1.7;
-const MAX_CAMERA_ZOOM = 3.0;
 /** Padding inside playable HUD band when fitting the farm diamond. */
 const FARM_FIT_PAD_X = 10;
 const FARM_FIT_PAD_Y = 10;
-/** Zoom past strict fit so FARM_SOIL_BOUNDS fills the viewport (less outer water at edges). */
-const FARM_INITIAL_ZOOM_BOOST = 1.08;
 export class FarmScene extends Phaser.Scene {
   grid!: GridSystem;
   farming!: FarmingSystem;
@@ -158,8 +183,6 @@ export class FarmScene extends Phaser.Scene {
 
   private tileSprites: Phaser.GameObjects.Image[] = [];
   private tileDebugGraphics?: Phaser.GameObjects.Graphics;
-  private penDebugGraphics?: Phaser.GameObjects.Graphics;
-  private penDebugLabels: Phaser.GameObjects.Text[] = [];
   private farmWorldDebugContainer?: Phaser.GameObjects.Container;
   private farmViewportHudDebugContainer?: FarmViewportHudDebugOverlay;
   private clickPickGraphics?: Phaser.GameObjects.Graphics;
@@ -167,6 +190,7 @@ export class FarmScene extends Phaser.Scene {
   private clickPickGx = -1;
   private clickPickGy = -1;
   private cameraDebugLabel?: Phaser.GameObjects.Text;
+  private farmCenterDebugMarkers?: FarmCenterDebugMarkersOverlay;
   private cropSprites = new Map<string, CropSprite>();
   private buildingSprites = new Map<string, BuildingSprite>();
   private livestockPenSprites = new Map<string, LivestockPenSprite>();
@@ -183,9 +207,30 @@ export class FarmScene extends Phaser.Scene {
   private pointerGestureCancelled = false;
   private pointerGestureStartX = 0;
   private pointerGestureStartY = 0;
+  /** Last pointer position for pan deltas (touch can leave prevPosition stale on one axis). */
+  private pointerPanLastX = 0;
+  private pointerPanLastY = 0;
   private lastPinchDist = 0;
+  private lastPanDeltaX = 0;
+  private lastPanDeltaY = 0;
+  /** Smooth zoom target (wheel/pinch); `cam.zoom` lerps toward this each frame. */
+  private cameraTargetZoom = FARM_CAMERA_DEFAULT_ZOOM;
+  private cameraZoomAnchorX = 0;
+  private cameraZoomAnchorY = 0;
+  private cameraPanVelocityX = 0;
+  private cameraPanVelocityY = 0;
+  private cameraInertiaRemainingMs = 0;
+  /** TODO(phase-3): double-tap focus on farm soil — track last tap for stub hook. */
+  private lastCameraTapTime = 0;
+  private lastCameraTapX = 0;
+  private lastCameraTapY = 0;
   /** User panned/zoomed camera — skip auto-recenter on resize until explicit refocus. */
   private cameraScrollTouchedByUser = false;
+  /** Last zoom for which map-center world-offset keyframes were applied (1.9 bake baseline). */
+  private lastMapCenterWorldOffsetZoom = FARM_CAMERA_DEFAULT_ZOOM;
+  /** Expected 20×20 map AABB center world at {@link cameras.main} zoom (after last enforce). */
+  private farmMapCenterWorldTargetX = 0;
+  private farmMapCenterWorldTargetY = 0;
   private lastCameraLayoutW = 0;
   private lastCameraLayoutH = 0;
   private saveTimer = 0;
@@ -263,7 +308,6 @@ export class FarmScene extends Phaser.Scene {
         this.livestockSystem.getPens(),
         this.livestockPenSprites
       );
-      this.syncFarmDebugOverlays();
       this.scheduleSave();
     });
 
@@ -275,6 +319,18 @@ export class FarmScene extends Phaser.Scene {
       this.livestockSystem.getPens(),
       this.livestockPenSprites
     );
+
+    // Layout after UIScene launch; mirrors `ui-ready` if that event was missed.
+    this.time.delayedCall(0, () => {
+      if (!this.cameraScrollTouchedByUser) {
+        this.focusCameraOnFarmSoil();
+        this.time.delayedCall(0, () => {
+          if (!this.cameraScrollTouchedByUser) {
+            this.snapMainCameraOversizeScrollToMidpoint();
+          }
+        });
+      }
+    });
   }
 
   private loadGameState(): void {
@@ -401,12 +457,7 @@ export class FarmScene extends Phaser.Scene {
       return { ok: false, message: `Chưa có art thú ${def.labelVi}` };
     }
     if (!this.livestockSystem.findPenForStocking(animalType)) {
-      const place =
-        animalType === 'fish'
-          ? 'hồ cá'
-          : animalType === 'goat' || animalType === 'sheep'
-            ? 'chuồng Dê/Cừu'
-            : `chuồng ${def.labelVi}`;
+      const place = animalType === 'fish' ? 'hồ cá' : `chuồng ${def.labelVi}`;
       return {
         ok: false,
         message: `Cần đặt ${place} trước (Build → Chăn nuôi)`,
@@ -415,17 +466,22 @@ export class FarmScene extends Phaser.Scene {
     return { ok: true, message: '' };
   }
 
-  /** Logical viewport for layout (scale manager; matches HUD). */
+  /** Logical viewport for layout — synced with main camera (matches HUD + debug dots). */
   private getLayoutViewportSize(): { width: number; height: number } {
-    const w = this.scale.width;
-    const h = this.scale.height;
+    this.syncMainCameraViewport();
+    const cam = this.cameras.main;
+    const w = cam.width > 0 ? cam.width : this.scale.width;
+    const h = cam.height > 0 ? cam.height : this.scale.height;
     return { width: w > 0 ? w : 1, height: h > 0 ? h : 1 };
   }
 
   /** Keep main camera in sync with scale after hi-DPI resize (avoids stale cam.width). */
   private syncMainCameraViewport(): void {
-    const { width, height } = this.getLayoutViewportSize();
-    this.cameras.main.setSize(width, height);
+    const w = this.scale.width;
+    const h = this.scale.height;
+    if (w > 0 && h > 0) {
+      this.cameras.main.setSize(w, h);
+    }
   }
 
   /** Screen-fixed background (cover-fills viewport; iso map diamond leaves corners otherwise). */
@@ -482,7 +538,7 @@ export class FarmScene extends Phaser.Scene {
 
     for (let y = 0; y < this.grid.size; y++) {
       for (let x = 0; x < this.grid.size; x++) {
-        const pos = this.grid.gridToGroundScreen(x, y);
+        const pos = this.grid.gridToMapScreen(x, y);
         const tile = this.add.image(pos.x, pos.y, 'grass');
         this.tileSprites.push(tile);
         this.applyGroundTileAt(x, y, tile);
@@ -515,8 +571,54 @@ export class FarmScene extends Phaser.Scene {
 
   private syncFarmDebugOverlays(): void {
     this.renderTileDebugOutlines();
-    this.renderPenFootprintDebugOutlines();
     this.renderPlayableViewportDebug();
+    this.syncFarmCenterDebugMarkers();
+  }
+
+  private syncFarmCenterDebugMarkers(): void {
+    this.farmCenterDebugMarkers?.destroy();
+    this.farmCenterDebugMarkers = undefined;
+    if (!isFarmCenterDebugMarkers()) return;
+
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    this.farmCenterDebugMarkers = buildFarmCenterDebugMarkers(this, viewW, viewH);
+    this.refreshFarmCenterDebugMarkers();
+  }
+
+  private refreshFarmCenterDebugMarkers(): void {
+    const overlay = this.farmCenterDebugMarkers;
+    if (!overlay || !this.grid) return;
+
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const mapCenterWorld = this.grid.gridToMapTileCenter(
+      FARM_PLAYER_SPAWN_GX,
+      FARM_PLAYER_SPAWN_GY
+    );
+    const mapCenterScreenTarget = getFarmMapCenterScreenTargetAtScrollZero(
+      viewW,
+      viewH,
+      cam.zoom
+    );
+    const mapCenterWorldOffset = getFarmMapCenterWorldOffsets(viewW, viewH, cam.zoom);
+    overlay.refresh(
+      {
+        mapCenterWorld,
+        mapCenterScreenTarget,
+        mapCenterWorldOffset,
+        mapCenterZoom: cam.zoom,
+        scrollOriginWorld: { x: cam.scrollX, y: cam.scrollY },
+        viewportCenterWorld: farmViewportCenterWorldAtScroll(
+          viewW,
+          viewH,
+          cam.zoom,
+          cam.scrollX,
+          cam.scrollY,
+          mapCenterScreenTarget
+        ),
+      },
+      cam
+    );
   }
 
   /** World-space iso outlines on every logical map cell (grass, water, farm). */
@@ -533,51 +635,12 @@ export class FarmScene extends Phaser.Scene {
     for (let y = 0; y < this.grid.size; y++) {
       for (let x = 0; x < this.grid.size; x++) {
         if (this.livestockSystem.getPenAt(x, y)) continue;
-        const onFarm = this.grid.isFarmIslandFootprintCell(x, y);
         const pos = this.grid.gridToMapScreen(x, y);
+        const onFarm = this.grid.isFarmIslandFootprintCell(x, y);
         drawIsoTileDebug(g, pos.x, pos.y, onFarm ? 0x00ff88 : 0x4488ff, onFarm ? 0.85 : 0.35);
       }
     }
     this.tileDebugGraphics = g;
-  }
-
-  /** World-space dashed iso outlines on each livestock pen footprint cell (3×3 / 4×4). */
-  private renderPenFootprintDebugOutlines(): void {
-    this.penDebugGraphics?.destroy();
-    this.penDebugGraphics = undefined;
-    for (const label of this.penDebugLabels) label.destroy();
-    this.penDebugLabels = [];
-    if (!isFarmGridDebug()) return;
-
-    const g = this.add.graphics();
-    const maxGx = this.grid.size - 1;
-    const maxGy = this.grid.size - 1;
-    const depth = this.grid.getDepth(maxGx, maxGy, 'entities') + 1;
-    g.setDepth(depth);
-    g.setScrollFactor(1);
-
-    for (const pen of this.livestockSystem.getPens()) {
-      for (const { gx, gy } of penFootprintCells(pen)) {
-        const pos = this.grid.gridToMapScreen(gx, gy);
-        drawIsoTileDebugDashed(g, pos.x, pos.y);
-      }
-      const centerGrid = penFootprintCenterGrid(pen);
-      const centerTop = this.grid.gridToMapScreen(centerGrid.gx, centerGrid.gy);
-      const center = tileCenterFromTop(centerTop);
-      const label = this.add
-        .text(center.x, center.y, penFootprintDebugLabel(pen), {
-          fontSize: '11px',
-          color: '#ff44cc',
-          fontStyle: 'bold',
-          backgroundColor: '#00000088',
-          padding: { x: 3, y: 1 },
-        })
-        .setOrigin(0.5)
-        .setDepth(depth + 1)
-        .setScrollFactor(1);
-      this.penDebugLabels.push(label);
-    }
-    this.penDebugGraphics = g;
   }
 
   /** World-space farm pan bounds grid + screen-fixed viewport HUD outlines. */
@@ -594,7 +657,6 @@ export class FarmScene extends Phaser.Scene {
       map: screenBoundsToFootprint(mapBounds),
       panBounds: this.getFarmCameraScrollBounds(),
       footprint: screenBoundsToFootprint(footprintBounds),
-      footprintRhombus: this.grid.getFarmFootprintScreenRhombus(),
       tileCount: this.grid.size * this.grid.size,
       gridSize: this.grid.size,
     });
@@ -680,9 +742,9 @@ export class FarmScene extends Phaser.Scene {
     this.cameraDebugLabel = undefined;
     if (!isFarmCameraDebug()) return;
 
-    const topBand = this.topHudBand();
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
     this.cameraDebugLabel = this.add
-      .text(8, topBand + 6, '', {
+      .text(viewW / 2, viewH / 2, '', {
         fontSize: '11px',
         color: '#aaffcc',
         backgroundColor: '#001a0dcc',
@@ -690,9 +752,11 @@ export class FarmScene extends Phaser.Scene {
         fontFamily: 'monospace',
         lineSpacing: 2,
       })
+      .setOrigin(0.5, 0.5)
       .setScrollFactor(0)
       .setDepth(10002);
     this.refreshCameraDebugOverlay();
+    this.refreshFarmCenterDebugMarkers();
   }
 
   private refreshCameraDebugOverlay(): void {
@@ -701,12 +765,23 @@ export class FarmScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    label.setPosition(8, this.topHudBand() + 6);
+    const spawn = this.grid.gridToMapTileCenter(FARM_PLAYER_SPAWN_GX, FARM_PLAYER_SPAWN_GY);
+    const worldTarget = getFarmMapCenterWorldTargetAtDefaultScroll(
+      viewW,
+      viewH,
+      cam.zoom
+    );
+    const spawnWorldErrorX = spawn.x - worldTarget.x;
+    const spawnWorldErrorY = spawn.y - worldTarget.y;
+    label.setPosition(viewW / 2, viewH / 2);
     label.setText(
       [
-        `zoom ${cam.zoom.toFixed(3)} (${MIN_CAMERA_ZOOM}–${MAX_CAMERA_ZOOM})`,
+        `zoom ${cam.zoom.toFixed(3)} (${FARM_CAMERA_MIN_ZOOM}–${FARM_CAMERA_MAX_ZOOM}) target ${this.cameraTargetZoom.toFixed(3)}`,
         `scroll ${cam.scrollX.toFixed(1)}, ${cam.scrollY.toFixed(1)}`,
         `view ${viewW}×${viewH}  userPan ${this.cameraScrollTouchedByUser ? 'yes' : 'no'}`,
+        `spawn(10,10) world ${spawn.x.toFixed(1)}, ${spawn.y.toFixed(1)}`,
+        `spawn target ${worldTarget.x.toFixed(1)}, ${worldTarget.y.toFixed(1)}`,
+        `spawnWorldError ${spawnWorldErrorX.toFixed(2)}, ${spawnWorldErrorY.toFixed(2)}`,
       ].join('\n')
     );
   }
@@ -730,7 +805,7 @@ export class FarmScene extends Phaser.Scene {
     });
     spr.setTexture(textureKey);
     spr.clearTint();
-    const top = this.grid.gridToGroundScreen(gx, gy);
+    const top = this.grid.gridToMapScreen(gx, gy);
     let px = top.x;
     let py = top.y;
     if (cell.type === 'water') {
@@ -810,17 +885,204 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private setupPlayer(): void {
-    this.player = new Player(this, this.grid, 10, 10);
+    this.player = new Player(
+      this,
+      this.grid,
+      FARM_PLAYER_SPAWN_GX,
+      FARM_PLAYER_SPAWN_GY
+    );
   }
 
   private setupCamera(): void {
     this.cameraScrollTouchedByUser = false;
-    this.focusCameraOnFarmSoil({ recenterCamera: true });
-    this.time.delayedCall(0, () => {
+    this.lastMapCenterWorldOffsetZoom = FARM_CAMERA_DEFAULT_ZOOM;
+    const cam = this.cameras.main;
+    cam.setZoom(FARM_CAMERA_DEFAULT_ZOOM);
+    this.cameraTargetZoom = FARM_CAMERA_DEFAULT_ZOOM;
+    this.resetCameraMotionState(cam.width / 2, cam.height / 2);
+    // Initial centering runs on `ui-ready` once HUD playable bands are stable.
+  }
+
+  private resetCameraMotionState(anchorX: number, anchorY: number): void {
+    this.cameraZoomAnchorX = anchorX;
+    this.cameraZoomAnchorY = anchorY;
+    this.cameraPanVelocityX = 0;
+    this.cameraPanVelocityY = 0;
+    this.cameraInertiaRemainingMs = 0;
+    this.lastPanDeltaX = 0;
+    this.lastPanDeltaY = 0;
+  }
+
+  private stopCameraInertia(): void {
+    this.cameraPanVelocityX = 0;
+    this.cameraPanVelocityY = 0;
+    this.cameraInertiaRemainingMs = 0;
+  }
+
+  /** Zoom-interpolated pan clamp from {@link farmCameraConfig}. */
+  private getMergedFarmCameraScrollLimits(zoom: number): FarmCameraScrollLimits {
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    return getConfiguredFarmCameraScrollLimits(viewW, viewH, zoom);
+  }
+
+  /**
+   * Final layout pass: tile (10,10) world → zoom keyframe; clears {@link mapTopPanOffset}.
+   * Does not change camera scroll (world-only); safe when {@link cameraScrollTouchedByUser}.
+   */
+  private enforceFarmMapCenterWorldAnchorAtZoom(zoom: number): FarmMapCenterWorldEnforceResult {
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const enforced = enforceFarmMapCenterWorldAnchor(
+      this.grid,
+      viewW,
+      viewH,
+      zoom,
+      this.farmIslandImage ?? null
+    );
+    this.farmMapCenterWorldTargetX = enforced.target.x;
+    this.farmMapCenterWorldTargetY = enforced.target.y;
+    logFarmMapCenterWorldAnchorDeviation(enforced, zoom, viewW, viewH);
+    return enforced;
+  }
+
+  /** Absolute last layout step: world anchor + island/sprites (never moves scroll). */
+  private finalizeFarmWorldAnchorAtZoom(zoom: number): FarmMapCenterWorldEnforceResult {
+    const enforced = this.enforceFarmMapCenterWorldAnchorAtZoom(zoom);
+    this.lastMapCenterWorldOffsetZoom = zoom;
+    this.layoutFarmIsland();
+    this.syncMapLayerSpritesAfterCameraLayout();
+    return enforced;
+  }
+
+  /**
+   * Per-frame safety net: tile (10,10) world must match zoom keyframe; pan/scroll never move it.
+   * Re-runs analytical hard lock only when drift or stale mapTopPanOffset is detected.
+   */
+  private ensureFarmSpawnTileWorldHardLock(): void {
+    if (!this.grid) return;
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const target = getFarmMapCenterWorldTargetAtDefaultScroll(viewW, viewH, cam.zoom);
+    const spawn = this.grid.gridToMapTileCenter(
+      FARM_PLAYER_SPAWN_GX,
+      FARM_PLAYER_SPAWN_GY
+    );
+    const err = Math.hypot(spawn.x - target.x, spawn.y - target.y);
+    const staleOffset =
+      Math.abs(this.grid.mapTopPanOffsetX) > 1e-9 ||
+      Math.abs(this.grid.mapTopPanOffsetY) > 1e-9;
+    const zoomStale = Math.abs(this.lastMapCenterWorldOffsetZoom - cam.zoom) > 1e-6;
+    if (
+      err > FARM_SPAWN_WORLD_ANCHOR_TOLERANCE_PX ||
+      staleOffset ||
+      zoomStale
+    ) {
+      this.finalizeFarmWorldAnchorAtZoom(cam.zoom);
+    }
+  }
+
+  /**
+   * Shift farm world so playable map center tracks zoom-keyframe world offsets (baseline = 1.9 bake).
+   */
+  private syncMapCenterWorldOffsetToZoom(fromZoom: number, toZoom: number): void {
+    if (!this.grid) return;
+    if (Math.abs(fromZoom - toZoom) < 1e-6) return;
+    this.finalizeFarmWorldAnchorAtZoom(toZoom);
+    if (!this.cameraScrollTouchedByUser) {
+      this.applyFarmDefaultCameraScrollAtZoom(toZoom);
+    }
+    if (this.farmCenterDebugMarkers) {
+      this.refreshFarmCenterDebugMarkers();
+    }
+  }
+
+  /**
+   * Default scroll from viewport keyframes (after world anchor); only when the user has not panned.
+   */
+  private applyFarmDefaultCameraScrollAtZoom(zoom: number): void {
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const scroll = getFarmDefaultScrollAtZoom(viewW, viewH, zoom);
+    const limits = getConfiguredFarmCameraScrollLimits(viewW, viewH, zoom);
+    const clamped = clampScrollToFarmPlayable(scroll.scrollX, scroll.scrollY, limits);
+    cam.scrollX = clamped.scrollX;
+    cam.scrollY = clamped.scrollY;
+  }
+
+  /**
+   * First-load / refocus scroll: viewport keyframes at default zoom (world anchor applied separately).
+   * Does not re-run {@link GridSystem.centerInViewport} (safe during zoom animation).
+   */
+  private applyFarmMapCenterScrollAtZoom(zoom: number): void {
+    this.applyFarmDefaultCameraScrollAtZoom(zoom);
+  }
+
+  private updateFarmCameraMotion(delta: number): void {
+    if (this.pointerGestureActive || this.isDragging) {
+      return;
+    }
+
+    const cam = this.cameras.main;
+
+    if (Math.abs(cam.zoom - this.cameraTargetZoom) > 0.0005) {
+      const previousZoom = cam.zoom;
       if (!this.cameraScrollTouchedByUser) {
-        this.focusCameraOnFarmSoil({ recenterCamera: true });
+        const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+        const step = stepSmoothZoomAtMapCenter(
+          this.grid.getFarmPlayableMapCenterScreen(),
+          viewW,
+          viewH,
+          cam.scrollX,
+          cam.scrollY,
+          previousZoom,
+          this.cameraTargetZoom
+        );
+        this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, step.zoom);
+        cam.setZoom(step.zoom);
+        this.applyFarmDefaultCameraScrollAtZoom(step.zoom);
+        this.clampMainCameraScrollToPlayable();
+      } else {
+        const anchorBefore = this.getFarmCameraCenterAnchor();
+        const keepScreenX = (anchorBefore.x - cam.scrollX) * previousZoom;
+        const keepScreenY = (anchorBefore.y - cam.scrollY) * previousZoom;
+        const step = stepSmoothZoomAtAnchor(
+          cam.scrollX,
+          cam.scrollY,
+          cam.zoom,
+          this.cameraTargetZoom,
+          this.cameraZoomAnchorX,
+          this.cameraZoomAnchorY
+        );
+        this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, step.zoom);
+        const anchorAfter = this.getFarmCameraCenterAnchor();
+        cam.setZoom(step.zoom);
+        cam.scrollX = anchorAfter.x - keepScreenX / step.zoom;
+        cam.scrollY = anchorAfter.y - keepScreenY / step.zoom;
+        this.clampMainCameraScrollToPlayable();
+        if (step.settled) {
+          this.adjustScrollAfterZoom(previousZoom);
+        }
       }
-    });
+    }
+
+    if (
+      this.cameraInertiaRemainingMs > 0 &&
+      !panInertiaIsSettled(this.cameraPanVelocityX, this.cameraPanVelocityY)
+    ) {
+      this.cameraInertiaRemainingMs = Math.max(0, this.cameraInertiaRemainingMs - delta);
+      cam.scrollX -= this.cameraPanVelocityX / cam.zoom;
+      cam.scrollY -= this.cameraPanVelocityY / cam.zoom;
+      this.clampMainCameraScrollToPlayable();
+      const decayed = decayPanVelocity(this.cameraPanVelocityX, this.cameraPanVelocityY);
+      this.cameraPanVelocityX = decayed.velocityX;
+      this.cameraPanVelocityY = decayed.velocityY;
+    } else if (this.cameraInertiaRemainingMs <= 0) {
+      this.stopCameraInertia();
+    }
+  }
+
+  /** Stub hook for double-tap-to-focus (phase 3 cinematic); no-op for now. */
+  private tryDoubleTapCameraFocus(_pointer: Phaser.Input.Pointer): void {
+    // TODO: refocus on farm soil when double-tap detected within time/distance threshold.
   }
 
   /**
@@ -857,8 +1119,12 @@ export class FarmScene extends Phaser.Scene {
       : null;
 
     this.syncMainCameraViewport();
-    this.grid.centerInViewport(w, h, FARM_FIT_PAD_X, FARM_FIT_PAD_Y);
-    this.repositionWorld();
+    if (!preserveView) {
+      this.grid.centerInViewport(w, h, FARM_FIT_PAD_X, FARM_FIT_PAD_Y);
+      this.repositionWorld();
+    } else {
+      this.finalizeFarmWorldAnchorAtZoom(cam.zoom);
+    }
 
     if (preserveView && patchScreenBefore) {
       const anchorAfter = this.getFarmCameraCenterAnchor();
@@ -871,21 +1137,22 @@ export class FarmScene extends Phaser.Scene {
     this.layoutBackground();
   }
 
-  /** World anchor for camera centering: island.png AABB center when loaded, else footprint AABB. */
+  /** World anchor for camera centering: playable map center (farmer spawn / visual center). */
   private getFarmCameraCenterAnchor(): { x: number; y: number } {
-    return farmFootprintCenter(this.getFarmCameraScrollBounds());
+    return this.grid.getFarmPlayableMapCenterScreen();
   }
 
   /**
-   * Fit the farm island/footprint in the playable HUD band, centered on its screen AABB.
-   * screen = (world - scroll) * zoom  =>  scroll = world - screen / zoom
+   * Pan-bounds center + map-top passes at a given zoom (load, refocus, after user zoom).
+   * When the user has panned: scroll-only — hard-lock tile (10,10) world, skip map-top passes.
    */
-  private centerCameraOnMap(): void {
-    const cam = this.cameras.main;
+  private applyCenteredFarmCameraScroll(zoom: number): void {
+    if (this.cameraScrollTouchedByUser) {
+      this.finalizeFarmWorldAnchorAtZoom(zoom);
+      return;
+    }
     const farm = this.getFarmCameraScrollBounds();
     const anchor = this.getFarmCameraCenterAnchor();
-    cam.removeBounds();
-
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
     const viewport = computePlayableFarmViewportLayout(
       viewW,
@@ -894,33 +1161,19 @@ export class FarmScene extends Phaser.Scene {
       FARM_FIT_PAD_Y
     );
     const { playableLeft, playableTop, playableRight, playableBottom } = viewport;
-    const scrollPlayable = shiftPlayableBandForPanBoundsCenter({
+    const geomPlayable = {
       playableLeft,
       playableTop,
       playableRight,
       playableBottom,
-    });
-    const targetCenter = getPlayableBandPanBoundsCenter({
-      playableLeft,
-      playableTop,
-      playableRight,
-      playableBottom,
-    });
-    const farmW = farm.maxX - farm.minX;
-    const farmH = farm.maxY - farm.minY;
-    const map = this.grid.getMapScreenBounds();
-    const mapW = map.maxX - map.minX;
-    const mapH = map.maxY - map.minY;
-    const playableW = playableRight - playableLeft;
-    const playableH = playableBottom - playableTop;
-    const fitZoom = Math.min(playableW / farmW, playableH / farmH);
-    const mapCoverZoom = Math.min(playableW / mapW, playableH / mapH);
-    const zoom = Phaser.Math.Clamp(
-      Math.min(fitZoom * FARM_INITIAL_ZOOM_BOOST, mapCoverZoom),
-      MIN_CAMERA_ZOOM,
-      MAX_CAMERA_ZOOM
+    };
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+      geomPlayable,
+      viewW,
+      viewH
     );
-    cam.setZoom(zoom);
+    const targetCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
+
     let scroll = computeCenteredFarmCameraScroll(
       anchor,
       targetCenter,
@@ -928,14 +1181,13 @@ export class FarmScene extends Phaser.Scene {
       scrollPlayable,
       zoom
     );
-    cam.scrollX = scroll.scrollX;
-    cam.scrollY = scroll.scrollY;
     const mapTopHooks = {
       alignMapTop: (panBounds: FarmFootprintBounds, scrollY: number, z: number) =>
         this.grid.alignMapTopToPanBoundsInset(panBounds, scrollY, z),
       getPanBounds: () => this.getFarmCameraScrollBounds(),
       getMapBounds: () => this.grid.getMapScreenBounds(),
-      repositionWorld: () => this.repositionWorld(),
+      getCenterAnchor: () => this.getFarmCameraCenterAnchor(),
+      repositionWorld: () => this.repositionFarmMapLayerOnly(),
       scrollPlayable,
       panTargetCenter: targetCenter,
       zoom,
@@ -945,49 +1197,198 @@ export class FarmScene extends Phaser.Scene {
       this.grid,
       () => this.getFarmCameraScrollBounds(),
       scroll.scrollY,
+      zoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+      scrollPlayable
+    );
+    const finalized = mergeFarmCameraScrollWithOversizeCenter(
+      { scrollX: scroll.scrollX, scrollY: synced.scrollY },
+      this.getFarmCameraScrollBounds(),
+      scrollPlayable,
+      targetCenter,
       zoom
     );
-    cam.scrollX = scroll.scrollX;
-    cam.scrollY = synced.scrollY;
-    this.repositionWorld();
-    this.repositionWorld();
-    const resynced = syncFarmMapTopCameraScroll(
-      this.grid,
-      () => this.getFarmCameraScrollBounds(),
-      cam.scrollY,
+    this.setMainCameraScrollFromLayout(finalized.scrollX, finalized.scrollY, scrollPlayable, zoom);
+    this.finalizeFarmWorldAnchorAtZoom(zoom);
+  }
+
+  /** Apply layout scroll: oversize midpoint snap, then ensure soil stays on screen. */
+  private setMainCameraScrollFromLayout(
+    scrollX: number,
+    scrollY: number,
+    scrollPlayable: PlayableBandRect,
+    zoom: number
+  ): void {
+    const cam = this.cameras.main;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const snap = snapFarmOversizeScrollToLimitsMidpoint(
+      { scrollX, scrollY },
+      this.getFarmCameraScrollBounds(),
+      scrollPlayable,
       zoom
     );
-    cam.scrollY = resynced.scrollY;
-    this.repositionWorld();
-    const settled = syncFarmMapTopCameraScroll(
-      this.grid,
-      () => this.getFarmCameraScrollBounds(),
-      cam.scrollY,
-      zoom
+    const footprint = this.grid.getFarmFootprintScreenBounds();
+    const soilFootprint: FarmFootprintBounds = {
+      minX: footprint.minX,
+      minY: footprint.minY,
+      maxX: footprint.maxX,
+      maxY: footprint.maxY,
+    };
+    const limits = this.getMergedFarmCameraScrollLimits(zoom);
+    const visible = clampScrollSoFootprintOverlapsViewport(
+      soilFootprint,
+      limits,
+      viewW,
+      viewH,
+      zoom,
+      snap,
+      scrollPlayable
     );
-    cam.scrollY = settled.scrollY;
-    this.repositionWorld({ relayoutIsland: false });
-    this.clampMainCameraScrollXToPlayable();
+    if (!this.cameraScrollTouchedByUser) {
+      this.applyFarmMapCenterScrollAtZoom(zoom);
+    } else {
+      cam.scrollX = visible.scrollX;
+      cam.scrollY = visible.scrollY;
+    }
+  }
+
+  /**
+   * First load / refocus: viewport default scroll + zoom; bake playable map center to keyframe world.
+   */
+  private applyDefaultFarmCameraPosition(zoom: number): void {
+    if (this.cameraScrollTouchedByUser) return;
+    const cam = this.cameras.main;
+    cam.setZoom(zoom);
+    this.cameraTargetZoom = zoom;
+    this.syncMainCameraViewport();
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    this.grid.centerInViewport(viewW, viewH, FARM_FIT_PAD_X, FARM_FIT_PAD_Y);
+    this.finalizeFarmWorldAnchorAtZoom(zoom);
+    this.applyFarmMapCenterScrollAtZoom(zoom);
+    this.clampMainCameraScrollToPlayable();
+  }
+
+  /** Re-apply default scroll/zoom after layout when the user has not panned. */
+  private snapMainCameraOversizeScrollToMidpoint(): void {
+    this.applyDefaultFarmCameraPosition(this.cameras.main.zoom);
+  }
+
+  /**
+   * After zoom changes: center on pan target when the user has not panned yet; otherwise keep the
+   * soil anchor fixed on screen so wheel/pinch zoom does not undo horizontal pan.
+   */
+  private adjustScrollAfterZoom(
+    previousZoom: number,
+    options?: { forceRecenter?: boolean }
+  ): void {
+    if (this.pointerGestureActive || this.isDragging) {
+      return;
+    }
+    const cam = this.cameras.main;
+    const zoom = cam.zoom;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const viewport = computePlayableFarmViewportLayout(
+      viewW,
+      viewH,
+      FARM_FIT_PAD_X,
+      FARM_FIT_PAD_Y
+    );
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+      {
+        playableLeft: viewport.playableLeft,
+        playableTop: viewport.playableTop,
+        playableRight: viewport.playableRight,
+        playableBottom: viewport.playableBottom,
+      },
+      viewW,
+      viewH
+    );
+    const limits = this.getMergedFarmCameraScrollLimits(zoom);
+    let scrollX = cam.scrollX;
+    let scrollY = cam.scrollY;
+    const anchorBefore = this.getFarmCameraCenterAnchor();
+    const keepScreenX = (anchorBefore.x - cam.scrollX) * previousZoom;
+    const keepScreenY = (anchorBefore.y - cam.scrollY) * previousZoom;
+    this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, zoom);
+    if (!this.cameraScrollTouchedByUser || options?.forceRecenter) {
+      const defaultScroll = getFarmDefaultScrollAtZoom(viewW, viewH, zoom);
+      scrollX = defaultScroll.scrollX;
+      scrollY = defaultScroll.scrollY;
+    } else {
+      const anchorAfter = this.getFarmCameraCenterAnchor();
+      scrollX = anchorAfter.x - keepScreenX / zoom;
+      scrollY = anchorAfter.y - keepScreenY / zoom;
+    }
+    let scroll = clampScrollToFarmPlayable(scrollX, scrollY, limits);
+    const footprint = this.grid.getFarmFootprintScreenBounds();
+    const soilFootprint: FarmFootprintBounds = {
+      minX: footprint.minX,
+      minY: footprint.minY,
+      maxX: footprint.maxX,
+      maxY: footprint.maxY,
+    };
+    scroll = clampScrollSoFootprintOverlapsViewport(
+      soilFootprint,
+      limits,
+      viewW,
+      viewH,
+      zoom,
+      scroll,
+      scrollPlayable
+    );
+    if (!this.cameraScrollTouchedByUser || options?.forceRecenter) {
+      this.setMainCameraScrollFromLayout(
+        scroll.scrollX,
+        scroll.scrollY,
+        scrollPlayable,
+        zoom
+      );
+    } else {
+      cam.scrollX = scroll.scrollX;
+      cam.scrollY = scroll.scrollY;
+    }
+    this.cameraTargetZoom = zoom;
+  }
+
+  /** Center farm at default zoom/scroll in the playable HUD band. */
+  private centerCameraOnMap(): void {
+    const cam = this.cameras.main;
+    cam.removeBounds();
+
+    const zoom = FARM_CAMERA_DEFAULT_ZOOM;
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    this.resetCameraMotionState(viewW / 2, viewH / 2);
+    if (!this.cameraScrollTouchedByUser) {
+      this.applyDefaultFarmCameraPosition(zoom);
+    } else {
+      cam.setZoom(zoom);
+      this.cameraTargetZoom = zoom;
+      this.applyCenteredFarmCameraScroll(zoom);
+    }
   }
 
   private getMainCameraPlayableBand(viewW: number, viewH: number): PlayableBandRect {
     const { playableLeft, playableTop, playableRight, playableBottom } =
       computePlayableFarmViewportLayout(viewW, viewH, FARM_FIT_PAD_X, FARM_FIT_PAD_Y);
-    return shiftPlayableBandForPanBoundsCenter({
-      playableLeft,
-      playableTop,
-      playableRight,
-      playableBottom,
-    });
+    return shiftPlayableBandForPanBoundsCenter(
+      {
+        playableLeft,
+        playableTop,
+        playableRight,
+        playableBottom,
+      },
+      viewW,
+      viewH
+    );
   }
 
   /** Keep farm footprint inside HUD playable band after layout, pan, or zoom. */
   private clampMainCameraScroll(
-    farm: { minX: number; minY: number; maxX: number; maxY: number },
+    _farm: { minX: number; minY: number; maxX: number; maxY: number },
     playable: PlayableBandRect & { zoom: number }
   ): void {
     const cam = this.cameras.main;
-    const limits = computeFarmCameraScrollLimits(farm, playable, playable.zoom);
+    const limits = this.getMergedFarmCameraScrollLimits(playable.zoom);
     const next = clampScrollToFarmPlayable(cam.scrollX, cam.scrollY, limits);
     cam.scrollX = next.scrollX;
     cam.scrollY = next.scrollY;
@@ -996,26 +1397,17 @@ export class FarmScene extends Phaser.Scene {
   private clampMainCameraScrollToPlayable(): void {
     const cam = this.cameras.main;
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const scrollPlayable = this.getMainCameraPlayableBand(viewW, viewH);
     this.clampMainCameraScroll(this.getFarmCameraScrollBounds(), {
-      ...this.getMainCameraPlayableBand(viewW, viewH),
+      ...scrollPlayable,
       zoom: cam.zoom,
     });
-  }
-
-  /** Layout: keep island pan X in band without undoing map-top scroll Y. */
-  private clampMainCameraScrollXToPlayable(): void {
-    const cam = this.cameras.main;
-    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    const limits = computeFarmCameraScrollLimits(
-      this.getFarmCameraScrollBounds(),
-      this.getMainCameraPlayableBand(viewW, viewH),
-      cam.zoom
-    );
-    if (limits.x.oversize) {
-      cam.scrollX = Phaser.Math.Clamp(
+    if (!this.cameraScrollTouchedByUser) {
+      this.setMainCameraScrollFromLayout(
         cam.scrollX,
-        limits.x.minScroll,
-        limits.x.maxScroll
+        cam.scrollY,
+        scrollPlayable,
+        cam.zoom
       );
     }
   }
@@ -1024,19 +1416,31 @@ export class FarmScene extends Phaser.Scene {
    * Pan clamp target: island.png screen AABB (falls back to soil footprint before island loads).
    * Tile-only footprint is much smaller than the island art, which caused overly tight pan limits.
    */
+  /**
+   * Pan clamp: inset island AABB when the image is loaded (trim empty PNG alpha);
+   * fallback to soil+path footprint before island layout.
+   */
   private getFarmCameraScrollBounds(): FarmFootprintBounds {
-    const image = this.farmIslandImage;
-    if (image) {
-      const halfW = image.displayWidth / 2;
-      const halfH = image.displayHeight / 2;
-      return {
-        minX: image.x - halfW,
-        minY: image.y - halfH,
-        maxX: image.x + halfW,
-        maxY: image.y + halfH,
-      };
+    const fp = this.grid.getFarmFootprintScreenBounds();
+    const footprint: FarmFootprintBounds = {
+      minX: fp.minX,
+      minY: fp.minY,
+      maxX: fp.maxX,
+      maxY: fp.maxY,
+    };
+    if (!this.farmIslandImage) {
+      return resolveFarmPanClampBounds(footprint, null);
     }
-    return this.grid.getFarmFootprintScreenBounds();
+    const frame = this.farmIslandImage.frame;
+    const texW = frame.cutWidth || frame.width;
+    const texH = frame.cutHeight || frame.height;
+    const island = computeFarmIslandScreenBounds(
+      this.grid.getFarmSoilScreenRhombus(),
+      texW,
+      texH,
+      { scaleBoost: FARM_ISLAND_SCALE_BOOST }
+    );
+    return resolveFarmPanClampBounds(footprint, island);
   }
 
   private setupToolBar(): void {
@@ -1057,6 +1461,7 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
       this.focusCameraOnFarmSoil();
+      this.snapMainCameraOversizeScrollToMidpoint();
     }, 100);
   }
 
@@ -1069,10 +1474,23 @@ export class FarmScene extends Phaser.Scene {
     this.scheduleResizeCameraLayout();
   }
 
-  private repositionWorld(options?: { relayoutIsland?: boolean }): void {
-    if (options?.relayoutIsland !== false) {
-      this.layoutFarmIsland();
+  /** Island + tile sprites only (preserves {@link mapTopPanOffset} during map-top camera passes). */
+  private repositionFarmMapLayerOnly(): void {
+    this.layoutFarmIsland();
+    this.syncMapLayerSpritesAfterCameraLayout();
+  }
+
+  private repositionWorld(): void {
+    const cam = this.cameras.main;
+    const zoom = cam.zoom;
+    this.finalizeFarmWorldAnchorAtZoom(zoom);
+    if (!this.cameraScrollTouchedByUser) {
+      this.applyFarmDefaultCameraScrollAtZoom(zoom);
     }
+  }
+
+  /** Reposition map-layer sprites after {@link mapTopPanOffset} changes (no camera re-layout). */
+  private syncMapLayerSpritesAfterCameraLayout(): void {
     for (let i = 0; i < this.tileSprites.length; i++) {
       const gx = i % this.grid.size;
       const gy = Math.floor(i / this.grid.size);
@@ -1080,7 +1498,7 @@ export class FarmScene extends Phaser.Scene {
     }
     this.ensureNorthApexGroundDrawnOnTop();
     for (const d of this.decorations) {
-      const foot = this.grid.gridToMapTileBottom(d.gridX, d.gridY);
+      const foot = this.grid.gridToTileBottom(d.gridX, d.gridY);
       d.sprite.setPosition(foot.x, foot.y);
     }
     const spawn = this.player.getGridPosition();
@@ -1101,11 +1519,8 @@ export class FarmScene extends Phaser.Scene {
     this.syncFarmDebugOverlays();
     this.refreshClickPickDebug();
     this.refreshCameraDebugOverlay();
+    this.refreshFarmCenterDebugMarkers();
     this.expandDimOverlay?.refresh();
-  }
-
-  private topHudBand(): number {
-    return topHudBandHeight(this.scale.width, this.scale.height);
   }
 
   private getUIScene(): UIScene | undefined {
@@ -1118,6 +1533,8 @@ export class FarmScene extends Phaser.Scene {
     this.pointerGestureCancelled = false;
     this.pointerGestureStartX = pointer.x;
     this.pointerGestureStartY = pointer.y;
+    this.pointerPanLastX = pointer.x;
+    this.pointerPanLastY = pointer.y;
     this.isDragging = false;
   }
 
@@ -1146,15 +1563,28 @@ export class FarmScene extends Phaser.Scene {
     ) {
       this.pointerGestureDragged = true;
       this.isDragging = true;
+      this.pointerPanLastX = pointer.x;
+      this.pointerPanLastY = pointer.y;
     }
   }
 
   private panCameraWithPointer(pointer: Phaser.Input.Pointer): void {
     this.cameraScrollTouchedByUser = true;
+    this.stopCameraInertia();
     const cam = this.cameras.main;
-    cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
-    cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+    const dx = pointer.x - this.pointerPanLastX;
+    const dy = pointer.y - this.pointerPanLastY;
+    this.pointerPanLastX = pointer.x;
+    this.pointerPanLastY = pointer.y;
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+    this.lastPanDeltaX = dx;
+    this.lastPanDeltaY = dy;
+    cam.scrollX -= dx / cam.zoom;
+    cam.scrollY -= dy / cam.zoom;
     this.clampMainCameraScrollToPlayable();
+    this.ensureFarmSpawnTileWorldHardLock();
   }
 
   /**
@@ -1295,7 +1725,6 @@ export class FarmScene extends Phaser.Scene {
       }
 
       this.beginPointerGesture(pointer);
-      this.cameraScrollTouchedByUser = true;
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -1328,9 +1757,26 @@ export class FarmScene extends Phaser.Scene {
         !this.pointerGestureDragged;
       this.endPointerGesture();
       if (wasDrag) {
+        this.cameraPanVelocityX = this.lastPanDeltaX;
+        this.cameraPanVelocityY = this.lastPanDeltaY;
+        this.cameraInertiaRemainingMs = FARM_CAMERA_INERTIA_MS;
         this.clampMainCameraScrollToPlayable();
       }
       if (wasTap) {
+        const now = this.time.now;
+        const dt = now - this.lastCameraTapTime;
+        const dist = Phaser.Math.Distance.Between(
+          pointer.x,
+          pointer.y,
+          this.lastCameraTapX,
+          this.lastCameraTapY
+        );
+        if (dt < 300 && dist < 24) {
+          this.tryDoubleTapCameraFocus(pointer);
+        }
+        this.lastCameraTapTime = now;
+        this.lastCameraTapX = pointer.x;
+        this.lastCameraTapY = pointer.y;
         this.handlePointerTap(pointer);
       }
     });
@@ -1339,13 +1785,13 @@ export class FarmScene extends Phaser.Scene {
       this.endPointerGesture();
     });
 
-    this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, dy: number) => {
-      this.cameraScrollTouchedByUser = true;
-      const cam = this.cameras.main;
-      cam.setZoom(
-        Phaser.Math.Clamp(cam.zoom - dy * 0.001, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM)
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, dy: number) => {
+      this.stopCameraInertia();
+      this.cameraZoomAnchorX = pointer.x;
+      this.cameraZoomAnchorY = pointer.y;
+      this.cameraTargetZoom = clampFarmCameraZoom(
+        this.cameraTargetZoom - dy * FARM_CAMERA_WHEEL_ZOOM_SCALE
       );
-      this.clampMainCameraScrollToPlayable();
     });
 
     this.input.addPointer(2);
@@ -1359,11 +1805,11 @@ export class FarmScene extends Phaser.Scene {
           this.input.pointer2.x,
           this.input.pointer2.y
         );
-        const cam = this.cameras.main;
-        this.cameraScrollTouchedByUser = true;
-        const delta = (dist - this.lastPinchDist) * 0.005;
-        cam.setZoom(Phaser.Math.Clamp(cam.zoom + delta, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM));
-        this.clampMainCameraScrollToPlayable();
+        this.stopCameraInertia();
+        this.cameraZoomAnchorX = (this.input.pointer1.x + this.input.pointer2.x) / 2;
+        this.cameraZoomAnchorY = (this.input.pointer1.y + this.input.pointer2.y) / 2;
+        const delta = (dist - this.lastPinchDist) * FARM_CAMERA_PINCH_ZOOM_SCALE;
+        this.cameraTargetZoom = clampFarmCameraZoom(this.cameraTargetZoom + delta);
         this.lastPinchDist = dist;
       }
     });
@@ -1507,12 +1953,13 @@ export class FarmScene extends Phaser.Scene {
       this.setFarmMode('normal');
       this.emitHud();
       this.scheduleSave();
+      const def = getLivestockDef(item.placeTarget as AnimalType);
       const label =
-        item.placeTarget === 'ruminant'
-          ? 'chuồng Dê/Cừu'
-          : item.placeTarget === 'fish'
-            ? 'hồ cá'
-            : `chuồng ${getLivestockDef(item.placeTarget).labelVi}`;
+        item.placeTarget === 'fish'
+          ? 'hồ cá'
+          : item.placeTarget === 'ruminant'
+            ? RUMINANT_PEN_LABEL_VI.toLowerCase()
+            : `chuồng ${def.labelVi}`;
       this.showToast(`Đã đặt ${label}`);
       this.events.emit('mode-hint', { text: '', prominent: false });
     } else {
@@ -1534,18 +1981,10 @@ export class FarmScene extends Phaser.Scene {
     const stocked = this.livestockSystem.stockSpeciesPen(animalType);
     if (!stocked) {
       this.economy.earn(def.animalCost);
-      const penLabel =
-        animalType === 'goat' || animalType === 'sheep'
-          ? 'Chuồng Dê/Cừu'
-          : `Chuồng ${def.labelVi}`;
       this.showToast(
         this.livestockSystem.findPenForStocking(animalType)
-          ? `${penLabel} đã có thú`
-          : animalType === 'fish'
-            ? 'Cần đặt hồ cá trước (Build → Chăn nuôi)'
-            : animalType === 'goat' || animalType === 'sheep'
-              ? 'Cần đặt chuồng Dê/Cừu trước (Build → Chăn nuôi)'
-              : `Cần đặt chuồng ${def.labelVi} trước`
+          ? `Chuồng ${def.labelVi} đã có thú`
+          : `Cần đặt chuồng/hồ ${def.labelVi} trước`
       );
       return;
     }
@@ -1617,7 +2056,13 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private showObjectEditPopup(gx: number, gy: number, penOnly = false): void {
-    this.objectEditPopup.show(gx, gy, penOnly ? { hideRemove: true } : undefined);
+    const pen = penOnly ? this.livestockSystem.getPenAt(gx, gy) : undefined;
+    const showHungryWarning = pen?.lifecycleState === 'hungry';
+    this.objectEditPopup.show(
+      gx,
+      gy,
+      penOnly ? { hideRemove: true, showHungryWarning } : undefined
+    );
   }
 
   private executeObjectEditAction(action: ObjectEditAction, gx: number, gy: number): void {
@@ -1673,44 +2118,19 @@ export class FarmScene extends Phaser.Scene {
 
   private confirmObjectMove(): void {
     const { ghostX, ghostY } = this.objectEditSystem;
-    const session = this.objectEditSystem.getSession();
-    const movedPen = session?.payload.kind === 'pen';
     if (!this.objectEditSystem.confirmMoveAt(ghostX, ghostY)) {
       this.showToast("Can't place here");
       this.showObjectMoveConfirm();
       return;
     }
-    this.revealObjectAfterMove(session, ghostX, ghostY);
+    const movedPen = this.objectEditSystem.isPenSession();
     this.refreshMapDecorations();
+    this.objectEditSystem.endMove();
     this.buildPlacementConfirm.hide();
     this.ghostSprite?.setVisible(false);
     this.events.emit('mode-hint', { text: '', prominent: false });
     this.scheduleSave();
     this.showToast(movedPen ? 'Đã di chuyển chuồng' : 'Moved');
-  }
-
-  /** Undo {@link setObjectOriginHidden} after a successful move (pen sprites reuse the same cache entry). */
-  private revealObjectAfterMove(
-    session: ReturnType<ObjectEditSystem['getSession']>,
-    ghostX: number,
-    ghostY: number
-  ): void {
-    if (!session) return;
-    const penId = penIdAfterConfirmedMove(session);
-    if (penId) {
-      this.livestockPenSprites.get(penId)?.container.setVisible(true);
-      return;
-    }
-    if (session.payload.kind === 'building') {
-      const building = this.buildSystem.findBuildingAt(ghostX, ghostY);
-      if (building) {
-        this.buildingSprites.get(`${building.gridX},${building.gridY}`)?.sprite.setVisible(true);
-        return;
-      }
-      this.buildingSprites
-        .get(`${session.originGx},${session.originGy}`)
-        ?.sprite.setVisible(true);
-    }
   }
 
   private cancelObjectMoveMode(clearHint = true): void {
@@ -1867,16 +2287,38 @@ export class FarmScene extends Phaser.Scene {
   refocusFarmCameraForTest(): ReturnType<FarmScene['getFarmCameraCenterMetricsForTest']> {
     this.cameraScrollTouchedByUser = false;
     this.focusCameraOnFarmSoil({ recenterCamera: true });
+    const cam = this.cameras.main;
+    this.finalizeFarmWorldAnchorAtZoom(cam.zoom);
+    this.applyFarmMapCenterScrollAtZoom(cam.zoom);
+    this.clampMainCameraScrollToPlayable();
+    this.applyForceSpawnWorldCaptureScroll();
     return this.getFarmCameraCenterMetricsForTest();
   }
 
+  /**
+   * After `?forceSpawnWorld=…`: re-apply analytical scroll so tile (10,10) stays on the HUD
+   * target and the island footprint intersects the playable band (capture / debug).
+   */
+  private applyForceSpawnWorldCaptureScroll(): void {
+    if (!getFarmForceSpawnWorld()) return;
+    const cam = this.cameras.main;
+    const zoom = cam.zoom;
+    const enforced = this.finalizeFarmWorldAnchorAtZoom(zoom);
+    cam.scrollX = enforced.scrollX;
+    cam.scrollY = enforced.scrollY;
+    this.clampMainCameraScrollToPlayable();
+  }
+
+  /** Dev/e2e: snap oversize scroll axes to clamp midpoint; returns before/after diagnostics. */
   /** Dev/e2e: pan camera by screen pixels (same math as pointer drag). */
   panFarmCameraForTest(dxScreen: number, dyScreen: number): void {
     this.cameraScrollTouchedByUser = true;
+    this.stopCameraInertia();
     const cam = this.cameras.main;
     cam.scrollX -= dxScreen / cam.zoom;
     cam.scrollY -= dyScreen / cam.zoom;
     this.clampMainCameraScrollToPlayable();
+    this.ensureFarmSpawnTileWorldHardLock();
   }
 
   /** Dev/e2e: set zoom keeping a screen anchor fixed (defaults to viewport center). */
@@ -1885,19 +2327,30 @@ export class FarmScene extends Phaser.Scene {
     anchorScreenX?: number,
     anchorScreenY?: number
   ): void {
-    this.cameraScrollTouchedByUser = true;
     const cam = this.cameras.main;
-    const nextZoom = Phaser.Math.Clamp(zoom, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
-    const viewW = this.scale.width;
-    const viewH = this.scale.height;
-    const sx = anchorScreenX ?? viewW / 2;
-    const sy = anchorScreenY ?? viewH / 2;
-    const worldX = cam.scrollX + sx / cam.zoom;
-    const worldY = cam.scrollY + sy / cam.zoom;
-    cam.setZoom(nextZoom);
-    cam.scrollX = worldX - sx / nextZoom;
-    cam.scrollY = worldY - sy / nextZoom;
-    this.clampMainCameraScrollToPlayable();
+    const previousZoom = cam.zoom;
+    const clamped = clampFarmCameraZoom(zoom);
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    const anchorX = anchorScreenX ?? viewW / 2;
+    const anchorY = anchorScreenY ?? viewH / 2;
+    cam.setZoom(clamped);
+    this.cameraTargetZoom = clamped;
+    this.cameraZoomAnchorX = anchorX;
+    this.cameraZoomAnchorY = anchorY;
+    this.stopCameraInertia();
+    this.adjustScrollAfterZoom(previousZoom, { forceRecenter: true });
+  }
+
+  /** Dev/e2e: change zoom like wheel/pinch (preserves pan when the user has panned). */
+  stepFarmCameraZoomForTest(zoom: number): void {
+    const cam = this.cameras.main;
+    const previousZoom = cam.zoom;
+    this.cameraScrollTouchedByUser = true;
+    const clamped = clampFarmCameraZoom(zoom);
+    cam.setZoom(clamped);
+    this.cameraTargetZoom = clamped;
+    this.stopCameraInertia();
+    this.adjustScrollAfterZoom(previousZoom);
   }
 
   /** Dev/e2e: run debounced resize camera relayout (respects user view when flagged). */
@@ -1946,47 +2399,6 @@ export class FarmScene extends Phaser.Scene {
     };
   }
 
-  getSoilFootprintAlignMetricsForTest(): {
-    soilGridRange: { minX: number; maxX: number; minY: number; maxY: number };
-    centerAlignErrorPx: number;
-    maxTileOutsideAabbPx: number;
-    maxSpriteDriftPx: number;
-    soilFootprintAlignError: number;
-  } | null {
-    if (!this.grid) return null;
-    const measured = this.grid.measureSoilFootprintAlignment();
-    const { minX, maxX, minY, maxY } = FARM_SOIL_BOUNDS;
-    let maxSpriteDriftPx = 0;
-    for (let gy = minY; gy <= maxY; gy++) {
-      for (let gx = minX; gx <= maxX; gx++) {
-        const idx = gy * this.grid.size + gx;
-        const spr = this.tileSprites[idx];
-        if (!spr?.visible) continue;
-        const expected = this.grid.gridToMapScreen(gx, gy);
-        maxSpriteDriftPx = Math.max(
-          maxSpriteDriftPx,
-          Math.hypot(spr.x - expected.x, spr.y - expected.y)
-        );
-      }
-    }
-    return {
-      soilGridRange: measured.soilGridRange,
-      centerAlignErrorPx: measured.centerAlignErrorPx,
-      maxTileOutsideAabbPx: measured.maxTileOutsideAabbPx,
-      maxSpriteDriftPx,
-      soilFootprintAlignError: Math.max(
-        measured.soilFootprintAlignError,
-        maxSpriteDriftPx
-      ),
-    };
-  }
-
-  /** Dev/e2e: force map layer X offset and redraw world immediately. */
-  setMapTopPanOffsetXForTest(offsetX: number): void {
-    this.grid.mapTopPanOffsetX = offsetX;
-    this.repositionWorld({ relayoutIsland: false });
-  }
-
   getFarmCameraCenterMetricsForTest(): {
     viewW: number;
     viewH: number;
@@ -1999,6 +2411,10 @@ export class FarmScene extends Phaser.Scene {
     targetCenterY: number;
     errorX: number;
     errorY: number;
+    spawnScreenX: number;
+    spawnScreenY: number;
+    spawnErrorX: number;
+    spawnErrorY: number;
     soilScreenX: number;
     soilScreenY: number;
     soilErrorX: number;
@@ -2026,6 +2442,51 @@ export class FarmScene extends Phaser.Scene {
     marginRight: number;
     marginTop: number;
     marginBottom: number;
+    mapVoidLeft: number;
+    mapVoidRight: number;
+    mapVoidTop: number;
+    mapVoidBottom: number;
+    panVoidLeft: number;
+    panVoidRight: number;
+    panVoidTop: number;
+    panVoidBottom: number;
+    islandVoidLeft: number;
+    islandVoidRight: number;
+    islandVoidTop: number;
+    islandVoidBottom: number;
+    soilVoidLeft: number;
+    soilVoidRight: number;
+    soilVoidTop: number;
+    soilVoidBottom: number;
+    scrollMidpointErrorX: number;
+    scrollMidpointErrorY: number;
+    /** Playable map center on screen at current scroll. */
+    mapCenterScreenX: number;
+    mapCenterScreenY: number;
+    /** Interpolated map-center HUD target at current zoom ({@link getFarmMapCenterScreenTargetAtScrollZero}). */
+    mapCenterTargetScreenX: number;
+    mapCenterTargetScreenY: number;
+    mapCenterErrorX: number;
+    mapCenterErrorY: number;
+    /** Playable map center in world space after bake (zoom keyframe target). */
+    mapCenterAtOriginX: number;
+    mapCenterAtOriginY: number;
+    mapCenterWorldTargetX: number;
+    mapCenterWorldTargetY: number;
+    mapCenterWorldErrorX: number;
+    mapCenterWorldErrorY: number;
+    /** Tile (10,10) map-layer world (spawn anchor). */
+    spawnWorldX: number;
+    spawnWorldY: number;
+    spawnWorldTargetX: number;
+    spawnWorldTargetY: number;
+    spawnWorldErrorX: number;
+    spawnWorldErrorY: number;
+    /** True when 20×20 AABB center is corner-tile centroid (playable center may differ). */
+    isMapCenterTrueAabb: boolean;
+    /** Map-center HUD label screen vs dot screen (must be < 2px when debug markers on). */
+    mapCenterDotHudDeltaX: number;
+    mapCenterDotHudDeltaY: number;
   } | null {
     if (!this.grid) return null;
     const cam = this.cameras.main;
@@ -2036,29 +2497,28 @@ export class FarmScene extends Phaser.Scene {
       FARM_FIT_PAD_X,
       FARM_FIT_PAD_Y
     );
-    const mapBounds = this.grid.getMapScreenBounds();
+    const mapScreenBounds = this.grid.getMapScreenBounds();
     const panBounds = this.getFarmCameraScrollBounds();
     const mapTopTargetScreenY = getFarmMapTopTargetScreenYFromPanBounds(
       panBounds,
       cam.scrollY,
       cam.zoom
     );
-    const mapTopScreenY = (mapBounds.minY - cam.scrollY) * cam.zoom;
+    const mapTopScreenY = (mapScreenBounds.minY - cam.scrollY) * cam.zoom;
     const panBoundsTopScreenY = (panBounds.minY - cam.scrollY) * cam.zoom;
     const farm = this.getFarmCameraScrollBounds();
     const anchor = this.getFarmCameraCenterAnchor();
-    const soil = this.grid.getFarmSoilPatchCenterScreen();
+    const spawn = this.grid.getFarmPlayerSpawnScreen();
+    const soilRhombus = this.grid.getFarmSoilScreenRhombus().center;
     const z = cam.zoom;
     const patchScreenX = (anchor.x - cam.scrollX) * z;
     const patchScreenY = (anchor.y - cam.scrollY) * z;
-    const soilScreenX = (soil.x - cam.scrollX) * z;
-    const soilScreenY = (soil.y - cam.scrollY) * z;
+    const spawnScreenX = (spawn.x - cam.scrollX) * z;
+    const spawnScreenY = (spawn.y - cam.scrollY) * z;
+    const soilScreenX = (soilRhombus.x - cam.scrollX) * z;
+    const soilScreenY = (soilRhombus.y - cam.scrollY) * z;
     const geomCenter = getPlayableBandGeometricCenter(viewport);
-    const panBoundsCenterBase = getPlayableBandPanBoundsCenter(viewport);
-    const panBoundsCenter = {
-      x: panBoundsCenterBase.x,
-      y: panBoundsCenterBase.y,
-    };
+    const panBoundsCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, viewport);
     const margins = computeFarmPlayableScreenMargins(
       farm,
       viewport,
@@ -2066,6 +2526,72 @@ export class FarmScene extends Phaser.Scene {
       cam.scrollY,
       z
     );
+    const mapFootprint = screenBoundsToFootprint(mapScreenBounds);
+    const mapVoid = computeFarmViewportVoidMargins(
+      mapFootprint,
+      viewW,
+      viewH,
+      cam.scrollX,
+      cam.scrollY,
+      z
+    );
+    const panVoid = computeFarmViewportVoidMargins(
+      farm,
+      viewW,
+      viewH,
+      cam.scrollX,
+      cam.scrollY,
+      z
+    );
+    const footprint = this.grid.getFarmFootprintScreenBounds();
+    const soilVoid = computeFarmViewportVoidMargins(
+      {
+        minX: footprint.minX,
+        minY: footprint.minY,
+        maxX: footprint.maxX,
+        maxY: footprint.maxY,
+      },
+      viewW,
+      viewH,
+      cam.scrollX,
+      cam.scrollY,
+      z
+    );
+    let islandVoid = panVoid;
+    const image = this.farmIslandImage;
+    if (image) {
+      const halfW = image.displayWidth / 2;
+      const halfH = image.displayHeight / 2;
+      islandVoid = computeFarmViewportVoidMargins(
+        {
+          minX: image.x - halfW,
+          minY: image.y - halfH,
+          maxX: image.x + halfW,
+          maxY: image.y + halfH,
+        },
+        viewW,
+        viewH,
+        cam.scrollX,
+        cam.scrollY,
+        z
+      );
+    }
+    const limits = this.getMergedFarmCameraScrollLimits(z);
+    const midScrollX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    const midScrollY = (limits.y.minScroll + limits.y.maxScroll) / 2;
+    const spawnWorld = this.grid.gridToMapTileCenter(
+      FARM_PLAYER_SPAWN_GX,
+      FARM_PLAYER_SPAWN_GY
+    );
+    const mapCenterWorld = spawnWorld;
+    const mapCenterHudScreen = farmWorldToScreen(cam, mapCenterWorld.x, mapCenterWorld.y);
+    const mapCenterDotScreen = farmWorldToScreen(cam, mapCenterWorld.x, mapCenterWorld.y);
+    const mapCenterScreenX = mapCenterHudScreen.x;
+    const mapCenterScreenY = mapCenterHudScreen.y;
+    const worldTarget = getFarmMapCenterWorldTargetAtDefaultScroll(viewW, viewH, z);
+    const spawnWorldErrorX = spawnWorld.x - worldTarget.x;
+    const spawnWorldErrorY = spawnWorld.y - worldTarget.y;
+    const screenTarget = getFarmMapCenterScreenTargetAtScrollZero(viewW, viewH, z);
     return {
       viewW,
       viewH,
@@ -2078,6 +2604,10 @@ export class FarmScene extends Phaser.Scene {
       targetCenterY: viewport.centerY,
       errorX: patchScreenX - viewport.centerX,
       errorY: patchScreenY - viewport.centerY,
+      spawnScreenX,
+      spawnScreenY,
+      spawnErrorX: spawnScreenX - viewport.centerX,
+      spawnErrorY: spawnScreenY - viewport.centerY,
       soilScreenX,
       soilScreenY,
       soilErrorX: soilScreenX - viewport.centerX,
@@ -2104,18 +2634,94 @@ export class FarmScene extends Phaser.Scene {
       marginRight: margins.right,
       marginTop: margins.top,
       marginBottom: margins.bottom,
+      mapVoidLeft: mapVoid.left,
+      mapVoidRight: mapVoid.right,
+      mapVoidTop: mapVoid.top,
+      mapVoidBottom: mapVoid.bottom,
+      panVoidLeft: panVoid.left,
+      panVoidRight: panVoid.right,
+      panVoidTop: panVoid.top,
+      panVoidBottom: panVoid.bottom,
+      islandVoidLeft: islandVoid.left,
+      islandVoidRight: islandVoid.right,
+      islandVoidTop: islandVoid.top,
+      islandVoidBottom: islandVoid.bottom,
+      soilVoidLeft: soilVoid.left,
+      soilVoidRight: soilVoid.right,
+      soilVoidTop: soilVoid.top,
+      soilVoidBottom: soilVoid.bottom,
+      scrollMidpointErrorX: limits.x.oversize ? cam.scrollX - midScrollX : 0,
+      scrollMidpointErrorY: limits.y.oversize ? cam.scrollY - midScrollY : 0,
+      mapCenterScreenX,
+      mapCenterScreenY,
+      mapCenterTargetScreenX: screenTarget.x,
+      mapCenterTargetScreenY: screenTarget.y,
+      mapCenterErrorX: mapCenterScreenX - screenTarget.x,
+      mapCenterErrorY: mapCenterScreenY - screenTarget.y,
+      mapCenterAtOriginX: mapCenterWorld.x,
+      mapCenterAtOriginY: mapCenterWorld.y,
+      mapCenterWorldTargetX: this.farmMapCenterWorldTargetX || worldTarget.x,
+      mapCenterWorldTargetY: this.farmMapCenterWorldTargetY || worldTarget.y,
+      mapCenterWorldErrorX:
+        mapCenterWorld.x - (this.farmMapCenterWorldTargetX || worldTarget.x),
+      mapCenterWorldErrorY:
+        mapCenterWorld.y - (this.farmMapCenterWorldTargetY || worldTarget.y),
+      spawnWorldX: spawnWorld.x,
+      spawnWorldY: spawnWorld.y,
+      spawnWorldTargetX: worldTarget.x,
+      spawnWorldTargetY: worldTarget.y,
+      spawnWorldErrorX,
+      spawnWorldErrorY,
+      isMapCenterTrueAabb: this.grid.isFarmMapCenterTrueAabb(),
+      mapCenterDotHudDeltaX: mapCenterDotScreen.x - mapCenterHudScreen.x,
+      mapCenterDotHudDeltaY: mapCenterDotScreen.y - mapCenterHudScreen.y,
     };
   }
 
   getFarmCameraScrollLimitsForTest(): FarmCameraScrollLimits | null {
     if (!this.grid) return null;
     const cam = this.cameras.main;
+    return this.getMergedFarmCameraScrollLimits(cam.zoom);
+  }
+
+  /**
+   * Dev/e2e: playable map center screen after world-offset + scroll for `zoom` (from current baked state).
+   */
+  getFarmMapCenterScreenAtZoomForTest(zoom: number): {
+    zoom: number;
+    mapCenterWorldX: number;
+    mapCenterWorldY: number;
+    scrollX: number;
+    scrollY: number;
+    screenX: number;
+    screenY: number;
+    targetScreenX: number;
+    targetScreenY: number;
+  } | null {
+    if (!this.grid) return null;
+    const z = clampFarmCameraZoom(zoom);
     const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-    return computeFarmCameraScrollLimits(
-      this.getFarmCameraScrollBounds(),
-      this.getMainCameraPlayableBand(viewW, viewH),
-      cam.zoom
+    const { dx, dy } = getFarmMapCenterWorldOffsetDelta(
+      viewW,
+      viewH,
+      this.lastMapCenterWorldOffsetZoom,
+      z
     );
+    const mapCenterNow = this.grid.getFarmPlayableMapCenterScreen();
+    const mapCenter = { x: mapCenterNow.x + dx, y: mapCenterNow.y + dy };
+    const scroll = computeScrollForMapCenterScreenTarget(mapCenter, viewW, viewH, z);
+    const target = getFarmMapCenterScreenTargetAtScrollZero(viewW, viewH, z);
+    return {
+      zoom: z,
+      mapCenterWorldX: mapCenter.x,
+      mapCenterWorldY: mapCenter.y,
+      scrollX: scroll.scrollX,
+      scrollY: scroll.scrollY,
+      screenX: (mapCenter.x - scroll.scrollX) * z,
+      screenY: (mapCenter.y - scroll.scrollY) * z,
+      targetScreenX: target.x,
+      targetScreenY: target.y,
+    };
   }
 
   /** Clears pending tile state after popups close / plant completes. */
@@ -2354,6 +2960,120 @@ export class FarmScene extends Phaser.Scene {
     return this.toolBar?.isVisible() ?? false;
   }
 
+  showObjectEditPopupForTest(gx = 7, gy = 9, penOnly = false): void {
+    this.showObjectEditPopup(gx, gy, penOnly);
+  }
+
+  isObjectEditPopupVisibleForTest(): boolean {
+    return this.objectEditPopup.isVisible();
+  }
+
+  getObjectEditPopupActionsForTest(): ObjectEditAction[] {
+    return this.objectEditPopup.getVisibleActionsForTest();
+  }
+
+  isObjectEditFeedWarningVisibleForTest(): boolean {
+    return this.objectEditPopup.isFeedWarningBadgeVisibleForTest();
+  }
+
+  isPenHungryWarningVisibleForTest(gx: number, gy: number): boolean {
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    if (!pen) return false;
+    return this.livestockPenSprites.get(pen.id)?.isHungryWarningVisibleForTest() ?? false;
+  }
+
+  forcePenHungryStateForTest(gx: number, gy: number, hungry: boolean): boolean {
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    if (!pen) return false;
+    if (!this.livestockSystem.setPenHungryStateForTest(pen.id, hungry)) return false;
+    this.refreshMapDecorations();
+    return true;
+  }
+
+  tapPenForTest(gx: number, gy: number): boolean {
+    if (this.farmMode !== 'normal') return false;
+    const pen = this.livestockSystem.getPenAt(gx, gy);
+    if (!pen) return false;
+    this.dismissFarmPopups();
+    const now = Date.now();
+    this.livestockSystem.tick(now);
+    const action = this.livestockSystem.getPenAction(pen, now);
+    if (action.canCollect || action.canFeed || action.ticked.state === 'producing') {
+      this.handleLivestockPenTap(pen);
+      return true;
+    }
+    this.showObjectEditPopup(gx, gy, true);
+    return true;
+  }
+
+  closeObjectEditPopupForTest(): void {
+    this.objectEditPopup.hide();
+  }
+
+  getSoilFootprintAlignMetricsForTest(): {
+    soilGridRange: { minX: number; maxX: number; minY: number; maxY: number };
+    centerAlignErrorPx: number;
+    maxTileOutsideAabbPx: number;
+    maxSpriteDriftPx: number;
+    soilFootprintAlignError: number;
+  } | null {
+    if (!this.grid) return null;
+    const m = this.grid.measureSoilFootprintAlignment();
+    let maxSpriteDriftPx = 0;
+    const { minX, maxX, minY, maxY } = m.soilGridRange;
+    for (let gy = minY; gy <= maxY; gy++) {
+      for (let gx = minX; gx <= maxX; gx++) {
+        const spr = this.tileSprites[gy * this.grid.size + gx];
+        if (!spr?.visible) continue;
+        const expected = this.grid.gridToMapScreen(gx, gy);
+        maxSpriteDriftPx = Math.max(
+          maxSpriteDriftPx,
+          Math.hypot(spr.x - expected.x, spr.y - expected.y)
+        );
+      }
+    }
+    const soilFootprintAlignError = Math.max(
+      m.soilFootprintAlignError,
+      maxSpriteDriftPx
+    );
+    return {
+      soilGridRange: m.soilGridRange,
+      centerAlignErrorPx: m.centerAlignErrorPx,
+      maxTileOutsideAabbPx: m.maxTileOutsideAabbPx,
+      maxSpriteDriftPx,
+      soilFootprintAlignError,
+    };
+  }
+
+  getFarmBoundsMetricsForTest(): {
+    mapBounds: ReturnType<GridSystem['getMapScreenBounds']>;
+    footprintBounds: ReturnType<GridSystem['getFarmFootprintScreenBounds']>;
+    panBounds: FarmFootprintBounds;
+    mapTopPanOffsetY: number;
+    mapTopPanOffsetX: number;
+    /** Soil iso rhombus center (island layout; above spawn when spawn is baked to center). */
+    soilRhombusCenter: { x: number; y: number };
+    /** Player spawn tile center in world/map space. */
+    playerSpawnWorld: { x: number; y: number };
+  } | null {
+    if (!this.grid) return null;
+    const spawn = this.player?.getGridPosition() ?? { x: 10, y: 10 };
+    return {
+      mapBounds: this.grid.getMapScreenBounds(),
+      footprintBounds: this.grid.getFarmFootprintScreenBounds(),
+      panBounds: this.getFarmCameraScrollBounds(),
+      mapTopPanOffsetY: this.grid.mapTopPanOffsetY,
+      mapTopPanOffsetX: this.grid.mapTopPanOffsetX,
+      soilRhombusCenter: this.grid.getFarmSoilScreenRhombus().center,
+      playerSpawnWorld: this.grid.getFarmPlayerSpawnScreen(spawn.x, spawn.y),
+    };
+  }
+
+  setMapTopPanOffsetXForTest(offsetX: number): void {
+    this.grid.mapTopPanOffsetX = offsetX;
+    this.focusCameraOnFarmSoil({ recenterCamera: true });
+  }
+
   private executeFarmPopupAction(action: FarmPopupAction, gx: number, gy: number): void {
     this.pendingFarmTile = { x: gx, y: gy };
     const cell = this.grid.getCell(gx, gy);
@@ -2586,6 +3306,11 @@ export class FarmScene extends Phaser.Scene {
       this.emitGameRefs();
       if (!this.cameraScrollTouchedByUser) {
         this.focusCameraOnFarmSoil();
+        this.time.delayedCall(0, () => {
+          if (!this.cameraScrollTouchedByUser) {
+            this.snapMainCameraOversizeScrollToMidpoint();
+          }
+        });
       }
     });
     this.events.on('build-select', (item: BuildItemDef) => {
@@ -2716,7 +3441,7 @@ export class FarmScene extends Phaser.Scene {
     const foot =
       penFootprintTiles_
         ? (() => {
-            const b = this.grid.getRectMapFootprintScreenBounds(
+            const b = this.grid.getRectFootprintScreenBounds(
               anchorGx,
               anchorGy,
               penFootprintTiles_.w,
@@ -2804,7 +3529,10 @@ export class FarmScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    this.updateFarmCameraMotion(delta);
+    this.ensureFarmSpawnTileWorldHardLock();
     if (this.cameraDebugLabel) this.refreshCameraDebugOverlay();
+    if (this.farmCenterDebugMarkers) this.refreshFarmCenterDebugMarkers();
     if (this.farmViewportHudDebugContainer) this.refreshFarmDebugHudVoidHint();
 
     this.player.update(this.grid, delta);

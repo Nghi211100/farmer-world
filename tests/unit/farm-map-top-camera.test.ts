@@ -3,15 +3,19 @@ import { GridSystem } from '../../src/systems/GridSystem';
 import {
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
   FARM_MAP_LEFT_PAN_BOUNDS_FRAC,
+  FARM_MAP_LEFT_PAN_BOUNDS_COL_INDEX,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX,
   computePlayableFarmViewportLayout,
   getFarmMapLeftShiftScreenPx,
   getFarmMapTopTargetScreenYFromPanBounds,
-  getPlayableBandPanBoundsCenter,
+  getFarmPanBoundsScrollTargetScreen,
   shiftPlayableBandForPanBoundsCenter,
 } from '../../src/ui/hudLayout';
 import {
   computeCenteredFarmCameraScroll,
+  computeFarmCameraScrollLimits,
   farmFootprintCenter,
+  mergeFarmCameraScrollWithOversizeCenter,
 } from '../../src/farmCameraScroll';
 import {
   measureMapTopAbovePanBoundsPx,
@@ -45,18 +49,18 @@ function runFullMapTopLayout(
 ) {
   grid.centerInViewport(viewW, viewH, padX, padY);
   const viewport = computePlayableFarmViewportLayout(viewW, viewH, padX, padY);
-  const scrollPlayable = shiftPlayableBandForPanBoundsCenter({
+  const geomPlayable = {
     playableLeft: viewport.playableLeft,
     playableTop: viewport.playableTop,
     playableRight: viewport.playableRight,
     playableBottom: viewport.playableBottom,
-  });
-  const panTargetCenter = getPlayableBandPanBoundsCenter({
-    playableLeft: viewport.playableLeft,
-    playableTop: viewport.playableTop,
-    playableRight: viewport.playableRight,
-    playableBottom: viewport.playableBottom,
-  });
+  };
+  const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+    geomPlayable,
+    viewW,
+    viewH
+  );
+  const panTargetCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
   const farm = layoutIslandPanBounds(grid);
   const anchor = farmFootprintCenter(farm);
   let scroll = computeCenteredFarmCameraScroll(
@@ -88,8 +92,14 @@ function runFullMapTopLayout(
     zoom,
     frac
   );
-  scroll = { ...scroll, scrollY: synced.scrollY };
   const panBounds = synced.panBounds;
+  scroll = mergeFarmCameraScrollWithOversizeCenter(
+    { scrollX: scroll.scrollX, scrollY: synced.scrollY },
+    panBounds,
+    scrollPlayable,
+    panTargetCenter,
+    zoom
+  );
   const mapMinY = grid.getMapScreenBounds().minY;
   const northTileTopY = grid.gridToMapScreen(0, 0).y;
   const mapCornerTopY = grid.gridToMapScreen(grid.size - 1, grid.size - 1).y;
@@ -128,17 +138,17 @@ describe('farm map top camera layout', () => {
     expect(grid.getFarmSoilScreenRhombus().north.y).toBe(rhombusBefore + 420);
   });
 
-  it('mapTopPanOffsetX includes pan-center bias and left-shift target', () => {
+  it('mapTopPanOffsetX centers map AABB horizontally inside pan bounds', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     grid.centerInViewport(viewW, viewH, padX, padY);
 
     const pan = layoutIslandPanBounds(grid);
+    const visual = grid.getVisualMapScreenBounds();
+    const mapW = visual.maxX - visual.minX;
+    const panW = pan.maxX - pan.minX;
     grid.alignMapTopToPanBoundsInset(pan, 0, zoom);
-    const visualCenter = grid.getVisualMapScreenBounds().centerX;
-    const panCenter = (pan.minX + pan.maxX) / 2;
-    const expectedOffset =
-      panCenter - visualCenter - (pan.maxX - pan.minX) * FARM_MAP_LEFT_PAN_BOUNDS_FRAC;
+    const expectedOffset = pan.minX + (panW - mapW) / 2 - visual.minX;
     expect(grid.mapTopPanOffsetX).toBeCloseTo(expectedOffset, 6);
   });
 
@@ -153,10 +163,10 @@ describe('farm map top camera layout', () => {
     grid.alignMapTopToPanBoundsInset(pan, 0, zoom);
     const mapAfter = grid.getMapScreenBounds();
     const footprintAfter = grid.getFarmFootprintScreenBounds();
-    const visualCenter = grid.getVisualMapScreenBounds().centerX;
-    const panCenter = (pan.minX + pan.maxX) / 2;
-    const expectedDx =
-      panCenter - visualCenter - (pan.maxX - pan.minX) * FARM_MAP_LEFT_PAN_BOUNDS_FRAC;
+    const visual = grid.getVisualMapScreenBounds();
+    const mapW = visual.maxX - visual.minX;
+    const panW = pan.maxX - pan.minX;
+    const expectedDx = pan.minX + (panW - mapW) / 2 - visual.minX;
     expect(mapAfter.minX - mapBefore.minX).toBeCloseTo(expectedDx, 6);
     expect(footprintAfter.minX - footprintBefore.minX).toBeCloseTo(expectedDx, 6);
   });
@@ -179,21 +189,43 @@ describe('farm map top camera layout', () => {
     }
   });
 
-  it('map layer applies visible left shift in screen-space', () => {
+  it('map layer is centered horizontally inside pan bounds in screen-space', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     grid.centerInViewport(viewW, viewH, padX, padY);
-    const farm = layoutIslandPanBounds(grid);
-    grid.alignMapTopToPanBoundsInset(farm, 0, zoom);
-    const expectedShiftPx = getFarmMapLeftShiftScreenPx(
-      farm.maxX - farm.minX,
-      zoom,
-      FARM_MAP_LEFT_PAN_BOUNDS_FRAC
-    );
-    const mapCenter = grid.getMapScreenBounds().centerX;
-    const panCenter = (farm.minX + farm.maxX) / 2;
-    const actualShiftPx = (panCenter - mapCenter) * zoom;
+    const pan = layoutIslandPanBounds(grid);
+    grid.alignMapTopToPanBoundsInset(pan, 0, zoom);
+    const panW = pan.maxX - pan.minX;
+    const map = grid.getMapScreenBounds();
+    const mapW = map.maxX - map.minX;
+    const expectedShiftPx = ((panW - mapW) / 2) * zoom;
+    const actualShiftPx = (map.minX - pan.minX) * zoom;
     expect(actualShiftPx).toBeCloseTo(expectedShiftPx, 4);
+  });
+
+  it('full layout places oversize scroll X at clamp midpoint (symmetric pan)', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const { scroll, panBounds } = runFullMapTopLayout(grid, 3);
+    const viewport = computePlayableFarmViewportLayout(viewW, viewH, padX, padY);
+    const geomPlayable = {
+      playableLeft: viewport.playableLeft,
+      playableTop: viewport.playableTop,
+      playableRight: viewport.playableRight,
+      playableBottom: viewport.playableBottom,
+    };
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+      geomPlayable,
+      viewW,
+      viewH
+    );
+    const limits = computeFarmCameraScrollLimits(panBounds, scrollPlayable, zoom);
+    expect(limits.x.oversize).toBe(true);
+    const midX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    expect(scroll.scrollX).toBeCloseTo(midX, 2);
+    const panTarget = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
+    const centerScreenX = (farmFootprintCenter(panBounds).x - scroll.scrollX) * zoom;
+    expect(centerScreenX).toBeCloseTo(panTarget.x, 1);
   });
 
   it('single alignMapTop places virtual map top on pan-bounds world target', () => {
@@ -217,18 +249,14 @@ describe('farm map top camera layout', () => {
     grid.generatePlaceholderMap();
     grid.centerInViewport(viewW, viewH, padX, padY);
     const viewport = computePlayableFarmViewportLayout(viewW, viewH, padX, padY);
-    const scrollPlayable = shiftPlayableBandForPanBoundsCenter({
+    const geomPlayable = {
       playableLeft: viewport.playableLeft,
       playableTop: viewport.playableTop,
       playableRight: viewport.playableRight,
       playableBottom: viewport.playableBottom,
-    });
-    const panTargetCenter = getPlayableBandPanBoundsCenter({
-      playableLeft: viewport.playableLeft,
-      playableTop: viewport.playableTop,
-      playableRight: viewport.playableRight,
-      playableBottom: viewport.playableBottom,
-    });
+    };
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(geomPlayable);
+    const panTargetCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
     const farm = layoutIslandPanBounds(grid);
     const scrollIn = computeCenteredFarmCameraScroll(
       farmFootprintCenter(farm),
@@ -327,8 +355,9 @@ describe('farm map top camera layout', () => {
     expect(Math.abs(result.mapTopErrorY)).toBeLessThan(2);
   });
 
-  it('at default frac map top sits down orange pan height by FARM_MAP_TOP_PAN_BOUNDS_FRAC', () => {
-    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.165);
+  it('at default row target map top sits on row 7 from pan top', () => {
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX).toBe(7);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.3);
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const result = runFullMapTopLayout(grid, 3);
@@ -341,12 +370,18 @@ describe('farm map top camera layout', () => {
       result.panTopScreenY + FARM_MAP_TOP_PAN_BOUNDS_FRAC * panH,
       2
     );
-    const target = getFarmMapTopTargetScreenYFromPanBounds(
-      result.panBounds,
-      result.scroll.scrollY,
-      zoom,
-      FARM_MAP_TOP_PAN_BOUNDS_FRAC
-    );
-    expect(result.mapTopScreenY).toBeCloseTo(target, 1);
+  });
+
+  it('at default layout map is centered horizontally inside pan bounds', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const result = runFullMapTopLayout(grid, 3);
+    const panW = (result.panBounds.maxX - result.panBounds.minX) * zoom;
+    const map = grid.getMapScreenBounds();
+    const mapW = (map.maxX - map.minX) * zoom;
+    const mapLeftScreenX = (map.minX - result.scroll.scrollX) * zoom;
+    const panLeftScreenX = (result.panBounds.minX - result.scroll.scrollX) * zoom;
+    const expectedShiftPx = (panW - mapW) / 2;
+    expect(mapLeftScreenX - panLeftScreenX).toBeCloseTo(expectedShiftPx, 1);
   });
 });

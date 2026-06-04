@@ -10,6 +10,7 @@ import { BootScene } from './scenes/BootScene';
 import { FarmScene } from './scenes/FarmScene';
 import { PreloadScene } from './scenes/PreloadScene';
 import { UIScene } from './scenes/UIScene';
+import { isScreenshotCaptureMode } from './config/gameConfig';
 import { installGameTestApi } from './testing/gameTestApi';
 
 /** Canvas backdrop when bg cover crops past art edges (matches background art). */
@@ -41,6 +42,8 @@ const config: Phaser.Types.Core.GameConfig = {
     pixelArt: true,
     antialias: false,
     roundPixels: true,
+    /** Required for Playwright `canvas.screenshot()` — default WebGL clears the buffer. */
+    preserveDrawingBuffer: import.meta.env.DEV || isScreenshotCaptureMode(),
   },
 };
 

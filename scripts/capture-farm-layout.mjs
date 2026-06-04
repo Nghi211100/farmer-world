@@ -31,7 +31,7 @@ async function waitForFarmReady(page) {
   await page.waitForFunction(
     () => {
       const m = window.__FARMER_WORLD_TEST__?.getFarmCameraCenterMetrics();
-      return m != null && m.zoom >= 1.5;
+      return m != null && m.zoom >= 1.0;
     },
     undefined,
     { timeout: 60_000 }

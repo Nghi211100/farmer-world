@@ -125,6 +125,44 @@ export const FARM_ISLAND_OFFSET_X_FRAC = 0;
 /** Vertical island.png offset as fraction of rhombus N–S span. */
 export const FARM_ISLAND_OFFSET_Y_FRAC = 0;
 
+/**
+ * Trim island.png screen AABB before pan clamp: the texture has more empty alpha on the
+ * northwest (left/top on screen) than on the southeast where cliff/land mass sits.
+ */
+export const FARM_ISLAND_PAN_CLAMP_INSET_LEFT_FRAC = 0.16;
+export const FARM_ISLAND_PAN_CLAMP_INSET_RIGHT_FRAC = 0.24;
+export const FARM_ISLAND_PAN_CLAMP_INSET_TOP_FRAC = 0.1;
+export const FARM_ISLAND_PAN_CLAMP_INSET_BOTTOM_FRAC = 0.06;
+
+/** Shrink a footprint AABB by fractional insets per edge (each 0–0.45). */
+export function insetFarmFootprintBounds(
+  bounds: FarmFootprintBounds,
+  inset: { left?: number; right?: number; top?: number; bottom?: number }
+): FarmFootprintBounds {
+  const w = bounds.maxX - bounds.minX;
+  const h = bounds.maxY - bounds.minY;
+  const l = (inset.left ?? 0) * w;
+  const r = (inset.right ?? 0) * w;
+  const t = (inset.top ?? 0) * h;
+  const b = (inset.bottom ?? 0) * h;
+  return {
+    minX: bounds.minX + l,
+    minY: bounds.minY + t,
+    maxX: bounds.maxX - r,
+    maxY: bounds.maxY - b,
+  };
+}
+
+/** Pan clamp target from the laid-out island image AABB (not the full transparent texture). */
+export function getFarmIslandPanClampBounds(island: FarmFootprintBounds): FarmFootprintBounds {
+  return insetFarmFootprintBounds(island, {
+    left: FARM_ISLAND_PAN_CLAMP_INSET_LEFT_FRAC,
+    right: FARM_ISLAND_PAN_CLAMP_INSET_RIGHT_FRAC,
+    top: FARM_ISLAND_PAN_CLAMP_INSET_TOP_FRAC,
+    bottom: FARM_ISLAND_PAN_CLAMP_INSET_BOTTOM_FRAC,
+  });
+}
+
 export type FarmSoilScreenRhombus = {
   north: { x: number; y: number };
   east: { x: number; y: number };

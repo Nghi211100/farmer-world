@@ -23,6 +23,9 @@ import {
   findPenForStocking,
   getPenForSpecies,
   isRuminantPen,
+  livestockSellPrice,
+  penCapacity,
+  penStockCount,
   livestockPenKey,
   normalizeSavedLivestockPens,
   penFootprintCells,
@@ -150,6 +153,16 @@ export class LivestockSystem {
     return findPenForStocking(this.pens, animalType);
   }
 
+  getPenCapacityForSpecies(animalType: AnimalType): number | null {
+    const pen = getPenForSpecies(this.pens, animalType);
+    return pen ? penCapacity(pen) : null;
+  }
+
+  getPenStockCountForSpecies(animalType: AnimalType): number | null {
+    const pen = getPenForSpecies(this.pens, animalType);
+    return pen ? penStockCount(pen) : null;
+  }
+
   private penBlocksCell(gx: number, gy: number, ignorePenId?: string): boolean {
     return this.pens.some(
       (p) => p.id !== ignorePenId && penOccupiesCell(p, gx, gy)
@@ -215,6 +228,80 @@ export class LivestockSystem {
     this.markPenFootprint(pen, true);
     this.onChange?.();
     return pen;
+  }
+
+  /**
+   * Recover pens from legacy grid occupancy markers when save.livestock is absent.
+   * Markers are rectangular 3x3/4x4 blocks tagged as `livestock_pen_<species|ruminant>`.
+   */
+  recoverPensFromGridMarkers(): LivestockPenData[] {
+    type PenMarkerType = AnimalType | 'ruminant';
+    const markerPrefix = 'livestock_pen_';
+    const validMarkerType = (raw: string): PenMarkerType | null => {
+      if (raw === 'ruminant') return 'ruminant';
+      if (LIVESTOCK_ANIMAL_LIST.some((a) => a.type === raw)) return raw as AnimalType;
+      return null;
+    };
+
+    const markerAt = (gx: number, gy: number): PenMarkerType | null => {
+      const objectId = this.grid.getCell(gx, gy)?.object;
+      if (!objectId?.startsWith(markerPrefix)) return null;
+      return validMarkerType(objectId.slice(markerPrefix.length));
+    };
+
+    const visited = new Set<string>();
+    const out: LivestockPenData[] = [];
+    let recoveredIndex = 0;
+    const keyOf = (gx: number, gy: number) => `${gx},${gy}`;
+
+    for (let gy = 0; gy < this.grid.size; gy++) {
+      for (let gx = 0; gx < this.grid.size; gx++) {
+        const marker = markerAt(gx, gy);
+        if (!marker) continue;
+        const startKey = keyOf(gx, gy);
+        if (visited.has(startKey)) continue;
+
+        const stack: Array<{ gx: number; gy: number }> = [{ gx, gy }];
+        const cells: Array<{ gx: number; gy: number }> = [];
+
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          const curKey = keyOf(cur.gx, cur.gy);
+          if (visited.has(curKey)) continue;
+          if (markerAt(cur.gx, cur.gy) !== marker) continue;
+          visited.add(curKey);
+          cells.push(cur);
+          stack.push(
+            { gx: cur.gx + 1, gy: cur.gy },
+            { gx: cur.gx - 1, gy: cur.gy },
+            { gx: cur.gx, gy: cur.gy + 1 },
+            { gx: cur.gx, gy: cur.gy - 1 }
+          );
+        }
+
+        if (cells.length === 0) continue;
+        const minX = Math.min(...cells.map((c) => c.gx));
+        const minY = Math.min(...cells.map((c) => c.gy));
+        const maxX = Math.max(...cells.map((c) => c.gx));
+        const maxY = Math.max(...cells.map((c) => c.gy));
+        const width = maxX - minX + 1;
+        const height = maxY - minY + 1;
+        const level = width === 4 && height === 4 ? 2 : 1;
+        const isRect =
+          cells.length === width * height &&
+          cells.every((c) => c.gx >= minX && c.gx <= maxX && c.gy >= minY && c.gy <= maxY);
+        if (!isRect || width !== height || (width !== 3 && width !== 4)) continue;
+
+        recoveredIndex += 1;
+        const recoveredId = `pen-${marker}-${recoveredIndex}`;
+        const pen =
+          marker === 'ruminant'
+            ? createRuminantPen(recoveredId, minX, minY, level)
+            : createNewPen(recoveredId, marker, minX, minY, level);
+        out.push(pen);
+      }
+    }
+    return out.sort((a, b) => a.gridY - b.gridY || a.gridX - b.gridX);
   }
 
   loadPens(data: LivestockPenData[]): void {
@@ -318,6 +405,57 @@ export class LivestockSystem {
     return result;
   }
 
+  getSellPrice(pen: LivestockPenData, nowMs: number): number {
+    return livestockSellPrice(pen, nowMs);
+  }
+
+  trySellAnimal(pen: LivestockPenData, nowMs: number): { pen: LivestockPenData; sellPrice: number } | null {
+    const current = tickLivestockPen(pen, nowMs);
+    const sellPrice = livestockSellPrice(current, nowMs);
+    if (sellPrice <= 0) return null;
+    const nextCount = Math.max(0, penStockCount(current) - 1);
+    const next: LivestockPenData = {
+      ...current,
+      stockCount: nextCount,
+      state: nextCount === 0 ? 'unstocked' : current.state,
+      lifecycleState: nextCount === 0 ? undefined : current.lifecycleState,
+      readyAt: undefined,
+    };
+    if (isRuminantPen(current)) {
+      next.ruminantOccupants = (current.ruminantOccupants ?? []).slice(0, nextCount);
+      if (nextCount === 0) {
+        next.animalType = 'sheep';
+      } else {
+        next.animalType = next.ruminantOccupants[0]?.animalType ?? current.animalType;
+      }
+    }
+    this.replacePen(next);
+    return { pen: next, sellPrice };
+  }
+
+  setPenHungryStateForTest(penId: string, hungry: boolean): boolean {
+    const pen = this.pens.find((p) => p.id === penId);
+    if (!pen || pen.state === 'unstocked') return false;
+    const now = Date.now();
+    const next: LivestockPenData = hungry
+      ? {
+          ...pen,
+          state: 'producing',
+          lifecycleState: 'hungry',
+          hungrySince: now,
+          lastUpdatedAt: now,
+        }
+      : {
+          ...pen,
+          state: 'producing',
+          lifecycleState: 'producing',
+          hungrySince: undefined,
+          lastUpdatedAt: now,
+        };
+    this.replacePen(next);
+    return true;
+  }
+
   private replacePen(next: LivestockPenData): void {
     const idx = this.pens.findIndex((p) => p.id === next.id);
     if (idx >= 0) {
@@ -327,7 +465,10 @@ export class LivestockSystem {
   }
 
   exportPens(): LivestockPenData[] {
-    return this.pens.map((p) => ({ ...p }));
+    return this.pens.map((p) => ({
+      ...p,
+      ruminantOccupants: p.ruminantOccupants?.map((o) => ({ ...o })) ?? [],
+    }));
   }
 
   occupiedCells(): ReadonlyArray<{ gx: number; gy: number }> {

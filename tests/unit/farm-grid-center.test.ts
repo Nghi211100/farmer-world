@@ -6,7 +6,7 @@ import {
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
   getFarmMapTopTargetScreenY,
   getFarmMapTopTargetScreenYFromPanBounds,
-  getPlayableBandPanBoundsCenter,
+  getFarmPanBoundsScrollTargetScreen,
   shiftPlayableBandForPanBoundsCenter,
 } from '../../src/ui/hudLayout';
 import {
@@ -171,8 +171,12 @@ describe('farm grid + camera horizontal centering', () => {
       playableRight: layout.playableRight,
       playableBottom: layout.playableBottom,
     };
-    const panCenter = getPlayableBandPanBoundsCenter(geomPlayable);
-    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(geomPlayable);
+    const panCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+      geomPlayable,
+      viewW,
+      viewH
+    );
     const scroll = computeCenteredFarmCameraScroll(
       anchor,
       panCenter,

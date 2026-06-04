@@ -17,7 +17,7 @@ import { GridSystem } from '../../src/systems/GridSystem';
 import {
   computePlayableFarmViewportLayout,
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
-  getPlayableBandPanBoundsCenter,
+  getFarmPanBoundsScrollTargetScreen,
   shiftPlayableBandForPanBoundsCenter,
 } from '../../src/ui/hudLayout';
 import { TILE_HEIGHT, TILE_WIDTH } from '../../src/utils/iso';
@@ -40,18 +40,18 @@ function layoutIslandPanBounds(grid: GridSystem) {
 function runMapTopLayout(grid: GridSystem) {
   grid.centerInViewport(viewW, viewH, padX, padY);
   const viewport = computePlayableFarmViewportLayout(viewW, viewH, padX, padY);
-  const scrollPlayable = shiftPlayableBandForPanBoundsCenter({
+  const geomPlayable = {
     playableLeft: viewport.playableLeft,
     playableTop: viewport.playableTop,
     playableRight: viewport.playableRight,
     playableBottom: viewport.playableBottom,
-  });
-  const panTargetCenter = getPlayableBandPanBoundsCenter({
-    playableLeft: viewport.playableLeft,
-    playableTop: viewport.playableTop,
-    playableRight: viewport.playableRight,
-    playableBottom: viewport.playableBottom,
-  });
+  };
+  const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+    geomPlayable,
+    viewW,
+    viewH
+  );
+  const panTargetCenter = getFarmPanBoundsScrollTargetScreen(viewW, viewH, geomPlayable);
   const farm = layoutIslandPanBounds(grid);
   let scroll = computeCenteredFarmCameraScroll(
     farmFootprintCenter(farm),
@@ -232,6 +232,79 @@ describe('farm soil vs cyan footprint alignment', () => {
     grid.generatePlaceholderMap();
     runMapTopLayout(grid);
     expectAlignmentWithin2px(grid);
+  });
+
+  it('footprint stays inside 20x20 map bounds after top/left pan offsets', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    runMapTopLayout(grid);
+    const map = grid.getMapScreenBounds();
+    const footprint = grid.getFarmFootprintScreenBounds();
+    const eps = 0.5;
+    expect(footprint.minX).toBeGreaterThanOrEqual(map.minX - eps);
+    expect(footprint.maxX).toBeLessThanOrEqual(map.maxX + eps);
+    expect(footprint.minY).toBeGreaterThanOrEqual(map.minY - eps);
+    expect(footprint.maxY).toBeLessThanOrEqual(map.maxY + eps);
+  });
+
+  it('wide desktop viewport (2176×1285): soil footprint aligns after map-top layout', () => {
+    const wideW = 2176;
+    const wideH = 1285;
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    grid.centerInViewport(wideW, wideH, padX, padY);
+    const viewport = computePlayableFarmViewportLayout(wideW, wideH, padX, padY);
+    const geomPlayable = {
+      playableLeft: viewport.playableLeft,
+      playableTop: viewport.playableTop,
+      playableRight: viewport.playableRight,
+      playableBottom: viewport.playableBottom,
+    };
+    const scrollPlayable = shiftPlayableBandForPanBoundsCenter(
+      geomPlayable,
+      wideW,
+      wideH
+    );
+    const panTargetCenter = getFarmPanBoundsScrollTargetScreen(wideW, wideH, geomPlayable);
+    const farm = layoutIslandPanBounds(grid);
+    const wideZoom = 1;
+    let scroll = computeCenteredFarmCameraScroll(
+      farmFootprintCenter(farm),
+      panTargetCenter,
+      farm,
+      scrollPlayable,
+      wideZoom
+    );
+    scroll = runMapTopPanBoundsCameraPasses(
+      {
+        alignMapTop: (panBounds, scrollY, z) =>
+          grid.alignMapTopToPanBoundsInset(panBounds, scrollY, z),
+        getPanBounds: () => layoutIslandPanBounds(grid),
+        getMapBounds: () => grid.getMapScreenBounds(),
+        repositionWorld: () => undefined,
+        scrollPlayable,
+        panTargetCenter,
+        zoom: wideZoom,
+      },
+      scroll,
+      3
+    );
+    scroll = syncFarmMapTopCameraScroll(
+      grid,
+      () => layoutIslandPanBounds(grid),
+      scroll.scrollY,
+      wideZoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC
+    ).scrollY;
+    syncFarmMapTopCameraScroll(
+      grid,
+      () => layoutIslandPanBounds(grid),
+      scroll,
+      wideZoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC
+    );
+    expectAlignmentWithin2px(grid);
+    expect(grid.mapTopPanOffsetY).not.toBe(0);
   });
 
   it('soil tile centers snap to footprint-projected centers (≤1px)', () => {

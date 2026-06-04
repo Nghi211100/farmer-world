@@ -123,7 +123,7 @@ export function drawCropDebugOverlay(
 
   const stageNumber = resolveRenderStage(stage);
   const configSize = getCropDisplaySize(cropType, stageNumber);
-  const top = grid.gridToScreen(gx, gy);
+  const top = grid.gridToMapScreen(gx, gy);
   const foot = grid.gridToTileBottom(gx, gy);
   const anchorY = getCropAnchorY(foot.y, cropType, stageNumber);
   const width = sprite ? sprite.displayWidth : configSize.width;

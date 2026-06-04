@@ -17,9 +17,13 @@ const LOADING_BAR_FILL_WIDTH_FRAC = 0.86;
 const LOADING_BAR_FILL_HEIGHT_FRAC = 0.6;
 /** Horizontal offset left as a fraction of track width (barW). */
 const LOADING_BAR_FILL_LEFT_SHIFT_FRAC = 0.022;
+/** If the loader never completes, still advance (placeholders + farm). */
+const PRELOAD_TRANSITION_TIMEOUT_MS = 45_000;
 
 export class PreloadScene extends Phaser.Scene {
   private loadedKeys = new Set<string>();
+  private transitionedToFarm = false;
+  private transitionTimeout?: Phaser.Time.TimerEvent;
   private splash?: Phaser.GameObjects.Image;
   private progressTrack?: Phaser.GameObjects.Image;
   private progressFill?: Phaser.GameObjects.Image;
@@ -119,6 +123,22 @@ export class PreloadScene extends Phaser.Scene {
         this.load.image(entry.key, url);
       }
     }
+
+    this.transitionTimeout = this.time.delayedCall(
+      PRELOAD_TRANSITION_TIMEOUT_MS,
+      () => {
+        if (this.transitionedToFarm) return;
+        console.warn(
+          '[PreloadScene] Load timed out — starting farm with placeholders'
+        );
+        if (this.load.isLoading()) {
+          this.load.reset();
+        }
+        this.transitionToFarm();
+      },
+      undefined,
+      this
+    );
   }
 
   private setLoadProgress(v: number): void {
@@ -140,6 +160,15 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.transitionToFarm();
+  }
+
+  private transitionToFarm(): void {
+    if (this.transitionedToFarm) return;
+    this.transitionedToFarm = true;
+    this.transitionTimeout?.remove();
+    this.transitionTimeout = undefined;
+
     for (const entry of ASSET_MANIFEST) {
       if (!this.textures.exists(entry.key)) {
         createPlaceholderTexture(this, entry);

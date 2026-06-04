@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computeSpriteFitScale,
   ISO_PEN_FOOTPRINT_DEBUG_COLOR,
   isoRectFootprintScreenBounds,
   isoRectFootprintScreenRhombus,
@@ -10,7 +9,12 @@ import {
 import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { FARM_ISLAND_RING_MARGIN } from '../../src/farmIslandLayout';
 import { GridSystem } from '../../src/systems/GridSystem';
-import { PEN_HOUSE_FOOTPRINT_FIT_PADDING, penHouseDisplaySize } from '../../src/config/livestockAssets';
+import {
+  PEN_HOUSE_FOOTPRINT_FIT_PADDING,
+  PEN_HOUSE_VISUAL_HEIGHT_SCALE,
+  PEN_HOUSE_VISUAL_SCALE,
+  penHouseDisplaySize,
+} from '../../src/config/livestockAssets';
 
 describe('isoRectFootprintScreenBounds', () => {
   it('3×3 anchor footprint spans three tile widths on screen', () => {
@@ -69,15 +73,13 @@ describe('isoRectFootprintScreenBounds', () => {
     expect(ISO_PEN_FOOTPRINT_DEBUG_COLOR).toBe(0xff44cc);
   });
 
-  it('pen house contain scale keeps art inside footprint AABB', () => {
+  it('pen house visual box responds to X scale independently', () => {
     const box = penHouseDisplaySize(1);
-    const fishFrame = { w: 112, h: 96 };
-    expect(computeSpriteFitScale(fishFrame.w, fishFrame.h, box.width, box.height, 'contain')).toBe(
-      1
-    );
-    expect(computeSpriteFitScale(fishFrame.w, fishFrame.h, box.width, box.height, 'cover')).toBe(
-      box.width / fishFrame.w
-    );
+    const smallerX = penHouseDisplaySize(1, TILE_WIDTH, TILE_HEIGHT, PEN_HOUSE_FOOTPRINT_FIT_PADDING, 1, 1);
+    expect(box.width).toBeGreaterThan(smallerX.width);
+    expect(box.height).toBeCloseTo(smallerX.height, 10);
+    expect(PEN_HOUSE_VISUAL_SCALE).toBe(1.1);
+    expect(PEN_HOUSE_VISUAL_HEIGHT_SCALE).toBe(1);
     expect(PEN_HOUSE_FOOTPRINT_FIT_PADDING).toBe(1);
   });
 });

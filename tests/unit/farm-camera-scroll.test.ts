@@ -1,21 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampScrollToFarmPlayable,
+  clampScrollSoFootprintOverlapsViewport,
   computeCenteredFarmCameraScroll,
+  mergeFarmCameraScrollWithOversizeCenter,
   computeFarmCameraScrollForMapTopAndPanCenter,
   computeFarmCameraScrollLimits,
   computeFarmPlayableScreenMargins,
+  computeOversizeFarmPanBottomScrollY,
   farmFootprintCenter,
   type FarmFootprintBounds,
 } from '../../src/farmCameraScroll';
 import {
   FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC,
+  FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC,
   FARM_MAP_TOP_PAN_BOUNDS_FRAC,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX,
+  FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET,
   getFarmMapTopTargetScreenY,
   getFarmMapTopTargetScreenYFromPanBounds,
+  getFarmPanBoundsScrollTargetScreen,
   getPlayableBandPanBoundsCenter,
   shiftPlayableBandForPanBoundsCenter,
 } from '../../src/ui/hudLayout';
+
+const phoneViewW = 390;
+const phoneViewH = 844;
 
 const phonePlayable = {
   playableLeft: 10,
@@ -183,8 +194,16 @@ describe('computeCenteredFarmCameraScroll', () => {
 
   it('places oversize scroll at limit midpoint when pan-bounds offset shifts the clamp band', () => {
     const zoom = 1.7;
-    const scrollBand = shiftPlayableBandForPanBoundsCenter(phonePlayable);
-    const targetCenter = getPlayableBandPanBoundsCenter(phonePlayable);
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(
+      phonePlayable,
+      phoneViewW,
+      phoneViewH
+    );
+    const targetCenter = getFarmPanBoundsScrollTargetScreen(
+      phoneViewW,
+      phoneViewH,
+      phonePlayable
+    );
     const anchor = farmFootprintCenter(phoneFootprint);
     const limits = computeFarmCameraScrollLimits(phoneFootprint, scrollBand, zoom);
     const scroll = computeCenteredFarmCameraScroll(
@@ -195,9 +214,35 @@ describe('computeCenteredFarmCameraScroll', () => {
       zoom
     );
     expect(limits.x.oversize).toBe(true);
-    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC).toBe(0.45);
+    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_X_FRAC).toBe(0.5);
     const midX = (limits.x.minScroll + limits.x.maxScroll) / 2;
     expect(scroll.scrollX).toBeCloseTo(midX, 5);
+  });
+
+  it('mergeFarmCameraScrollWithOversizeCenter recenters X only when Y fits in band', () => {
+    const zoom = 1.7;
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(
+      phonePlayable,
+      phoneViewW,
+      phoneViewH
+    );
+    const panTarget = getFarmPanBoundsScrollTargetScreen(
+      phoneViewW,
+      phoneViewH,
+      phonePlayable
+    );
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, scrollBand, zoom);
+    const drifted = { scrollX: limits.x.minScroll + 12, scrollY: 400 };
+    const merged = mergeFarmCameraScrollWithOversizeCenter(
+      drifted,
+      phoneFootprint,
+      scrollBand,
+      panTarget,
+      zoom
+    );
+    const midX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    expect(merged.scrollX).toBeCloseTo(midX, 5);
+    expect(merged.scrollY).toBe(400);
   });
 
   it('uses anchor scroll when farm fits on both axes', () => {
@@ -219,8 +264,16 @@ describe('computeCenteredFarmCameraScroll', () => {
 describe('computeFarmCameraScrollForMapTopAndPanCenter', () => {
   it('keeps map top on screen target when map minY shifts (origin align)', () => {
     const zoom = 1.7;
-    const scrollBand = shiftPlayableBandForPanBoundsCenter(phonePlayable);
-    const panTarget = getPlayableBandPanBoundsCenter(phonePlayable);
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(
+      phonePlayable,
+      phoneViewW,
+      phoneViewH
+    );
+    const panTarget = getFarmPanBoundsScrollTargetScreen(
+      phoneViewW,
+      phoneViewH,
+      phonePlayable
+    );
     const mapTopTarget = getFarmMapTopTargetScreenYFromPanBounds(
       phoneFootprint,
       0,
@@ -256,7 +309,72 @@ describe('computeFarmCameraScrollForMapTopAndPanCenter', () => {
     expect(scroll1.scrollY).toBeCloseTo(scroll0.scrollY - 120, 1);
   });
 
-  it('default pan-bounds frac 0.165 places map top 16.5% down pan height', () => {
+  it('centers pan on target when Y is oversize (map top via align, not bottom pin)', () => {
+    const zoom = 1.7;
+    const tallFootprint: FarmFootprintBounds = { ...phoneFootprint, minY: 100, maxY: 550 };
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(
+      phonePlayable,
+      phoneViewW,
+      phoneViewH
+    );
+    const panTarget = getFarmPanBoundsScrollTargetScreen(
+      phoneViewW,
+      phoneViewH,
+      phonePlayable
+    );
+    const limits = computeFarmCameraScrollLimits(tallFootprint, scrollBand, zoom);
+    expect(limits.y.oversize).toBe(true);
+    expect(FARM_PAN_BOUNDS_CENTER_OFFSET_Y_FRAC).toBe(0.5);
+    const mapTopTarget = getFarmMapTopTargetScreenYFromPanBounds(
+      tallFootprint,
+      0,
+      zoom,
+      FARM_MAP_TOP_PAN_BOUNDS_FRAC
+    );
+    const anchor = farmFootprintCenter(tallFootprint);
+    const scroll = computeFarmCameraScrollForMapTopAndPanCenter(
+      999,
+      anchor,
+      tallFootprint,
+      scrollBand,
+      mapTopTarget,
+      panTarget,
+      zoom
+    );
+    const idealScrollY = anchor.y - panTarget.y / zoom;
+    const expectedScrollY = Math.min(
+      Math.max(idealScrollY, limits.y.minScroll),
+      limits.y.maxScroll
+    );
+    expect(scroll.scrollY).toBeCloseTo(expectedScrollY, 5);
+    const centerScreenY = (anchor.y - scroll.scrollY) * zoom;
+    expect(centerScreenY).toBeCloseTo(panTarget.y, 1);
+  });
+
+  it('computeOversizeFarmPanBottomScrollY centers footprint on pan target', () => {
+    const zoom = 1.7;
+    const scrollBand = shiftPlayableBandForPanBoundsCenter(
+      phonePlayable,
+      phoneViewW,
+      phoneViewH
+    );
+    const panTarget = getFarmPanBoundsScrollTargetScreen(
+      phoneViewW,
+      phoneViewH,
+      phonePlayable
+    );
+    const scrollY = computeOversizeFarmPanBottomScrollY(
+      phoneFootprint,
+      scrollBand,
+      zoom,
+      panTarget
+    );
+    const center = farmFootprintCenter(phoneFootprint);
+    const centerScreenY = (center.y - scrollY) * zoom;
+    expect(centerScreenY).toBeCloseTo(panTarget.y, 1);
+  });
+
+  it('default pan-bounds row mapping places map top at row 7 from top', () => {
     const zoom = 1.7;
     const panTop = (phoneFootprint.minY - 0) * zoom;
     const panH = (phoneFootprint.maxY - phoneFootprint.minY) * zoom;
@@ -266,7 +384,69 @@ describe('computeFarmCameraScrollForMapTopAndPanCenter', () => {
       zoom,
       FARM_MAP_TOP_PAN_BOUNDS_FRAC
     );
-    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.165);
-    expect(target).toBeCloseTo(panTop + panH * 0.165, 1);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_INDEX).toBe(7);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_OFFSET).toBe(6);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_ROW_COUNT).toBe(20);
+    expect(FARM_MAP_TOP_PAN_BOUNDS_FRAC).toBe(0.3);
+    expect(target).toBeCloseTo(panTop + panH * (6 / 20), 1);
+  });
+});
+
+describe('clampScrollSoFootprintOverlapsViewport', () => {
+  const soil: FarmFootprintBounds = { minX: 100, minY: 200, maxX: 400, maxY: 350 };
+  const playable = phonePlayable;
+  const viewW = phoneViewW;
+  const viewH = phoneViewH;
+
+  it('nudges scroll when footprint is entirely off the right edge', () => {
+    const zoom = 2;
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, playable, zoom);
+    const offRight = { scrollX: 500, scrollY: 128 };
+    const after = clampScrollSoFootprintOverlapsViewport(
+      soil,
+      limits,
+      viewW,
+      viewH,
+      zoom,
+      offRight
+    );
+    const screenMin = (soil.minX - after.scrollX) * zoom;
+    const screenMax = (soil.maxX - after.scrollX) * zoom;
+    expect(screenMax).toBeGreaterThan(0);
+    expect(screenMin).toBeLessThan(viewW);
+  });
+
+  it('preserves in-range scroll after pan clamp', () => {
+    const zoom = 1.7;
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, playable, zoom);
+    const centeredX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    const after = clampScrollSoFootprintOverlapsViewport(
+      soil,
+      limits,
+      viewW,
+      viewH,
+      zoom,
+      { scrollX: centeredX, scrollY: 128 }
+    );
+    expect(after.scrollX).toBeCloseTo(centeredX, 3);
+    expect(after.scrollY).toBeCloseTo(128, 3);
+  });
+
+  it('preserves midpoint scroll at high zoom when using playable band overlap', () => {
+    const zoom = 2.8;
+    const limits = computeFarmCameraScrollLimits(phoneFootprint, playable, zoom);
+    const centeredX = (limits.x.minScroll + limits.x.maxScroll) / 2;
+    const after = clampScrollSoFootprintOverlapsViewport(
+      soil,
+      limits,
+      viewW,
+      viewH,
+      zoom,
+      { scrollX: centeredX, scrollY: 128 },
+      playable
+    );
+    expect(after.scrollX).toBeCloseTo(centeredX, 2);
+    expect(limits.x.maxScroll - limits.x.minScroll).toBeGreaterThan(10);
+    expect(limits.x.oversize).toBe(true);
   });
 });

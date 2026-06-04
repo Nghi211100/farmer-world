@@ -1,97 +1,79 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canStockAnimal,
-  canStockPenWith,
   collectFromPen,
   createNewPen,
   createRuminantPen,
   feedPen,
-  findPenForStocking,
+  growthProgressRatio,
+  livestockSellPrice,
   stockPenWithAnimal,
   tickLivestockPen,
-  upgradePen,
+  tickAllLivestockPens,
 } from '../../src/systems/livestockLogic';
-import { resolveLivestockAnimalTextureKey } from '../../src/config/livestockAssets';
-import { LIVESTOCK_ANIMALS } from '../../src/config/LivestockConfig';
+import { livestockPenCapacity } from '../../src/config/LivestockConfig';
 import { ITEM_IDS } from '../../src/config/items';
 
 describe('livestockLogic', () => {
-  it('stocks empty pen and feeds into producing then ready', () => {
+  it('follows lifecycle baby -> growing -> adult/producing', () => {
     let pen = createNewPen('p1', 'chicken', 3, 4);
-    expect(pen.state).toBe('unstocked');
-
     const stocked = stockPenWithAnimal(pen, 'chicken', () => 0);
-    expect(stocked?.state).toBe('idle');
-    expect(stocked?.stage).toBeDefined();
-    expect(stocked?.animalTextureKey).toBe(
-      resolveLivestockAnimalTextureKey('chicken', stocked!.stage!, stocked!.variant!)
-    );
+    expect(stocked?.lifecycleState).toBe('baby');
     pen = stocked!;
-
-    const fed = feedPen(pen, 1000);
-    expect(fed?.state).toBe('producing');
-    expect(fed?.readyAt).toBe(1000 + LIVESTOCK_ANIMALS.chicken.produceMs);
-    pen = fed!;
-
-    const still = tickLivestockPen(pen, 1000 + 1000);
-    expect(still.state).toBe('producing');
-
-    const ready = tickLivestockPen(pen, fed!.readyAt!);
-    expect(ready.state).toBe('ready');
-
-    const collected = collectFromPen(ready, fed!.readyAt! + 1);
-    expect(collected?.productItemId).toBe(ITEM_IDS.EGG);
-    expect(collected?.pen.state).toBe('idle');
+    const start = pen.growthStartAt!;
+    const half = tickLivestockPen(pen, start + Math.floor((pen.growthDurationMs ?? 0) * 0.6));
+    expect(half.lifecycleState).toBe('growing');
+    const done = tickLivestockPen(pen, start + (pen.growthDurationMs ?? 0) + 1);
+    expect(done.lifecycleState).toBe('producing');
   });
 
-  it('cow produces milk', () => {
+  it('hungry pauses production and feeding resumes', () => {
+    let pen = stockPenWithAnimal(createNewPen('p2', 'duck', 1, 1), 'duck', () => 0)!;
+    const start = pen.growthStartAt!;
+    pen = tickLivestockPen(pen, start + (pen.growthDurationMs ?? 0) + 1);
+    const hungry = tickLivestockPen(pen, (pen.lastUpdatedAt ?? 0) + 200_000);
+    expect(hungry.lifecycleState).toBe('hungry');
+    const fed = feedPen(hungry, hungry.lastUpdatedAt! + 1);
+    expect(fed?.lifecycleState).toBe('producing');
+  });
+
+  it('production output uses species product', () => {
     let pen = createNewPen('c1', 'cow', 1, 1);
     pen = stockPenWithAnimal(pen, 'cow')!;
-    pen = feedPen(pen, 0)!;
-    const ready = tickLivestockPen(pen, pen.readyAt!);
-    const out = collectFromPen(ready, pen.readyAt!);
+    pen = tickLivestockPen(pen, pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1);
+    const ready = tickLivestockPen(
+      { ...pen, productionProgressMs: 1_000_000, state: 'producing', lifecycleState: 'producing' },
+      (pen.lastUpdatedAt ?? 0) + 1
+    );
+    const out = collectFromPen(ready, (ready.lastUpdatedAt ?? 0) + 1);
     expect(out?.productItemId).toBe(ITEM_IDS.MILK);
   });
 
-  it('ruminant pen accepts goat or sheep from shop, one animal', () => {
-    const pen = createRuminantPen('r1', 4, 4, 1);
-    expect(canStockAnimal(pen)).toBe(false);
-    expect(canStockPenWith(pen, 'goat')).toBe(true);
-    expect(canStockPenWith(pen, 'sheep')).toBe(true);
-    const stocked = stockPenWithAnimal(pen, 'sheep');
-    expect(stocked?.state).toBe('idle');
-    expect(stocked?.animalTextureKey).toMatch(/^sheep_/);
-    expect(canStockPenWith(stocked!, 'goat')).toBe(false);
+  it('early sell thresholds enforce 50% growth gate', () => {
+    const pen = stockPenWithAnimal(createNewPen('s1', 'pig', 2, 2), 'pig', () => 0)!;
+    const start = pen.growthStartAt!;
+    const tooEarly = livestockSellPrice(pen, start + Math.floor((pen.growthDurationMs ?? 0) * 0.49));
+    const half = livestockSellPrice(pen, start + Math.floor((pen.growthDurationMs ?? 0) * 0.5));
+    const full = livestockSellPrice(pen, start + (pen.growthDurationMs ?? 0) + 1);
+    expect(tooEarly).toBe(0);
+    expect(half).toBeGreaterThan(0);
+    expect(full).toBeGreaterThanOrEqual(half);
   });
 
-  it('goat in ruminant pen produces goat milk', () => {
-    let pen = createRuminantPen('g1', 2, 2);
-    pen = stockPenWithAnimal(pen, 'goat')!;
-    pen = feedPen(pen, 0)!;
-    const ready = tickLivestockPen(pen, pen.readyAt!);
-    const out = collectFromPen(ready, pen.readyAt!);
-    expect(out?.productItemId).toBe(ITEM_IDS.GOAT_MILK);
+  it('happiness decreases under prolonged hunger', () => {
+    let pen = stockPenWithAnimal(createNewPen('h1', 'sheep', 0, 0), 'sheep', () => 0)!;
+    pen = { ...pen, lifecycleState: 'hungry', hungrySince: 0, lastUpdatedAt: 0, happiness: 100 };
+    const ticked = tickLivestockPen(pen, 130 * 60 * 1000);
+    expect(ticked.happiness).toBeLessThanOrEqual(50);
   });
 
-  it('upgradePen moves footprint from 3×3 to 4×4', () => {
-    const pen = createNewPen('u1', 'cow', 2, 3, 1);
-    expect(pen.level).toBe(1);
-    const up = upgradePen(pen);
-    expect(up?.level).toBe(2);
+  it('offline tick advances all pens', () => {
+    const pen = stockPenWithAnimal(createNewPen('o1', 'fish', 0, 0), 'fish', () => 0)!;
+    const updated = tickAllLivestockPens([pen], pen.growthStartAt! + (pen.growthDurationMs ?? 0) + 1)[0]!;
+    expect(updated.lifecycleState).toBe('producing');
   });
 
-  it('findPenForStocking links goat and sheep to same empty ruminant pen', () => {
-    const pens = [createRuminantPen('r1', 0, 0)];
-    expect(findPenForStocking(pens, 'goat')?.id).toBe('r1');
-    expect(findPenForStocking(pens, 'sheep')?.id).toBe('r1');
-  });
-
-  it('pig produces pork', () => {
-    let pen = createNewPen('p1', 'pig', 2, 2);
-    pen = stockPenWithAnimal(pen, 'pig')!;
-    pen = feedPen(pen, 500)!;
-    const ready = tickLivestockPen(pen, pen.readyAt!);
-    const out = collectFromPen(ready, pen.readyAt!);
-    expect(out?.productItemId).toBe(ITEM_IDS.PORK);
+  it('preserves global capacity by level (lv1=4, lv2=8)', () => {
+    expect(livestockPenCapacity(1)).toBe(4);
+    expect(livestockPenCapacity(2)).toBe(8);
   });
 });

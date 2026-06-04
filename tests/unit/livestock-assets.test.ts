@@ -7,6 +7,8 @@ import {
   penFootprintCells,
   penFootprintTiles,
   PEN_HOUSE_FOOTPRINT_FIT_PADDING,
+  PEN_HOUSE_VISUAL_HEIGHT_SCALE,
+  PEN_HOUSE_VISUAL_SCALE,
   penHouseDisplaySize,
   penHouseFootprintFitBox,
   penOccupiesCell,
@@ -15,6 +17,11 @@ import {
   speciesHasAnimalSprites,
 } from '../../src/config/livestockAssets';
 import { getLivestockPenTextureKeyForPen, penFootprintDebugLabel } from '../../src/config/LivestockConfig';
+import {
+  ASSET_MANIFEST,
+  LIVESTOCK_WARNING_TEXTURE_KEY,
+  LIVESTOCK_WARNING_WIDTH_SCALE,
+} from '../../src/config/assets';
 import { createNewPen, createRuminantPen, upgradePen } from '../../src/systems/livestockLogic';
 
 describe('livestockAssets', () => {
@@ -22,8 +29,11 @@ describe('livestockAssets', () => {
     expect(getLivestockTexturesFor('chicken', 'child').map((e) => e.key)).toEqual([
       'chicken_child',
     ]);
-    expect(getLivestockTexturesFor('pig', 'young').map((e) => e.key)).toEqual(['pig_young']);
-    expect(getLivestockTexturesFor('pig', 'adult').map((e) => e.key)).toEqual(['pig_ault']);
+    expect(getLivestockTexturesFor('pig', 'young').map((e) => e.key)).toEqual([]);
+    expect(getLivestockTexturesFor('pig', 'adult').map((e) => e.key).sort()).toEqual([
+      'pig_adult',
+      'pig_adult_1',
+    ]);
     expect(getLivestockTexturesFor('fish', 'adult').map((e) => e.variant).sort()).toEqual([
       1, 2, 3, 4,
     ]);
@@ -41,15 +51,25 @@ describe('livestockAssets', () => {
     expect(resolveLivestockAnimalTextureKey('cow', 'adult', 99)).toBe('cow_ault');
   });
 
-  it('penHouseDisplaySize uses full N×N iso footprint (padding 1.0)', () => {
+  it('penHouseDisplaySize applies visual X/Y scaling on N×N iso footprint', () => {
     expect(PEN_HOUSE_FOOTPRINT_FIT_PADDING).toBe(1);
-    expect(penHouseDisplaySize(1)).toEqual({ width: 192, height: 96 });
-    expect(penHouseDisplaySize(2)).toEqual({ width: 256, height: 128 });
+    expect(PEN_HOUSE_VISUAL_SCALE).toBe(1.1);
+    expect(PEN_HOUSE_VISUAL_HEIGHT_SCALE).toBe(1);
+    const lv1 = penHouseDisplaySize(1);
+    expect(lv1.width).toBeCloseTo(211.2, 10);
+    expect(lv1.height).toBeCloseTo(96, 10);
+    const lv2 = penHouseDisplaySize(2);
+    expect(lv2.width).toBeCloseTo(281.6, 10);
+    expect(lv2.height).toBeCloseTo(128, 10);
   });
 
   it('penHouseFootprintFitBox matches penHouseDisplaySize for all species', () => {
-    expect(penHouseFootprintFitBox(1, 'fish')).toEqual(penHouseDisplaySize(1));
-    expect(penHouseFootprintFitBox(1, 'cow')).toEqual(penHouseDisplaySize(1));
+    expect(penHouseFootprintFitBox(1, 'fish')).toEqual(
+      penHouseDisplaySize(1, undefined, undefined, undefined, undefined, undefined, 'fish')
+    );
+    expect(penHouseFootprintFitBox(1, 'cow')).toEqual(
+      penHouseDisplaySize(1, undefined, undefined, undefined, undefined, undefined, 'cow')
+    );
   });
 
   it('pen footprint is 3×3 at level 1 and 4×4 at level 2', () => {
@@ -72,7 +92,7 @@ describe('livestockAssets', () => {
   it('fish has child and adult stages', () => {
     expect(getLivestockStagesForSpecies('fish').sort()).toEqual(['adult', 'child']);
     expect(getLivestockTexturesFor('fish', 'child').map((e) => e.key)).toEqual(['fish_child']);
-    expect(getLivestockStagesForSpecies('pig').sort()).toEqual(['adult', 'child', 'young']);
+    expect(getLivestockStagesForSpecies('pig').sort()).toEqual(['adult', 'child']);
   });
 
   it('ruminant empty pen uses sheep_house for display', () => {
@@ -99,5 +119,12 @@ describe('livestockAssets', () => {
   it('penFootprintDebugLabel shows species or ruminant kind', () => {
     expect(penFootprintDebugLabel(createNewPen('p', 'chicken', 0, 0, 1))).toBe('Gà');
     expect(penFootprintDebugLabel(createRuminantPen('r', 0, 0))).toBe('Dê/Cừu');
+  });
+
+  it('registers hungry warning texture asset key', () => {
+    const warningEntry = ASSET_MANIFEST.find((entry) => entry.key === LIVESTOCK_WARNING_TEXTURE_KEY);
+    expect(LIVESTOCK_WARNING_TEXTURE_KEY).toBe('livestock_warning');
+    expect(LIVESTOCK_WARNING_WIDTH_SCALE).toBe(0.5);
+    expect(warningEntry?.path).toBe('animals/warning.png');
   });
 });

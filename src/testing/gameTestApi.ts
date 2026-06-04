@@ -12,7 +12,48 @@ import type {
 } from '../ui/CropSelectPopup';
 import type { WarehouseGridLayoutMetrics, WarehouseTabId } from '../ui/InventoryPanel';
 import type { ShopCategoryId, ShopGridLayoutMetrics, ShopLayoutMetrics } from '../ui/ShopPanel';
-import { isWarehouseGridDebug, isShopGridDebug, setShopGridDebugForTest } from '../config/gameConfig';
+import {
+  isScreenshotCaptureMode,
+  isWarehouseGridDebug,
+  isShopGridDebug,
+  setShopGridDebugForTest,
+} from '../config/gameConfig';
+
+const FARM_LETTERBOX_RGB = '27,46,22';
+
+function sampleFarmCanvasColors(
+  canvas: HTMLCanvasElement,
+  sampleCount = 48
+): {
+  uniqueColors: number;
+  dominantPct: number;
+  letterboxPct: number;
+  preserveDrawingBuffer: boolean;
+} | null {
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (!gl) return null;
+  const counts = new Map<string, number>();
+  let letterboxHits = 0;
+  for (let i = 0; i < sampleCount; i++) {
+    const x = Math.floor(((i * 17) % 97) / 97 * (canvas.width - 1));
+    const y = Math.floor(((i * 31) % 89) / 89 * (canvas.height - 1));
+    const buf = new Uint8Array(4);
+    gl.readPixels(x, canvas.height - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    const key = `${buf[0]},${buf[1]},${buf[2]}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (key === FARM_LETTERBOX_RGB) letterboxHits++;
+  }
+  let dominantCount = 0;
+  for (const v of counts.values()) {
+    if (v > dominantCount) dominantCount = v;
+  }
+  return {
+    uniqueColors: counts.size,
+    dominantPct: (dominantCount / sampleCount) * 100,
+    letterboxPct: (letterboxHits / sampleCount) * 100,
+    preserveDrawingBuffer: gl.getContextAttributes()?.preserveDrawingBuffer === true,
+  };
+}
 
 export interface FarmerWorldTestApi {
   clickBag: () => void;
@@ -189,6 +230,8 @@ export interface FarmerWorldTestApi {
   } | null;
   clickWarehouseSellUse: () => void;
   isFarmSceneReady: () => boolean;
+  /** True when WebGL buffer is capturable and samples show farm art (not blank letterbox). */
+  isFarmCanvasCaptureReady: () => boolean;
   openFarmActionPopup: (gx?: number, gy?: number) => void;
   isFarmActionPopupOpen: () => boolean;
   getFarmActionPopupLayout: () => FarmActionPopupLayoutMetrics | null;
@@ -199,6 +242,14 @@ export interface FarmerWorldTestApi {
   getCropSelectPopupLayout: () => CropSelectPopupLayoutMetrics | null;
   getCropSelectPopupVisual: () => CropSelectPopupVisualMetrics | null;
   closeCropSelectPopup: () => void;
+  openObjectEditPopup: (gx?: number, gy?: number, penOnly?: boolean) => void;
+  isObjectEditPopupOpen: () => boolean;
+  getObjectEditPopupActions: () => Array<'move' | 'remove' | 'upgrade' | 'feed' | 'sell'>;
+  isObjectEditFeedWarningVisible: () => boolean;
+  isPenHungryWarningVisible: (gx: number, gy: number) => boolean;
+  forcePenHungryState: (gx: number, gy: number, hungry: boolean) => boolean;
+  tapPenAt: (gx: number, gy: number) => boolean;
+  closeObjectEditPopup: () => void;
   isToolBarVisible: () => boolean;
   refocusFarmCamera: () => {
     viewW: number;
@@ -247,13 +298,42 @@ export interface FarmerWorldTestApi {
     marginRight: number;
     marginTop: number;
     marginBottom: number;
+    scrollMidpointErrorX: number;
+    scrollMidpointErrorY: number;
+    mapCenterScreenX: number;
+    mapCenterScreenY: number;
+    mapCenterTargetScreenX: number;
+    mapCenterTargetScreenY: number;
+    mapCenterErrorX: number;
+    mapCenterErrorY: number;
+    mapCenterAtOriginX: number;
+    mapCenterAtOriginY: number;
+    mapCenterWorldTargetX: number;
+    mapCenterWorldTargetY: number;
+    isMapCenterTrueAabb: boolean;
+    mapCenterDotHudDeltaX: number;
+    mapCenterDotHudDeltaY: number;
   } | null;
   getFarmCameraScrollLimits: () => {
     x: { minScroll: number; maxScroll: number; oversize: boolean };
     y: { minScroll: number; maxScroll: number; oversize: boolean };
   } | null;
+  /** Map AABB center screen + scroll if nudged for zoom (world unchanged after bake). */
+  mapCenterScreenAtZoom: (zoom: number) => {
+    zoom: number;
+    mapCenterWorldX: number;
+    mapCenterWorldY: number;
+    scrollX: number;
+    scrollY: number;
+    screenX: number;
+    screenY: number;
+    targetScreenX: number;
+    targetScreenY: number;
+  } | null;
   panFarmCamera: (dxScreen: number, dyScreen: number) => void;
   setFarmCameraZoom: (zoom: number, anchorScreenX?: number, anchorScreenY?: number) => void;
+  /** Like wheel/pinch zoom — keeps horizontal pan when already panned. */
+  stepFarmCameraZoom: (zoom: number) => void;
   simulateFarmCameraResizeLayout: () => void;
   getSoilFootprintAlignMetrics: () => {
     soilGridRange: { minX: number; maxX: number; minY: number; maxY: number };
@@ -285,6 +365,34 @@ export interface FarmerWorldTestApi {
       centerY: number;
     };
     bg: { x: number; y: number; displayW: number; displayH: number } | null;
+  } | null;
+  getFarmBoundsMetrics: () => {
+    mapBounds: {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+      centerX: number;
+      centerY: number;
+    };
+    footprintBounds: {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+      centerX: number;
+      centerY: number;
+    };
+    panBounds: {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+    };
+    mapTopPanOffsetY: number;
+    mapTopPanOffsetX: number;
+    soilRhombusCenter: { x: number; y: number };
+    playerSpawnWorld: { x: number; y: number };
   } | null;
   /** Dev: force neglect-dry on a tilled plot (gx, gy) for soil moisture visuals. */
   forceSoilIdleDryAt: (gx: number, gy: number) => boolean;
@@ -607,6 +715,24 @@ export function installGameTestApi(game: Phaser.Game): void {
       getUiScene(game)?.inventoryPanel.simulateSellUseClick();
     },
     isFarmSceneReady: () => getFarmScene(game)?.isFarmPopupsReadyForTest() ?? false,
+    isFarmCanvasCaptureReady: () => {
+      if (!getFarmScene(game)?.isFarmPopupsReadyForTest()) return false;
+      if (!isScreenshotCaptureMode()) return false;
+      const canvas = game.canvas as HTMLCanvasElement | null;
+      if (!canvas?.width || !canvas.height) return false;
+      const sample = sampleFarmCanvasColors(canvas);
+      if (!sample?.preserveDrawingBuffer) return false;
+      if (sample.uniqueColors < 6) return false;
+      if (sample.dominantPct >= 95 || sample.letterboxPct >= 95) return false;
+      const metrics = getFarmScene(game)?.getFarmCameraCenterMetricsForTest();
+      if (!metrics) return false;
+      const islandOff =
+        metrics.islandVoidLeft > metrics.viewW &&
+        metrics.islandVoidRight > metrics.viewW &&
+        metrics.islandVoidTop > metrics.viewH &&
+        metrics.islandVoidBottom > metrics.viewH;
+      return !islandOff;
+    },
     openFarmActionPopup: (gx = 7, gy = 9) => {
       getFarmScene(game)?.showFarmActionPopupForTest(gx, gy);
     },
@@ -621,17 +747,35 @@ export function installGameTestApi(game: Phaser.Game): void {
     getCropSelectPopupLayout: () => getFarmScene(game)?.getCropSelectPopupLayoutForTest() ?? null,
     getCropSelectPopupVisual: () => getFarmScene(game)?.getCropSelectPopupVisualForTest() ?? null,
     closeCropSelectPopup: () => getFarmScene(game)?.closeCropSelectPopupForTest(),
+    openObjectEditPopup: (gx = 7, gy = 9, penOnly = false) => {
+      getFarmScene(game)?.showObjectEditPopupForTest(gx, gy, penOnly);
+    },
+    isObjectEditPopupOpen: () => getFarmScene(game)?.isObjectEditPopupVisibleForTest() ?? false,
+    getObjectEditPopupActions: () => getFarmScene(game)?.getObjectEditPopupActionsForTest() ?? [],
+    isObjectEditFeedWarningVisible: () =>
+      getFarmScene(game)?.isObjectEditFeedWarningVisibleForTest() ?? false,
+    isPenHungryWarningVisible: (gx, gy) =>
+      getFarmScene(game)?.isPenHungryWarningVisibleForTest(gx, gy) ?? false,
+    forcePenHungryState: (gx, gy, hungry) =>
+      getFarmScene(game)?.forcePenHungryStateForTest(gx, gy, hungry) ?? false,
+    tapPenAt: (gx, gy) => getFarmScene(game)?.tapPenForTest(gx, gy) ?? false,
+    closeObjectEditPopup: () => getFarmScene(game)?.closeObjectEditPopupForTest(),
     isToolBarVisible: () => getFarmScene(game)?.isToolBarVisibleForTest() ?? false,
     refocusFarmCamera: () => getFarmScene(game)?.refocusFarmCameraForTest() ?? null,
     getFarmCameraCenterMetrics: () =>
       getFarmScene(game)?.getFarmCameraCenterMetricsForTest() ?? null,
     getFarmCameraScrollLimits: () =>
       getFarmScene(game)?.getFarmCameraScrollLimitsForTest() ?? null,
+    mapCenterScreenAtZoom: (zoom) =>
+      getFarmScene(game)?.getFarmMapCenterScreenAtZoomForTest(zoom) ?? null,
     panFarmCamera: (dxScreen, dyScreen) => {
       getFarmScene(game)?.panFarmCameraForTest(dxScreen, dyScreen);
     },
     setFarmCameraZoom: (zoom, anchorScreenX, anchorScreenY) => {
       getFarmScene(game)?.setFarmCameraZoomForTest(zoom, anchorScreenX, anchorScreenY);
+    },
+    stepFarmCameraZoom: (zoom) => {
+      getFarmScene(game)?.stepFarmCameraZoomForTest(zoom);
     },
     simulateFarmCameraResizeLayout: () => {
       getFarmScene(game)?.simulateFarmCameraResizeLayoutForTest();
@@ -640,6 +784,7 @@ export function installGameTestApi(game: Phaser.Game): void {
       getFarmScene(game)?.getSoilFootprintAlignMetricsForTest() ?? null,
     getFarmViewportDebugMetrics: () =>
       getFarmScene(game)?.getFarmViewportDebugMetricsForTest() ?? null,
+    getFarmBoundsMetrics: () => getFarmScene(game)?.getFarmBoundsMetricsForTest() ?? null,
     setMapTopPanOffsetX: (offsetX: number) => {
       getFarmScene(game)?.setMapTopPanOffsetXForTest(offsetX);
     },

@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-06-02T14:38:13.878Z",
+  "label": "baseline",
+  "url": "http://127.0.0.1:5173/?debugGrid=1",
+  "screenshot": "artifacts/map-top-stability/baseline.png",
+  "metrics": {
+    "mapTopErrorY": -104.38000000000011,
+    "soilFootprintAlignError": 0,
+    "panBoundsErrorX": 1.2920000000002574,
+    "panBoundsErrorY": 314.74800000000005,
+    "mapTopScreenY": 1415.828,
+    "mapTopTargetScreenY": 1520.208,
+    "panBoundsTopScreenY": 942.378,
+    "mapTopAbovePanPx": -473.44999999999993,
+    "mapBounds": {
+      "minX": -129.14000000000001,
+      "minY": 532.84,
+      "maxX": 1150.8600000000001,
+      "maxY": 1172.8400000000001,
+      "centerX": 510.86000000000007,
+      "centerY": 852.8400000000001
+    },
+    "footprint": {
+      "minX": 126.86000000000001,
+      "minY": 660.84,
+      "maxX": 766.86,
+      "maxY": 980.84,
+      "centerX": 446.86,
+      "centerY": 820.84
+    },
+    "panBounds": {
+      "minX": -667.64,
+      "minY": 254.34000000000003,
+      "maxX": 1561.3600000000001,
+      "maxY": 1387.3400000000001
+    },
+    "containment": {
+      "footprintInsideMap": true,
+      "footprintInsidePanBounds": true
+    }
+  }
+}

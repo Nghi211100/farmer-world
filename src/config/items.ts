@@ -23,6 +23,8 @@ export const ITEM_IDS = {
   DUCK_EGG: 'duck_egg',
   WOOL: 'wool',
   GOAT_MILK: 'goat_milk',
+  FISH_FEED: 'fish_feed',
+  GRASS: 'grass',
   FLOUR: 'flour',
   WOOD: 'wood',
   STONE: 'stone',
@@ -42,6 +44,8 @@ export const ITEM_CATEGORIES: Record<ItemCategory, readonly string[]> = {
     ITEM_IDS.CARROT,
     ITEM_IDS.PUMPKIN,
     ITEM_IDS.TOMATO,
+    ITEM_IDS.GRASS,
+    ITEM_IDS.FISH_FEED,
   ],
   seeds: [
     ITEM_IDS.SEEDS_WHEAT,
@@ -99,6 +103,8 @@ export const ITEM_LABELS: Record<string, string> = {
   [ITEM_IDS.DUCK_EGG]: 'Duck egg',
   [ITEM_IDS.WOOL]: 'Wool',
   [ITEM_IDS.GOAT_MILK]: 'Goat milk',
+  [ITEM_IDS.FISH_FEED]: 'Fish feed',
+  [ITEM_IDS.GRASS]: 'Grass',
   [ITEM_IDS.FLOUR]: 'Flour',
   [ITEM_IDS.WOOD]: 'Wood',
   [ITEM_IDS.STONE]: 'Stone',
@@ -130,6 +136,8 @@ export const ITEM_ICON_KEYS: Record<string, string> = {
   [ITEM_IDS.DUCK_EGG]: 'cookie',
   [ITEM_IDS.WOOL]: 'wheat',
   [ITEM_IDS.GOAT_MILK]: 'milk',
+  [ITEM_IDS.FISH_FEED]: 'seed',
+  [ITEM_IDS.GRASS]: 'wheat',
   [ITEM_IDS.FLOUR]: 'flour',
   [ITEM_IDS.WOOD]: 'ui_wood',
   [ITEM_IDS.STONE]: 'rock_01',
@@ -172,6 +180,8 @@ export const RESOURCE_SELL_PRICES: Record<string, number> = {
   [ITEM_IDS.DUCK_EGG]: 11,
   [ITEM_IDS.WOOL]: 13,
   [ITEM_IDS.GOAT_MILK]: 15,
+  [ITEM_IDS.FISH_FEED]: 4,
+  [ITEM_IDS.GRASS]: 3,
 };
 
 /** Livestock product sell prices (mirrors LivestockConfig; used by EconomySystem). */

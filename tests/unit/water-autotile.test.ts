@@ -93,6 +93,15 @@ describe('water autotile', () => {
     expect(grid.getGroundTextureKey(4, 4)).toBe('water_1_border_top-right');
   });
 
+  it('counts water with hasBridge as water for autotile probe', () => {
+    expect(
+      cellCountsAsWaterForAutotile({
+        type: 'water',
+        hasBridge: true,
+      })
+    ).toBe(true);
+  });
+
   it('counts bridge_tile path as water for autotile probe', () => {
     expect(
       cellCountsAsWaterForAutotile({

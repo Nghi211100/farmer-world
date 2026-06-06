@@ -85,9 +85,9 @@ describe('Build decor placement (5 coins)', () => {
     grid.setCell(10, 9, { type: 'grass', walkable: true, object: undefined });
     grid.setCell(10, 10, { type: 'water', walkable: false, object: undefined });
     grid.setCell(11, 10, {
-      type: 'path',
+      type: 'water',
       walkable: true,
-      pathVariant: 'bridge_tile',
+      hasBridge: true,
       object: undefined,
     });
     grid.setCell(12, 10, { type: 'water', walkable: false, object: undefined });
@@ -123,9 +123,9 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.canPlace(2, 2)).toBe(false);
     const soil = grid.getSoilTileCoords()[0]!;
     expect(build.canPlace(soil.x, soil.y)).toBe(false);
-    const pathRing = { x: 3, y: 5 };
-    expect(grid.getCell(pathRing.x, pathRing.y)?.type).toBe('path');
-    expect(build.canPlace(pathRing.x, pathRing.y)).toBe(false);
+    const voidBesideSoil = { x: 3, y: 5 };
+    expect(grid.getCell(voidBesideSoil.x, voidBesideSoil.y)?.type).toBe('void');
+    expect(build.canPlace(voidBesideSoil.x, voidBesideSoil.y)).toBe(false);
 
     for (let y = 0; y < grid.size; y++) {
       for (let x = 0; x < grid.size; x++) {
@@ -153,7 +153,7 @@ describe('Build decor placement (5 coins)', () => {
     build.exitBuildMode();
   });
 
-  it('places bridge on water as walkable path', () => {
+  it('places bridge on water as walkable overlay', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     grid.setCell(0, 0, { type: 'water', walkable: false, object: undefined });
@@ -164,9 +164,10 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.canPlace(0, 0)).toBe(true);
     expect(build.place(0, 0)).toBe(true);
     const cell = grid.getCell(0, 0);
-    expect(cell?.type).toBe('path');
-    expect(cell?.pathVariant).toBe('bridge_tile');
+    expect(cell?.type).toBe('water');
+    expect(cell?.hasBridge).toBe(true);
     expect(cell?.walkable).toBe(true);
+    expect(grid.getGroundTextureKey(0, 0)).toBe('water');
   });
 
   it('allows bridge on any river water (shore, interior, beside existing bridge)', () => {
@@ -200,7 +201,9 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.place(10, 10)).toBe(true);
     expect(build.canPlace(11, 10)).toBe(true);
     expect(build.place(11, 10)).toBe(true);
-    expect(grid.getCell(11, 10)?.pathVariant).toBe('bridge_tile');
+    expect(grid.getCell(10, 10)?.type).toBe('water');
+    expect(grid.getCell(10, 10)?.hasBridge).toBe(true);
+    expect(grid.getCell(11, 10)?.hasBridge).toBe(true);
   });
 
   it('rejects bridge on void, grass, soil, and path', () => {
@@ -240,7 +243,8 @@ describe('Build decor placement (5 coins)', () => {
     expect(grid.canPlaceBridgeAt(8, 5)).toBe(true);
     expect(build.canPlace(8, 5)).toBe(true);
     expect(build.place(8, 5)).toBe(true);
-    expect(grid.getCell(8, 5)?.pathVariant).toBe('bridge_tile');
+    expect(grid.getCell(8, 5)?.type).toBe('water');
+    expect(grid.getCell(8, 5)?.hasBridge).toBe(true);
   });
 
   it('allows bridge on grass/path when iso pick hits land in a 1-tile-wide river', () => {

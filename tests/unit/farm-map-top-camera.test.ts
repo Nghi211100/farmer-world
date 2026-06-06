@@ -179,7 +179,7 @@ describe('farm map top camera layout', () => {
     // Include both footprint cells and full-map cells outside footprint to guard offset drift.
     const probes = [
       { x: 4, y: 6 }, // soil
-      { x: 3, y: 5 }, // path ring
+      { x: 3, y: 5 }, // void beside soil
       { x: 0, y: 0 }, // outside footprint
       { x: 19, y: 19 }, // outside footprint opposite corner
     ];

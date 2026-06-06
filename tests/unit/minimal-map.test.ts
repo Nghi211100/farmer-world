@@ -3,7 +3,7 @@ import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { GridSystem } from '../../src/systems/GridSystem';
 
 describe('minimal placeholder map', () => {
-  it('keeps only soil, stone path ring, and void elsewhere', () => {
+  it('keeps only farm soil and void elsewhere', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
 
@@ -46,20 +46,9 @@ describe('minimal placeholder map', () => {
     expect(soilCount).toBe(soilTiles);
     expect(waterCount).toBe(0);
     expect(grassCount).toBe(0);
+    expect(pathCount).toBe(0);
     expect(objectCount).toBe(0);
-    expect(pathCount).toBeGreaterThan(0);
-    expect(voidCount).toBe(grid.size * grid.size - soilCount - pathCount);
+    expect(voidCount).toBe(grid.size * grid.size - soilCount);
     expect(grid.getCell(10, 10)?.type).toBe('soil');
-    let hasPathAdjacentToSoil = false;
-    for (const { x, y } of grid.getSoilTileCoords()) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (grid.getCell(x + dx, y + dy)?.type === 'path') {
-            hasPathAdjacentToSoil = true;
-          }
-        }
-      }
-    }
-    expect(hasPathAdjacentToSoil).toBe(true);
   });
 });

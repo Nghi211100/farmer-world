@@ -357,7 +357,26 @@ export class BuildSystem {
       });
       return;
     }
-    if (tile === 'path' || tile === 'bridge') {
+    if (tile === 'bridge') {
+      const cell = this.grid.getCell(gx, gy);
+      if (cell?.type === 'water') {
+        this.grid.setCell(gx, gy, {
+          hasBridge: true,
+          walkable: true,
+          object: undefined,
+        });
+        return;
+      }
+      this.grid.setCell(gx, gy, {
+        type: 'path',
+        walkable: true,
+        groundVariant: undefined,
+        pathVariant: item.pathVariant ?? 'bridge_tile',
+        object: undefined,
+      });
+      return;
+    }
+    if (tile === 'path') {
       this.grid.setCell(gx, gy, {
         type: 'path',
         walkable: true,

@@ -57,7 +57,7 @@ export const FARM_SOIL_BOUNDS = {
   maxY: 13,
 } as const;
 
-/** Default farmer spawn on the path ring (matches placeholder map + {@link FarmScene} player). */
+/** Default farmer spawn on farm soil (matches placeholder map + {@link FarmScene} player). */
 export const FARM_PLAYER_SPAWN_GX = 10;
 export const FARM_PLAYER_SPAWN_GY = 10;
 export type MapObjectType = 'tree' | 'rock' | 'bush' | 'house' | 'barn' | 'silo' | 'coop';

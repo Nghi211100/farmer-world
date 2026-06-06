@@ -93,6 +93,7 @@ export type WaterNeighborProbe = (gx: number, gy: number) => boolean;
 export type WaterAutotileCell = {
   type: string;
   pathVariant?: string;
+  hasBridge?: boolean;
 } | null | undefined;
 
 /** True when a cell connects like water for shore autotile (includes bridge path). */
@@ -124,6 +125,7 @@ function isDiagonalLandShore(
 }
 
 function isBridgeTileCell(cell: WaterAutotileCell): boolean {
+  if (cell?.type === 'water' && cell.hasBridge) return true;
   return cell?.type === 'path' && cell.pathVariant === 'bridge_tile';
 }
 

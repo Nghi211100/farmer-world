@@ -40,7 +40,7 @@ import { Player } from '../entities/Player';
 import { BuildSystem } from '../systems/BuildSystem';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FarmingSystem } from '../systems/FarmingSystem';
-import { GridSystem } from '../systems/GridSystem';
+import { GridSystem, cellHasWaterBridgeOverlay } from '../systems/GridSystem';
 import { playDigDust, playPlantEffect, playWaterDrop } from '../systems/ActionEffects';
 import { playHarvestEffects } from '../systems/HarvestEffects';
 import {
@@ -113,7 +113,6 @@ import {
   getPenObjectEditHiddenActions,
   getPenObjectEditDisabledActions,
   getPenObjectEditVisibleActions,
-  createDefaultFarmPens,
   getPenMoveBlockMessage,
   maxLivestockPurchasable,
   type PenObjectEditAction,
@@ -225,6 +224,7 @@ export class FarmScene extends Phaser.Scene {
   private toolBar?: ToolBar;
 
   private tileSprites: Phaser.GameObjects.Image[] = [];
+  private bridgeOverlaySprites: Phaser.GameObjects.Image[] = [];
   private tileDebugGraphics?: Phaser.GameObjects.Graphics;
   private farmWorldDebugContainer?: Phaser.GameObjects.Container;
   private farmViewportHudDebugContainer?: FarmViewportHudDebugOverlay;
@@ -237,6 +237,7 @@ export class FarmScene extends Phaser.Scene {
   private buildingSprites = new Map<string, BuildingSprite>();
   private livestockPenSprites = new Map<string, LivestockPenSprite>();
   private ghostSprite?: Phaser.GameObjects.Sprite;
+  private ghostBridgeOverlay?: Phaser.GameObjects.Sprite;
   private objectMoveLongPressTimer?: Phaser.Time.TimerEvent;
   private objectMovePressPointerId = -1;
   private objectMovePressScreenX = 0;
@@ -456,7 +457,7 @@ export class FarmScene extends Phaser.Scene {
       gems: DEFAULT_GEMS,
       energy: DEFAULT_ENERGY,
     });
-    this.livestockSystem.loadPens(createDefaultFarmPens());
+    this.livestockSystem.loadPens([]);
     this.scheduleSave();
   }
 
@@ -604,6 +605,8 @@ export class FarmScene extends Phaser.Scene {
   private renderMap(): void {
     for (const s of this.tileSprites) s.destroy();
     this.tileSprites = [];
+    for (const s of this.bridgeOverlaySprites) s.destroy();
+    this.bridgeOverlaySprites = [];
     for (const d of this.decorations) d.sprite.destroy();
     this.decorations = [];
 
@@ -613,6 +616,9 @@ export class FarmScene extends Phaser.Scene {
         const tile = this.add.image(pos.x, pos.y, 'grass');
         this.tileSprites.push(tile);
         this.applyGroundTileAt(x, y, tile);
+        const bridgeOverlay = this.add.image(pos.x, pos.y, 'bridge_tile');
+        this.bridgeOverlaySprites.push(bridgeOverlay);
+        this.applyBridgeOverlayAt(x, y, bridgeOverlay);
       }
     }
 
@@ -875,11 +881,39 @@ export class FarmScene extends Phaser.Scene {
     spr.setDepth(this.grid.getDepth(gx, gy, 'ground'));
   }
 
+  private applyBridgeOverlayAt(
+    gx: number,
+    gy: number,
+    spr: Phaser.GameObjects.Image
+  ): void {
+    const cell = this.grid.getCell(gx, gy);
+    if (!cell || !cellHasWaterBridgeOverlay(cell)) {
+      spr.setVisible(false);
+      return;
+    }
+    if (this.farming.hidesGroundUnderCrop(gx, gy)) {
+      spr.setVisible(false);
+      return;
+    }
+    if (this.grid.hidesGroundForFarmIsland(gx, gy)) {
+      spr.setVisible(false);
+      return;
+    }
+    spr.setVisible(true);
+    spr.setTexture('bridge_tile');
+    const bridgeNudge = getBridgeTileDisplayOffset(BRIDGE_GROUND_BASE_DISPLAY_SCALE);
+    const top = this.grid.gridToMapScreen(gx, gy);
+    spr.setPosition(top.x + bridgeNudge.dx, top.y + bridgeNudge.dy);
+    applyIsoBridgeTileSprite(spr, BRIDGE_GROUND_BASE_DISPLAY_SCALE);
+    spr.setDepth(this.grid.getDepth(gx, gy, 'ground') + 1);
+  }
+
   private refreshTileAt(gx: number, gy: number): void {
     const idx = gy * this.grid.size + gx;
     const spr = this.tileSprites[idx];
-    if (!spr) return;
-    this.applyGroundTileAt(gx, gy, spr);
+    if (spr) this.applyGroundTileAt(gx, gy, spr);
+    const overlay = this.bridgeOverlaySprites[idx];
+    if (overlay) this.applyBridgeOverlayAt(gx, gy, overlay);
   }
 
   /** Refresh placed ground tile and neighbors (water shores, path corners, moisture). */
@@ -1523,6 +1557,9 @@ export class FarmScene extends Phaser.Scene {
       const gx = i % this.grid.size;
       const gy = Math.floor(i / this.grid.size);
       this.applyGroundTileAt(gx, gy, this.tileSprites[i]);
+      if (this.bridgeOverlaySprites[i]) {
+        this.applyBridgeOverlayAt(gx, gy, this.bridgeOverlaySprites[i]);
+      }
     }
     this.ensureNorthApexGroundDrawnOnTop();
     for (const d of this.decorations) {
@@ -4143,6 +4180,7 @@ export class FarmScene extends Phaser.Scene {
     const livestockActive = this.livestockSystem.active;
     if (!buildActive && !moveActive && !livestockActive) {
       this.ghostSprite?.setVisible(false);
+      this.ghostBridgeOverlay?.setVisible(false);
       return;
     }
 
@@ -4185,16 +4223,18 @@ export class FarmScene extends Phaser.Scene {
       : null;
     const foot = penLayout ?? this.grid.gridToTileBottom(anchorGx, anchorGy);
     const buildItem = this.buildSystem.selectedItem;
+    const previewCell = this.grid.getCell(ghostX, ghostY);
     const waterGroundPreview =
       buildActive &&
       buildItem?.placement === 'ground' &&
       buildItem.groundTile === 'water';
-    const bridgeOnRiverWater =
+    const bridgeOverWaterPreview =
       buildActive &&
       buildItem?.placement === 'ground' &&
       buildItem.groundTile === 'bridge' &&
-      this.grid.canPlaceBridgeAt(ghostX, ghostY);
-    const waterStyleGroundGhost = waterGroundPreview || bridgeOnRiverWater;
+      previewCell?.type === 'water' &&
+      this.buildSystem.canPlace(ghostX, ghostY);
+    const waterStyleGroundGhost = waterGroundPreview || bridgeOverWaterPreview;
     let key = moveActive
       ? this.objectEditSystem.ghostTextureKey()
       : livestockActive
@@ -4204,6 +4244,8 @@ export class FarmScene extends Phaser.Scene {
       key = this.grid.getGroundTextureKey(anchorGx, anchorGy, {
         waterPlacementPreview: true,
       });
+    } else if (bridgeOverWaterPreview) {
+      key = this.grid.getGroundTextureKey(anchorGx, anchorGy);
     }
     const canPlace = moveActive
       ? this.objectEditSystem.canPlaceAt(ghostX, ghostY)
@@ -4232,12 +4274,10 @@ export class FarmScene extends Phaser.Scene {
         ? getWaterTextureUniformDisplayScale(key)
         : GROUND_TILE_SEAM_SCALE;
       let top = this.grid.gridToMapScreen(ghostX, ghostY);
-      if (waterGroundPreview) {
-        const probe = waterPlacementPreviewProbe(
-          ghostX,
-          ghostY,
-          this.grid.getWaterNeighborProbe()
-        );
+      if (waterStyleGroundGhost) {
+        const probe = waterGroundPreview
+          ? waterPlacementPreviewProbe(ghostX, ghostY, this.grid.getWaterNeighborProbe())
+          : this.grid.getWaterNeighborProbe();
         const nudge = getWaterCornerDisplayOffset(
           ghostX,
           ghostY,
@@ -4265,7 +4305,7 @@ export class FarmScene extends Phaser.Scene {
       }
       this.ghostSprite.setOrigin(0.5, 0);
       this.ghostSprite.setPosition(top.x, top.y);
-      if (waterGroundPreview) {
+      if (waterStyleGroundGhost) {
         applyWaterGroundTileSprite(this.ghostSprite, key, ghostScale);
       } else if (key === 'bridge_tile') {
         applyIsoBridgeTileSprite(this.ghostSprite, ghostScale);
@@ -4273,6 +4313,33 @@ export class FarmScene extends Phaser.Scene {
         applyIsoTileSprite(this.ghostSprite, ghostScale);
       }
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 50);
+      if (bridgeOverWaterPreview) {
+        if (!this.ghostBridgeOverlay) {
+          this.ghostBridgeOverlay = this.add.sprite(top.x, top.y, 'bridge_tile');
+          this.ghostBridgeOverlay.setOrigin(0.5, 0);
+          if (this.ghostBridgeOverlay.input) {
+            this.ghostBridgeOverlay.disableInteractive();
+          }
+        }
+        const bridgeScale = BRIDGE_GROUND_BASE_DISPLAY_SCALE;
+        const bridgeNudge = getBridgeTileDisplayOffset(bridgeScale);
+        this.ghostBridgeOverlay.setTexture('bridge_tile');
+        this.ghostBridgeOverlay.setOrigin(0.5, 0);
+        this.ghostBridgeOverlay.setPosition(
+          top.x + bridgeNudge.dx,
+          top.y + bridgeNudge.dy
+        );
+        applyIsoBridgeTileSprite(this.ghostBridgeOverlay, bridgeScale);
+        this.ghostBridgeOverlay.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 51);
+        this.ghostBridgeOverlay.setAlpha(0.55);
+        this.ghostBridgeOverlay.setTint(canPlace ? 0x88ff88 : 0xff8888);
+        this.ghostBridgeOverlay.setVisible(true);
+        if (this.ghostBridgeOverlay.input) {
+          this.ghostBridgeOverlay.disableInteractive();
+        }
+      } else {
+        this.ghostBridgeOverlay?.setVisible(false);
+      }
     } else if (isNatural) {
       const tree = key.startsWith('tree');
       this.ghostSprite.setOrigin(0.5, 1);
@@ -4299,6 +4366,7 @@ export class FarmScene extends Phaser.Scene {
     }
     if (!isGroundBuild) {
       this.ghostSprite.setPosition(penLayout?.x ?? foot.x, penLayout?.y ?? foot.y);
+      this.ghostBridgeOverlay?.setVisible(false);
     }
     this.ghostSprite.setAlpha(0.55);
     this.ghostSprite.setTint(canPlace ? 0x88ff88 : 0xff8888);

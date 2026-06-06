@@ -60,6 +60,20 @@ export interface TileCell {
   groundVariant?: GroundDecorVariant;
   /** Path tiles: which path texture to draw (defaults to stone_path). */
   pathVariant?: PathGroundVariant;
+  /** River water with a player-built bridge overlay (type stays `water`). */
+  hasBridge?: boolean;
+}
+
+/** Walkable bridge drawn on river water without replacing the water cell. */
+export function cellHasWaterBridgeOverlay(cell: TileCell | null | undefined): boolean {
+  return cell?.type === 'water' && cell.hasBridge === true;
+}
+
+/** Bridge segment: overlay on water, or legacy path tile on narrow crossings. */
+export function cellHasBridgeSegment(cell: TileCell | null | undefined): boolean {
+  if (!cell) return false;
+  if (cellHasWaterBridgeOverlay(cell)) return true;
+  return cell.type === 'path' && cell.pathVariant === 'bridge_tile';
 }
 
 export interface GroundTextureOptions {
@@ -601,7 +615,9 @@ export class GridSystem {
     if (!this.inBounds(gx, gy)) return;
     const cell = this.cells[gy][gx];
     delete cell.object;
-    if (cell.type === 'water' || cell.type === 'void') {
+    if (cell.type === 'water') {
+      cell.walkable = cell.hasBridge === true;
+    } else if (cell.type === 'void') {
       cell.walkable = false;
     } else if (cell.type === 'soil') {
       cell.walkable = !!cell.unlocked;
@@ -748,7 +764,7 @@ export class GridSystem {
     return isoDepth(maxTileSum, 0, 0) + 20;
   }
 
-  /** Minimal 20×20 map: farm soil patch, stone path ring, void elsewhere (decor from Build). */
+  /** Minimal 20×20 map: farm soil patch only; void elsewhere (paths/decor from Build). */
   generatePlaceholderMap(): { spawnX: number; spawnY: number } {
     const spawnX = FARM_PLAYER_SPAWN_GX;
     const spawnY = FARM_PLAYER_SPAWN_GY;
@@ -769,8 +785,6 @@ export class GridSystem {
     for (const { x, y } of this.pickInitialUnlockedSoil(soilCoords)) {
       this.setCell(x, y, { unlocked: true, soilWaterLevel: 0 });
     }
-
-    this.applyFarmPathRing();
 
     return { spawnX, spawnY };
   }
@@ -804,7 +818,7 @@ export class GridSystem {
     const cell = this.getCell(gx, gy);
     if (!cell) return false;
 
-    if (cell.type === 'water') return true;
+    if (cell.type === 'water') return !cell.hasBridge;
 
     if (cell.type === 'grass') {
       return this.isNarrowRiverCrossingCell(gx, gy);

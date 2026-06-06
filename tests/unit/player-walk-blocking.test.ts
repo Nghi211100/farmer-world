@@ -115,4 +115,24 @@ describe('player walk blocking', () => {
     expect(findPlayerWalkPath(grid, 12, 11, 12, 12)).toBeNull();
     expect(canPlayerWalkTo(grid, 12, 11, 12, 12)).toBe(false);
   });
+
+  it('player can walk on bridge overlay over water', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    for (let y = 0; y < grid.size; y++) {
+      for (let x = 0; x < grid.size; x++) {
+        if (grid.getCell(x, y)?.type === 'void') {
+          grid.setCell(x, y, { type: 'grass', walkable: true });
+        }
+      }
+    }
+    wireFarmWalkBlocking(grid);
+    grid.setCell(5, 5, { type: 'water', walkable: true, hasBridge: true, object: undefined });
+    grid.setCell(4, 5, { type: 'grass', walkable: true, object: undefined });
+    grid.setCell(6, 5, { type: 'grass', walkable: true, object: undefined });
+
+    expect(isPlayerWalkCell(grid, 5, 5)).toBe(true);
+    expect(canPlayerWalkTo(grid, 4, 5, 5, 5)).toBe(true);
+    expect(canPlayerWalkTo(grid, 5, 5, 6, 5)).toBe(true);
+  });
 });

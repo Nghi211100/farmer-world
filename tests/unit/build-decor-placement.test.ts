@@ -60,7 +60,7 @@ describe('Build decor placement (5 coins)', () => {
     expect(grid.getCell(3, 5)?.pathVariant).toBe('field_border');
   });
 
-  it('autotiles water with bottom-right border when land is to the north', () => {
+  it('autotiles water with top-right border when land is to the north', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     grid.setCell(6, 6, { type: 'grass', walkable: true, object: undefined });
@@ -74,9 +74,9 @@ describe('Build decor placement (5 coins)', () => {
     build.enterBuildMode(item);
     expect(
       grid.getGroundTextureKey(6, 6, { waterPlacementPreview: true })
-    ).toBe('water_1_border_bottom-right');
+    ).toBe('water_1_border_top-right');
     expect(build.place(6, 6)).toBe(true);
-    expect(grid.getGroundTextureKey(6, 6)).toBe('water_1_border_bottom-right');
+    expect(grid.getGroundTextureKey(6, 6)).toBe('water_1_border_top-right');
   });
 
   it('allows bridge on any river water (shore, chain, next to existing bridge)', () => {
@@ -174,7 +174,7 @@ describe('Build decor placement (5 coins)', () => {
     grid.generatePlaceholderMap();
     const bridgeItem = BUILD_ITEMS.find((i) => i.label === 'Bridge')!;
 
-    // Shore tile: land to grid north → water_1_border_bottom-right
+    // Shore tile: land to grid north → water_1_border_top-right
     grid.setCell(10, 10, { type: 'grass', walkable: true, object: undefined });
     grid.setCell(10, 9, { type: 'grass', walkable: true, object: undefined });
     grid.setCell(10, 11, { type: 'water', walkable: false, object: undefined });

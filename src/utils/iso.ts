@@ -16,34 +16,228 @@ export const ISO_CROP_ORIGIN = { x: 0.5, y: 1 } as const;
 /** Farmer sprite scale vs legacy size (1.5× smaller on screen) */
 export const PLAYER_DISPLAY_SCALE = 1 / 1.5;
 
-/** Enlarge water ground sprites so adjacent iso diamonds overlap (hides seam lines). */
+/** Enlarge flat `water` ground sprites so adjacent iso diamonds overlap (hides seam lines). */
+export const WATER_FLAT_DISPLAY_SCALE = 1.045;
+
+/** Single-edge shore tiles (`water_1_border_*`); flat scale + 0.1 for stronger overlap. */
+export const WATER_1_BORDER_DISPLAY_SCALE = WATER_FLAT_DISPLAY_SCALE + 0.1;
+/** Extra vertical scale for `water_1_border_top-*` only (scaleX unchanged). */
+export const WATER_1_BORDER_TOP_SCALE_Y_OFFSET = 0.15;
+export const WATER_1_BORDER_TOP_SCALE_Y =
+  WATER_1_BORDER_DISPLAY_SCALE + WATER_1_BORDER_TOP_SCALE_Y_OFFSET;
+
+/** Shore / border water variants (`water_2_borders_*`, face-to-face); not flat `water`. */
 export const WATER_GROUND_DISPLAY_SCALE = 1.27;
 
 /**
  * Default overlap for grass, path, and farm soil ground tiles (hides dark diamond gaps).
- * Applied to the full farm map ground layer; water uses {@link WATER_GROUND_DISPLAY_SCALE}.
+ * Applied to the full farm map ground layer; flat water uses {@link WATER_FLAT_DISPLAY_SCALE}.
  */
-export const GROUND_TILE_SEAM_SCALE = 1.15;
+export const GROUND_TILE_SEAM_SCALE = 1.01;
 
 /** @deprecated Use {@link GROUND_TILE_SEAM_SCALE}; kept for farm-island / water max(). */
 export const FARM_SOIL_GROUND_DISPLAY_SCALE = GROUND_TILE_SEAM_SCALE;
 
-/** Extra scale on north path ring + first soil row so tiles cover island cliff art at the apex. */
-export const FARM_NORTH_EDGE_GROUND_SCALE = 1.42;
+/** Base seam scale for bridge path tiles (unchanged when land scale is tuned). */
+export const BRIDGE_GROUND_BASE_DISPLAY_SCALE = 1.05;
+
+/** Bridge path tile (`pathVariant: bridge_tile`) — display scale multipliers. */
+export const BRIDGE_TILE_DISPLAY_SCALE_X = 1.05;
+export const BRIDGE_TILE_DISPLAY_SCALE_Y = 1.2;
+
+/** Face-to-face water shore tiles — horizontal scale = uniform iso scale − 0.15 (1.0 → 0.85). */
+export const WATER_FACE_TO_FACE_DISPLAY_SCALE_X = 0.85;
+export const WATER_FACE_TO_FACE_LEFT_TEXTURE_KEY = 'water_2_borders_face_to_face_left';
+export const WATER_FACE_TO_FACE_RIGHT_TEXTURE_KEY = 'water_2_borders_face_to_face_right';
+
+const WATER_FACE_TO_FACE_TEXTURE_KEYS = new Set([
+  WATER_FACE_TO_FACE_LEFT_TEXTURE_KEY,
+  WATER_FACE_TO_FACE_RIGHT_TEXTURE_KEY,
+]);
+
+export function isWaterFaceToFaceTextureKey(textureKey: string): boolean {
+  return WATER_FACE_TO_FACE_TEXTURE_KEYS.has(textureKey);
+}
+
+/** Horizontal scale for `water_2_borders_left` (uniform iso scale − 0.15). */
+export const WATER_2_BORDERS_LEFT_SCALE_X = 0.85;
+/** Horizontal scale for `water_2_borders_right` (uniform iso scale − 0.15). */
+export const WATER_2_BORDERS_LEFT_RIGHT_SCALE_X = 0.85;
+/** Vertical scale for `water_2_borders_left`. */
+export const WATER_2_BORDERS_LEFT_SCALE_Y = 0.97;
+/** Vertical scale for `water_2_borders_right`. */
+export const WATER_2_BORDERS_RIGHT_SCALE_Y = 0.97;
+export const WATER_2_BORDERS_LEFT_TEXTURE_KEY = 'water_2_borders_left';
+export const WATER_2_BORDERS_RIGHT_TEXTURE_KEY = 'water_2_borders_right';
+
+const WATER_2_BORDERS_LEFT_RIGHT_TEXTURE_KEYS = new Set([
+  WATER_2_BORDERS_LEFT_TEXTURE_KEY,
+  WATER_2_BORDERS_RIGHT_TEXTURE_KEY,
+]);
+
+export function isWater2BordersLeftRightTextureKey(textureKey: string): boolean {
+  return WATER_2_BORDERS_LEFT_RIGHT_TEXTURE_KEYS.has(textureKey);
+}
+/** Shift `water_2_borders_left` left (fraction of rendered tile width; negative = toward left). */
+export const WATER_2_BORDERS_LEFT_OFFSET_X = -0.03;
+/** Shift `water_2_borders_right` right (fraction of rendered tile width; positive = toward right). */
+export const WATER_2_BORDERS_RIGHT_OFFSET_X = 0.05;
+/** Shift `water_2_borders_left` up (fraction of rendered tile height; negative = toward top). */
+export const WATER_2_BORDERS_LEFT_OFFSET_Y = -0.01;
+/** Shift `water_2_borders_right` up (fraction of rendered tile height; negative = toward top). */
+export const WATER_2_BORDERS_RIGHT_OFFSET_Y = -0.04;
+
+function water2BordersDisplayOffsetFractions(textureKey: string): { offsetX: number; offsetY: number } {
+  if (textureKey === WATER_2_BORDERS_RIGHT_TEXTURE_KEY) {
+    return {
+      offsetX: WATER_2_BORDERS_RIGHT_OFFSET_X,
+      offsetY: WATER_2_BORDERS_RIGHT_OFFSET_Y,
+    };
+  }
+  return {
+    offsetX: WATER_2_BORDERS_LEFT_OFFSET_X,
+    offsetY: WATER_2_BORDERS_LEFT_OFFSET_Y,
+  };
+}
+
+/** Screen-space nudge for `water_2_borders_left` / `water_2_borders_right` ground tiles. */
+export function getWater2BordersDisplayOffset(
+  textureKey: string,
+  displayScale = 1
+): BridgeTileDisplayOffset {
+  const { offsetX, offsetY } = water2BordersDisplayOffsetFractions(textureKey);
+  return {
+    dx: offsetX * TILE_WIDTH * displayScale,
+    dy: offsetY * TILE_HEIGHT * displayScale,
+  };
+}
+
+/** Shift bridge sprite up (fraction of rendered tile height; negative = toward top). */
+export const BRIDGE_TILE_DISPLAY_OFFSET_Y = -0.20;
+
+export type BridgeTileDisplayOffset = { dx: number; dy: number };
+
+/** Screen-space nudge for bridge ground tiles (fraction of rendered tile height). */
+export function getBridgeTileDisplayOffset(displayScale = 1): BridgeTileDisplayOffset {
+  return {
+    dx: 0,
+    dy: BRIDGE_TILE_DISPLAY_OFFSET_Y * TILE_HEIGHT * displayScale,
+  };
+}
 
 /**
  * `water_2_borders_top` only — width footprint (horizontal diamond span).
  * Larger than WATER_GROUND_DISPLAY_SCALE.
  */
-export const WATER_TOP_BORDER_SIZE_SCALE = 1.29;
+export const WATER_TOP_BORDER_SIZE_SCALE = 1.09;
 
 /**
  * `water_2_borders_top` only — vertical diamond squeeze (méo).
  * Applied to tile height independently of SIZE_SCALE.
  */
-export const WATER_TOP_BORDER_MEO_SCALE = 1.3;
+export const WATER_TOP_BORDER_MEO_SCALE = 1.20;
 export const WATER_BOTTOM_BORDER_SIZE_SCALE = WATER_TOP_BORDER_SIZE_SCALE;
-export const WATER_BOTTOM_BORDER_MEO_SCALE = WATER_TOP_BORDER_MEO_SCALE;
+export const WATER_BOTTOM_BORDER_MEO_SCALE = 1.25;
+
+export const WATER_2_BORDERS_TOP_TEXTURE_KEY = 'water_2_borders_top';
+export const WATER_2_BORDERS_BOTTOM_TEXTURE_KEY = 'water_2_borders_bottom';
+
+const WATER_2_BORDERS_TOP_BOTTOM_TEXTURE_KEYS = new Set([
+  WATER_2_BORDERS_TOP_TEXTURE_KEY,
+  WATER_2_BORDERS_BOTTOM_TEXTURE_KEY,
+]);
+
+export function isWater2BordersTopBottomTextureKey(textureKey: string): boolean {
+  return WATER_2_BORDERS_TOP_BOTTOM_TEXTURE_KEYS.has(textureKey);
+}
+
+/** Shift `water_2_borders_top` left (fraction of tile width; negative = toward left). */
+export const WATER_2_BORDERS_TOP_OFFSET_X = -0.01;
+/** Shift `water_2_borders_top` up (fraction of tile height; negative = toward top). */
+export const WATER_2_BORDERS_TOP_OFFSET_Y = -0.05;
+/** Shift `water_2_borders_bottom` right (fraction of tile width; positive = toward right). */
+export const WATER_2_BORDERS_BOTTOM_OFFSET_X = 0.00;
+/** Shift `water_2_borders_bottom` down (fraction of tile height; positive = toward bottom). */
+export const WATER_2_BORDERS_BOTTOM_OFFSET_Y = 0.075;
+
+function water2BordersTopBottomDisplayOffsetFractions(textureKey: string): {
+  offsetX: number;
+  offsetY: number;
+} {
+  if (textureKey === WATER_2_BORDERS_BOTTOM_TEXTURE_KEY) {
+    return {
+      offsetX: WATER_2_BORDERS_BOTTOM_OFFSET_X,
+      offsetY: WATER_2_BORDERS_BOTTOM_OFFSET_Y,
+    };
+  }
+  return {
+    offsetX: WATER_2_BORDERS_TOP_OFFSET_X,
+    offsetY: WATER_2_BORDERS_TOP_OFFSET_Y,
+  };
+}
+
+/** Screen-space nudge for `water_2_borders_top` / `water_2_borders_bottom` ground tiles. */
+export function getWater2BordersTopBottomDisplayOffset(
+  textureKey: string
+): BridgeTileDisplayOffset {
+  const { offsetX, offsetY } = water2BordersTopBottomDisplayOffsetFractions(textureKey);
+  return {
+    dx: offsetX * TILE_WIDTH,
+    dy: offsetY * TILE_HEIGHT,
+  };
+}
+
+export const WATER_1_BORDER_TOP_LEFT_TEXTURE_KEY = 'water_1_border_top-left';
+export const WATER_1_BORDER_TOP_RIGHT_TEXTURE_KEY = 'water_1_border_top-right';
+export const WATER_1_BORDER_BOTTOM_LEFT_TEXTURE_KEY = 'water_1_border_bottom-left';
+export const WATER_1_BORDER_BOTTOM_RIGHT_TEXTURE_KEY = 'water_1_border_bottom-right';
+
+const WATER_1_BORDER_TEXTURE_KEYS = new Set([
+  WATER_1_BORDER_TOP_LEFT_TEXTURE_KEY,
+  WATER_1_BORDER_TOP_RIGHT_TEXTURE_KEY,
+  WATER_1_BORDER_BOTTOM_LEFT_TEXTURE_KEY,
+  WATER_1_BORDER_BOTTOM_RIGHT_TEXTURE_KEY,
+]);
+
+export function isWater1BorderTextureKey(textureKey: string): boolean {
+  return WATER_1_BORDER_TEXTURE_KEYS.has(textureKey);
+}
+
+export function isWater1BorderTopTextureKey(textureKey: string): boolean {
+  return (
+    textureKey === WATER_1_BORDER_TOP_LEFT_TEXTURE_KEY ||
+    textureKey === WATER_1_BORDER_TOP_RIGHT_TEXTURE_KEY
+  );
+}
+
+/** Vertical display scale for `water_1_border_*`; top variants are taller. */
+export function getWater1BorderDisplayScaleY(
+  textureKey: string,
+  displayScale = WATER_1_BORDER_DISPLAY_SCALE
+): number {
+  return isWater1BorderTopTextureKey(textureKey)
+    ? displayScale + WATER_1_BORDER_TOP_SCALE_Y_OFFSET
+    : displayScale;
+}
+
+/** Shift `water_1_border_*` tiles down (fraction of tile height; positive = toward bottom). */
+export const WATER_1_BORDER_OFFSET_Y = 0.12;
+/** Top variants sit 5% higher than bottom variants. */
+export const WATER_1_BORDER_TOP_OFFSET_Y = 0.07;
+
+/** Screen-space nudge for `water_1_border_*` single-edge shore tiles. */
+export function getWater1BorderDisplayOffset(textureKey: string): BridgeTileDisplayOffset {
+  if (!isWater1BorderTextureKey(textureKey)) {
+    return { dx: 0, dy: 0 };
+  }
+  const offsetY = isWater1BorderTopTextureKey(textureKey)
+    ? WATER_1_BORDER_TOP_OFFSET_Y
+    : WATER_1_BORDER_OFFSET_Y;
+  return {
+    dx: 0,
+    dy: offsetY * TILE_HEIGHT,
+  };
+}
 
 /** Walk-to / farm-tap destination pin (ui/coming.png is high-res; always scale down). */
 export const MOVE_DESTINATION_MARKER_MAX_PX = TILE_WIDTH * 0.275;
@@ -108,6 +302,91 @@ export function applyIsoTileSprite(
   sprite.setDisplaySize(TILE_WIDTH * displayScale, TILE_HEIGHT * displayScale);
 }
 
+/** Bridge tile at diamond top; width uses {@link BRIDGE_TILE_DISPLAY_SCALE_X}; height matches ground seam scale. */
+export function applyIsoBridgeTileSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  sprite.setDisplaySize(
+    TILE_WIDTH * displayScale * BRIDGE_TILE_DISPLAY_SCALE_X,
+    TILE_HEIGHT * displayScale * BRIDGE_TILE_DISPLAY_SCALE_Y
+  );
+}
+
+/** Single-edge `water_1_border_*` at diamond top; top variants use taller scaleY. */
+export function applyIsoWater1BorderSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1,
+  textureKey?: string
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  const scaleY =
+    textureKey !== undefined
+      ? getWater1BorderDisplayScaleY(textureKey, displayScale)
+      : displayScale;
+  sprite.setDisplaySize(TILE_WIDTH * displayScale, TILE_HEIGHT * scaleY);
+}
+
+/** Face-to-face water shore at diamond top; width uses {@link WATER_FACE_TO_FACE_DISPLAY_SCALE_X}. */
+export function applyIsoFaceToFaceWaterSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  sprite.setDisplaySize(
+    TILE_WIDTH * displayScale * WATER_FACE_TO_FACE_DISPLAY_SCALE_X,
+    TILE_HEIGHT * displayScale
+  );
+}
+
+export function getWater2BordersLeftRightScaleX(textureKey: string): number {
+  if (textureKey === WATER_2_BORDERS_RIGHT_TEXTURE_KEY) {
+    return WATER_2_BORDERS_LEFT_RIGHT_SCALE_X;
+  }
+  return WATER_2_BORDERS_LEFT_SCALE_X;
+}
+
+export function getWater2BordersLeftRightScaleY(textureKey: string): number {
+  if (textureKey === WATER_2_BORDERS_RIGHT_TEXTURE_KEY) {
+    return WATER_2_BORDERS_RIGHT_SCALE_Y;
+  }
+  return WATER_2_BORDERS_LEFT_SCALE_Y;
+}
+
+/** Left/right water shore at diamond top; uses per-texture scaleX/scaleY. */
+export function applyIsoWater2BordersLeftRightSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1,
+  textureKey?: string
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  const scaleX =
+    textureKey !== undefined
+      ? getWater2BordersLeftRightScaleX(textureKey)
+      : WATER_2_BORDERS_LEFT_SCALE_X;
+  const scaleY =
+    textureKey !== undefined
+      ? getWater2BordersLeftRightScaleY(textureKey)
+      : WATER_2_BORDERS_LEFT_SCALE_Y;
+  sprite.setDisplaySize(
+    TILE_WIDTH * displayScale * scaleX,
+    TILE_HEIGHT * displayScale * scaleY
+  );
+}
+
 /**
  * `water_2_borders_top` at diamond top: width uses SIZE_SCALE, height uses MEO_SCALE
  * (méo = vertical squeeze; size = overall width footprint).
@@ -125,7 +404,7 @@ export function applyIsoTopBorderWaterSprite(
   );
 }
 
-/** `water_2_borders_bottom` mirrors top-border size/méo footprint. */
+/** `water_2_borders_bottom` shares top-border width scale; méo squeeze is taller. */
 export function applyIsoBottomBorderWaterSprite(
   sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image
 ): void {

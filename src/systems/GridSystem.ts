@@ -31,8 +31,10 @@ import {
   type IsoScreenRhombus,
 } from '../utils/iso';
 import {
+  gridWaterNeighborProbe,
   waterPlacementPreviewProbe,
   waterTextureKeyAt,
+  type WaterDiagonalContext,
   type WaterNeighborProbe,
 } from '../utils/waterAutotile';
 import {
@@ -1151,18 +1153,29 @@ export class GridSystem {
     return next;
   }
 
+  getWaterNeighborProbe(): WaterNeighborProbe {
+    return gridWaterNeighborProbe(
+      (nx, ny) => this.inBounds(nx, ny),
+      (nx, ny) => this.getCell(nx, ny)
+    );
+  }
+
+  getWaterDiagonalContext(): WaterDiagonalContext {
+    return {
+      inBounds: (nx, ny) => this.inBounds(nx, ny),
+      getCell: (nx, ny) => this.getCell(nx, ny),
+    };
+  }
+
   getGroundTextureKey(gx: number, gy: number, options?: GroundTextureOptions): string {
     const cell = this.getCell(gx, gy);
     if (!cell) return 'grass';
     if (cell.type === 'water' || options?.waterPlacementPreview) {
-      const baseProbe: WaterNeighborProbe = (nx, ny) => {
-        if (!this.inBounds(nx, ny)) return false;
-        return this.getCell(nx, ny)?.type === 'water';
-      };
+      const baseProbe = this.getWaterNeighborProbe();
       const probe = options?.waterPlacementPreview
         ? waterPlacementPreviewProbe(gx, gy, baseProbe)
         : baseProbe;
-      return waterTextureKeyAt(gx, gy, probe);
+      return waterTextureKeyAt(gx, gy, probe, this.getWaterDiagonalContext());
     }
     if (cell.type === 'path') return cell.pathVariant ?? 'stone_path';
     if (cell.type === 'soil') {

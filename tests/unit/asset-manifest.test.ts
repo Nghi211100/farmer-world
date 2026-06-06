@@ -71,6 +71,7 @@ describe('asset manifest bundling', () => {
       ['water', 'tiles/water.png'],
       ['water_1_border_bottom-right', 'tiles/water_1_border_bottom-right.png'],
       ['water_1_border_bottom-left', 'tiles/water_1_border_bottom-left.png'],
+      ['water_1_border_top-left', 'tiles/water_1_border_top-left.png'],
       ['water_1_border_top-right', 'tiles/water_1_border_top-right.png'],
     ] as const;
     for (const [key, path] of expected) {

@@ -54,8 +54,8 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'bridge_tile', path: 'tiles/bridge_tile.png', placeholderColor: 0x795548, width: 64, height: 32 },
   { key: 'water', path: 'tiles/water.png', placeholderColor: 0x3498db, width: 64, height: 32 },
   {
-    key: 'water_1_border_top',
-    path: 'tiles/water_1_border_top.png',
+    key: 'water_1_border_top-left',
+    path: 'tiles/water_1_border_top-left.png',
     placeholderColor: 0x3498db,
     width: 64,
     height: 32,
@@ -104,7 +104,7 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   },
   {
     key: 'water_2_borders_bottom',
-    path: 'tiles/water_2_borders_bttom.png',
+    path: 'tiles/water_2_borders_bottom.png',
     placeholderColor: 0x3498db,
     width: 64,
     height: 32,

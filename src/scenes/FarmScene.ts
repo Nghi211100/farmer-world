@@ -44,13 +44,19 @@ import { GridSystem } from '../systems/GridSystem';
 import { playDigDust, playPlantEffect, playWaterDrop } from '../systems/ActionEffects';
 import { playHarvestEffects } from '../systems/HarvestEffects';
 import {
-  applyIsoBottomBorderWaterSprite,
+  applyIsoBridgeTileSprite,
   applyIsoTileSprite,
-  applyIsoTopBorderWaterSprite,
+  getBridgeTileDisplayOffset,
+  getWater1BorderDisplayOffset,
+  getWater2BordersDisplayOffset,
+  getWater2BordersTopBottomDisplayOffset,
+  isWater1BorderTextureKey,
+  isWater2BordersLeftRightTextureKey,
+  isWater2BordersTopBottomTextureKey,
   DISPLAY_SIZE,
   drawIsoTileClickPick,
   drawIsoTileDebug,
-  FARM_NORTH_EDGE_GROUND_SCALE,
+  BRIDGE_GROUND_BASE_DISPLAY_SCALE,
   GROUND_TILE_SEAM_SCALE,
   fitSpriteDisplay,
   MOVE_DESTINATION_MARKER_MAX_PX,
@@ -70,12 +76,11 @@ import {
 } from '../utils/farmViewportDebug';
 import { farmWorldToScreen, screenBoundsToFootprint } from '../utils/farmViewportDebugLayout';
 import {
+  applyWaterGroundTileSprite,
   getWaterCornerDisplayOffset,
-  getWaterGroundDisplayScale,
-  getWaterTextureDisplayOffset,
-  WATER_BOTTOM_BORDER_TEXTURE_KEY,
-  WATER_TOP_BORDER_TEXTURE_KEY,
-  type WaterNeighborProbe,
+  getWaterTextureUniformDisplayScale,
+  resolveWaterGroundDisplayScale,
+  waterPlacementPreviewProbe,
 } from '../utils/waterAutotile';
 import { EnergySystem } from '../systems/EnergySystem';
 import { InventorySystem } from '../systems/InventorySystem';
@@ -817,55 +822,57 @@ export class FarmScene extends Phaser.Scene {
     spr.setTexture(textureKey);
     spr.clearTint();
     const top = this.grid.gridToMapScreen(gx, gy);
+    const underFarmIsland = this.grid.isFarmIslandFootprintCell(gx, gy);
     let px = top.x;
     let py = top.y;
     if (cell.type === 'water') {
-      const probe: WaterNeighborProbe = (nx, ny) => {
-        if (!this.grid.inBounds(nx, ny)) return false;
-        return this.grid.getCell(nx, ny)?.type === 'water';
-      };
-      const nudge = getWaterCornerDisplayOffset(gx, gy, probe);
+      const probe = this.grid.getWaterNeighborProbe();
+      const nudge = getWaterCornerDisplayOffset(
+        gx,
+        gy,
+        probe,
+        this.grid.getWaterDiagonalContext()
+      );
       if (nudge) {
         px += nudge.dx;
         py += nudge.dy;
       }
-      const textureNudge = getWaterTextureDisplayOffset(textureKey);
-      if (textureNudge) {
-        px += textureNudge.dx;
-        py += textureNudge.dy;
+      if (isWater2BordersTopBottomTextureKey(textureKey)) {
+        const topBottomNudge = getWater2BordersTopBottomDisplayOffset(textureKey);
+        px += topBottomNudge.dx;
+        py += topBottomNudge.dy;
       }
+      if (isWater2BordersLeftRightTextureKey(textureKey)) {
+        const waterScale = resolveWaterGroundDisplayScale(textureKey, underFarmIsland);
+        const leftRightNudge = getWater2BordersDisplayOffset(textureKey, waterScale);
+        px += leftRightNudge.dx;
+        py += leftRightNudge.dy;
+      }
+      if (isWater1BorderTextureKey(textureKey)) {
+        const oneBorderNudge = getWater1BorderDisplayOffset(textureKey);
+        px += oneBorderNudge.dx;
+        py += oneBorderNudge.dy;
+      }
+    } else if (cell.type === 'path' && cell.pathVariant === 'bridge_tile') {
+      const bridgeNudge = getBridgeTileDisplayOffset(BRIDGE_GROUND_BASE_DISPLAY_SCALE);
+      px += bridgeNudge.dx;
+      py += bridgeNudge.dy;
     }
     spr.setPosition(px, py);
-    const underFarmIsland = this.grid.isFarmIslandFootprintCell(gx, gy);
     if (cell.type === 'water') {
-      if (textureKey === WATER_TOP_BORDER_TEXTURE_KEY) {
-        applyIsoTopBorderWaterSprite(spr);
-      } else if (textureKey === WATER_BOTTOM_BORDER_TEXTURE_KEY) {
-        applyIsoBottomBorderWaterSprite(spr);
-      } else {
-        const waterScale = getWaterGroundDisplayScale();
-        applyIsoTileSprite(
-          spr,
-          underFarmIsland
-            ? Math.max(waterScale, GROUND_TILE_SEAM_SCALE)
-            : waterScale
-        );
-      }
+      applyWaterGroundTileSprite(
+        spr,
+        textureKey,
+        resolveWaterGroundDisplayScale(textureKey, underFarmIsland)
+      );
     } else {
-      applyIsoTileSprite(spr, this.farmFootprintGroundScale(gx, gy));
+      if (cell.type === 'path' && cell.pathVariant === 'bridge_tile') {
+        applyIsoBridgeTileSprite(spr, BRIDGE_GROUND_BASE_DISPLAY_SCALE);
+      } else {
+        applyIsoTileSprite(spr, GROUND_TILE_SEAM_SCALE);
+      }
     }
     spr.setDepth(this.grid.getDepth(gx, gy, 'ground'));
-  }
-
-  /** Seam scale for farm soil + path ring; north apex row is enlarged to mask island cliff bleed. */
-  private farmFootprintGroundScale(gx: number, gy: number): number {
-    if (!this.grid.isFarmIslandFootprintCell(gx, gy)) {
-      return GROUND_TILE_SEAM_SCALE;
-    }
-    if (isFarmNorthEdgeCell(gx, gy)) {
-      return Math.max(GROUND_TILE_SEAM_SCALE, FARM_NORTH_EDGE_GROUND_SCALE);
-    }
-    return GROUND_TILE_SEAM_SCALE;
   }
 
   private refreshTileAt(gx: number, gy: number): void {
@@ -4221,32 +4228,48 @@ export class FarmScene extends Phaser.Scene {
     }
     this.ghostSprite.setTexture(key);
     if (isGroundBuild) {
+      const ghostScale = waterStyleGroundGhost
+        ? getWaterTextureUniformDisplayScale(key)
+        : GROUND_TILE_SEAM_SCALE;
       let top = this.grid.gridToMapScreen(ghostX, ghostY);
       if (waterGroundPreview) {
-        const probe: WaterNeighborProbe = (nx, ny) => {
-          if (!this.grid.inBounds(nx, ny)) return false;
-          if (nx === ghostX && ny === ghostY) return true;
-          return this.grid.getCell(nx, ny)?.type === 'water';
-        };
-        const nudge = getWaterCornerDisplayOffset(ghostX, ghostY, probe);
+        const probe = waterPlacementPreviewProbe(
+          ghostX,
+          ghostY,
+          this.grid.getWaterNeighborProbe()
+        );
+        const nudge = getWaterCornerDisplayOffset(
+          ghostX,
+          ghostY,
+          probe,
+          this.grid.getWaterDiagonalContext()
+        );
         if (nudge) {
           top = { x: top.x + nudge.dx, y: top.y + nudge.dy };
         }
-        const textureNudge = getWaterTextureDisplayOffset(key);
-        if (textureNudge) {
-          top = { x: top.x + textureNudge.dx, y: top.y + textureNudge.dy };
+        if (isWater2BordersTopBottomTextureKey(key)) {
+          const topBottomNudge = getWater2BordersTopBottomDisplayOffset(key);
+          top = { x: top.x + topBottomNudge.dx, y: top.y + topBottomNudge.dy };
         }
+        if (isWater2BordersLeftRightTextureKey(key)) {
+          const leftRightNudge = getWater2BordersDisplayOffset(key, ghostScale);
+          top = { x: top.x + leftRightNudge.dx, y: top.y + leftRightNudge.dy };
+        }
+        if (isWater1BorderTextureKey(key)) {
+          const oneBorderNudge = getWater1BorderDisplayOffset(key);
+          top = { x: top.x + oneBorderNudge.dx, y: top.y + oneBorderNudge.dy };
+        }
+      } else if (key === 'bridge_tile') {
+        const bridgeNudge = getBridgeTileDisplayOffset(ghostScale);
+        top = { x: top.x + bridgeNudge.dx, y: top.y + bridgeNudge.dy };
       }
       this.ghostSprite.setOrigin(0.5, 0);
       this.ghostSprite.setPosition(top.x, top.y);
-      if (waterGroundPreview && key === WATER_TOP_BORDER_TEXTURE_KEY) {
-        applyIsoTopBorderWaterSprite(this.ghostSprite);
-      } else if (waterGroundPreview && key === WATER_BOTTOM_BORDER_TEXTURE_KEY) {
-        applyIsoBottomBorderWaterSprite(this.ghostSprite);
+      if (waterGroundPreview) {
+        applyWaterGroundTileSprite(this.ghostSprite, key, ghostScale);
+      } else if (key === 'bridge_tile') {
+        applyIsoBridgeTileSprite(this.ghostSprite, ghostScale);
       } else {
-        const ghostScale = waterStyleGroundGhost
-          ? getWaterGroundDisplayScale()
-          : GROUND_TILE_SEAM_SCALE;
         applyIsoTileSprite(this.ghostSprite, ghostScale);
       }
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 50);

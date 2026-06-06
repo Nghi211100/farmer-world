@@ -182,10 +182,10 @@ import {
   getFarmDefaultScrollAtZoom,
 } from '../config/farmCameraConfig';
 import {
+  computeScrollForZoomAtScreenAnchor,
   decayPanVelocity,
   panInertiaIsSettled,
   stepSmoothZoomAtAnchor,
-  stepSmoothZoomAtMapCenter,
 } from '../farmCameraMotion';
 
 type FarmMode = 'normal' | 'build' | 'livestock' | 'expand' | 'plant';
@@ -1087,42 +1087,17 @@ export class FarmScene extends Phaser.Scene {
 
     if (Math.abs(cam.zoom - this.cameraTargetZoom) > 0.0005) {
       const previousZoom = cam.zoom;
-      if (!this.cameraScrollTouchedByUser) {
-        const { width: viewW, height: viewH } = this.getLayoutViewportSize();
-        const step = stepSmoothZoomAtMapCenter(
-          this.grid.getFarmPlayableMapCenterScreen(),
-          viewW,
-          viewH,
-          cam.scrollX,
-          cam.scrollY,
-          previousZoom,
-          this.cameraTargetZoom
-        );
-        this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, step.zoom);
-        cam.setZoom(step.zoom);
-        this.applyFarmDefaultCameraScrollAtZoom(step.zoom);
-        this.clampMainCameraScrollToPlayable();
-      } else {
-        const anchorBefore = this.getFarmCameraCenterAnchor();
-        const keepScreenX = (anchorBefore.x - cam.scrollX) * previousZoom;
-        const keepScreenY = (anchorBefore.y - cam.scrollY) * previousZoom;
-        const step = stepSmoothZoomAtAnchor(
-          cam.scrollX,
-          cam.scrollY,
-          cam.zoom,
-          this.cameraTargetZoom,
-          this.cameraZoomAnchorX,
-          this.cameraZoomAnchorY
-        );
-        this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, step.zoom);
-        const anchorAfter = this.getFarmCameraCenterAnchor();
-        cam.setZoom(step.zoom);
-        cam.scrollX = anchorAfter.x - keepScreenX / step.zoom;
-        cam.scrollY = anchorAfter.y - keepScreenY / step.zoom;
-        this.clampMainCameraScrollToPlayable();
-        if (step.settled) {
-          this.adjustScrollAfterZoom(previousZoom);
-        }
+      const step = stepSmoothZoomAtAnchor(
+        cam.scrollX,
+        cam.scrollY,
+        previousZoom,
+        this.cameraTargetZoom,
+        this.cameraZoomAnchorX,
+        this.cameraZoomAnchorY
+      );
+      this.applyFarmCameraZoomStepAtFocalAnchor(step);
+      if (step.settled) {
+        this.adjustScrollAfterZoom(previousZoom);
       }
     }
 
@@ -1202,6 +1177,25 @@ export class FarmScene extends Phaser.Scene {
   /** World anchor for camera centering: playable map center (farmer spawn / visual center). */
   private getFarmCameraCenterAnchor(): { x: number; y: number } {
     return this.grid.getFarmPlayableMapCenterScreen();
+  }
+
+  /**
+   * Apply one smooth zoom step while keeping the wheel/pinch focal point on screen.
+   * World-offset keyframes shift grid coordinates; compensate scroll by the map-center delta.
+   */
+  private applyFarmCameraZoomStepAtFocalAnchor(step: {
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+  }): void {
+    const cam = this.cameras.main;
+    const anchorBefore = this.getFarmCameraCenterAnchor();
+    this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, step.zoom);
+    const anchorAfter = this.getFarmCameraCenterAnchor();
+    cam.setZoom(step.zoom);
+    cam.scrollX = step.scrollX + (anchorAfter.x - anchorBefore.x);
+    cam.scrollY = step.scrollY + (anchorAfter.y - anchorBefore.y);
+    this.clampMainCameraScrollToPlayable();
   }
 
   /**
@@ -1369,8 +1363,14 @@ export class FarmScene extends Phaser.Scene {
     let scrollX = cam.scrollX;
     let scrollY = cam.scrollY;
     const anchorBefore = this.getFarmCameraCenterAnchor();
-    const keepScreenX = (anchorBefore.x - cam.scrollX) * previousZoom;
-    const keepScreenY = (anchorBefore.y - cam.scrollY) * previousZoom;
+    const focalScroll = computeScrollForZoomAtScreenAnchor(
+      cam.scrollX,
+      cam.scrollY,
+      previousZoom,
+      zoom,
+      this.cameraZoomAnchorX,
+      this.cameraZoomAnchorY
+    );
     this.syncMapCenterWorldOffsetToZoom(this.lastMapCenterWorldOffsetZoom, zoom);
     if (!this.cameraScrollTouchedByUser || options?.forceRecenter) {
       const defaultScroll = getFarmDefaultScrollAtZoom(viewW, viewH, zoom);
@@ -1378,8 +1378,8 @@ export class FarmScene extends Phaser.Scene {
       scrollY = defaultScroll.scrollY;
     } else {
       const anchorAfter = this.getFarmCameraCenterAnchor();
-      scrollX = anchorAfter.x - keepScreenX / zoom;
-      scrollY = anchorAfter.y - keepScreenY / zoom;
+      scrollX = focalScroll.scrollX + (anchorAfter.x - anchorBefore.x);
+      scrollY = focalScroll.scrollY + (anchorAfter.y - anchorBefore.y);
     }
     let scroll = clampScrollToFarmPlayable(scrollX, scrollY, limits);
     const footprint = this.grid.getFarmFootprintScreenBounds();
@@ -1899,6 +1899,7 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('wheel', (pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, dy: number) => {
+      this.cameraScrollTouchedByUser = true;
       this.stopCameraInertia();
       this.cameraZoomAnchorX = pointer.x;
       this.cameraZoomAnchorY = pointer.y;
@@ -1918,6 +1919,7 @@ export class FarmScene extends Phaser.Scene {
           this.input.pointer2.x,
           this.input.pointer2.y
         );
+        this.cameraScrollTouchedByUser = true;
         this.stopCameraInertia();
         this.cameraZoomAnchorX = (this.input.pointer1.x + this.input.pointer2.x) / 2;
         this.cameraZoomAnchorY = (this.input.pointer1.y + this.input.pointer2.y) / 2;
@@ -2943,6 +2945,9 @@ export class FarmScene extends Phaser.Scene {
     const previousZoom = cam.zoom;
     this.cameraScrollTouchedByUser = true;
     const clamped = clampFarmCameraZoom(zoom);
+    const { width: viewW, height: viewH } = this.getLayoutViewportSize();
+    this.cameraZoomAnchorX = viewW / 2;
+    this.cameraZoomAnchorY = viewH / 2;
     cam.setZoom(clamped);
     this.cameraTargetZoom = clamped;
     this.stopCameraInertia();

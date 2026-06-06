@@ -28,6 +28,33 @@ describe('farmCameraConfig', () => {
 });
 
 describe('computeScrollForZoomAtScreenAnchor', () => {
+  it('stays fixed on screen after uniform world shift compensation', () => {
+    const scrollX = 50;
+    const scrollY = 60;
+    const prevZoom = 1.9;
+    const nextZoom = 2.5;
+    const anchorX = 120;
+    const anchorY = 340;
+    const worldShiftX = 12;
+    const worldShiftY = -8;
+    const worldX = scrollX + anchorX / prevZoom + worldShiftX;
+    const worldY = scrollY + anchorY / prevZoom + worldShiftY;
+    const next = computeScrollForZoomAtScreenAnchor(
+      scrollX,
+      scrollY,
+      prevZoom,
+      nextZoom,
+      anchorX,
+      anchorY
+    );
+    const compensated = {
+      scrollX: next.scrollX + worldShiftX,
+      scrollY: next.scrollY + worldShiftY,
+    };
+    expect(compensated.scrollX + anchorX / nextZoom).toBeCloseTo(worldX, 5);
+    expect(compensated.scrollY + anchorY / nextZoom).toBeCloseTo(worldY, 5);
+  });
+
   it('keeps the world point under the cursor fixed when zoom changes', () => {
     const scrollX = 100;
     const scrollY = 200;

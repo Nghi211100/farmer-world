@@ -57,6 +57,13 @@ import {
   resolveShopModalRowRect,
 } from './shopModalLayout';
 import {
+  beginScrollDrag,
+  clearScrollDrag,
+  createScrollDragSession,
+  endScrollDrag,
+  handleScrollDragMove,
+} from './scrollDragGesture';
+import {
   getModalTypographyScale,
   scaledFontSize,
   scaledFontSizePx,
@@ -258,9 +265,6 @@ const GRID_COLS = SHOP_LAYOUT_GRID_COLS;
 const GRID_ROW_GAP_PX = 6;
 /** Product card display scale inside cell (matches e2e `SHOP_ITEM_CARD_SCALE`). */
 const SHOP_ITEM_CARD_SCALE = 0.95;
-/** Min pointer travel before grid scroll drag starts (avoids eating taps on scrollHit). */
-const SCROLL_DRAG_THRESHOLD_PX = 6;
-
 /** Modal layout overlay (tabs / grid / detail, 4×3 cells). */
 const DEBUG_LAYOUT_GRID_COLOR = 0xdfe963;
 const DEBUG_LAYOUT_GRID_ALPHA = 0.72;
@@ -645,11 +649,9 @@ export class ShopPanel {
   private scrollGeometryMask?: Phaser.Display.Masks.GeometryMask;
   private scrollHit!: Phaser.GameObjects.Rectangle;
   private scrollOffset = 0;
-  private scrollDragActive = false;
-  private scrollDragPointerId: number | null = null;
-  private scrollDragStartY = 0;
-  private scrollDragStartOffset = 0;
+  private scrollDrag = createScrollDragSession();
   private readonly boundClearScrollDrag: () => void;
+  private readonly boundScrollPointerMove: (pointer: Phaser.Input.Pointer) => void;
   private lastRenderedSlotCount = 0;
   private gridCellHits: Phaser.GameObjects.Rectangle[] = [];
   private readonly boundWheel: (
@@ -704,8 +706,12 @@ export class ShopPanel {
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
     this.boundClearScrollDrag = () => {
-      this.scrollDragActive = false;
-      this.scrollDragPointerId = null;
+      if (!this.visible) return;
+      endScrollDrag(this.scrollDrag);
+    };
+    this.boundScrollPointerMove = (pointer: Phaser.Input.Pointer) => {
+      if (!this.visible) return;
+      handleScrollDragMove(this.scrollDrag, pointer, 'y', (offset) => this.setScrollOffset(offset));
     };
     this.boundWheel = (pointer, _over, _dx, dy, _dz, event) => {
       if (!this.visible) return;
@@ -1737,22 +1743,10 @@ export class ShopPanel {
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: false });
     this.scrollHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      this.scrollDragPointerId = pointer.id;
-      this.scrollDragStartY = pointer.y;
-      this.scrollDragStartOffset = this.scrollOffset;
-      this.scrollDragActive = false;
-    });
-    this.scrollHit.on('pointerup', this.boundClearScrollDrag);
-    this.scrollHit.on('pointerupoutside', this.boundClearScrollDrag);
-    this.scrollHit.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.scrollDragPointerId !== pointer.id) return;
-      if (!this.scrollDragActive) {
-        if (Math.abs(pointer.y - this.scrollDragStartY) < SCROLL_DRAG_THRESHOLD_PX) return;
-        this.scrollDragActive = true;
-      }
-      this.setScrollOffset(this.scrollDragStartOffset - (pointer.y - this.scrollDragStartY));
+      beginScrollDrag(this.scrollDrag, pointer, this.scrollOffset, 'y');
     });
 
+    scene.input.on('pointermove', this.boundScrollPointerMove);
     scene.input.on('pointerup', this.boundClearScrollDrag);
     scene.input.on('pointerupoutside', this.boundClearScrollDrag);
     scene.input.on('wheel', this.boundWheel);
@@ -2151,7 +2145,11 @@ export class ShopPanel {
           0.001
         )
         .setInteractive({ useHandCursor: true });
-      hit.on('pointerdown', () => this.selectItem(itemId));
+      hit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        beginScrollDrag(this.scrollDrag, pointer, this.scrollOffset, 'y', () =>
+          this.selectItem(itemId)
+        );
+      });
 
       this.listContainer.add([icon, hit]);
       this.gridCellHits.push(hit);
@@ -3058,6 +3056,7 @@ export class ShopPanel {
 
   hide(): void {
     this.hideBuyQtyInput();
+    clearScrollDrag(this.scrollDrag);
     this.setBuyQtyControlsEnabled(false);
     this.container.setVisible(false);
     this.visible = false;
@@ -3075,6 +3074,7 @@ export class ShopPanel {
 
   destroy(): void {
     this.scene.input.off('wheel', this.boundWheel);
+    this.scene.input.off('pointermove', this.boundScrollPointerMove);
     this.scene.input.off('pointerup', this.boundClearScrollDrag);
     this.scene.input.off('pointerupoutside', this.boundClearScrollDrag);
     this.hideBuyQtyInput();

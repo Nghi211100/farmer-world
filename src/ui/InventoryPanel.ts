@@ -30,6 +30,13 @@ import {
   scaledFontSize,
   scaledFontSizePx,
 } from './uiFontScale';
+import {
+  beginScrollDrag,
+  clearScrollDrag,
+  createScrollDragSession,
+  endScrollDrag,
+  handleScrollDragMove,
+} from './scrollDragGesture';
 
 export type WarehouseTabId = 'all' | ItemCategory;
 type TabId = WarehouseTabId;
@@ -770,9 +777,9 @@ export class InventoryPanel {
     _dz: number,
     event?: Event
   ) => void;
-  private scrollDragActive = false;
-  private scrollDragStartY = 0;
-  private scrollDragStartOffset = 0;
+  private scrollDrag = createScrollDragSession();
+  private readonly boundClearScrollDrag: () => void;
+  private readonly boundScrollPointerMove: (pointer: Phaser.Input.Pointer) => void;
   private capacityProcessBg!: Phaser.GameObjects.Image;
   private capacityTrack!: Phaser.GameObjects.Image;
   private capacityFill!: Phaser.GameObjects.Image;
@@ -870,6 +877,14 @@ export class InventoryPanel {
       if (!this.isPointerInGrid(pointer)) return;
       event?.stopPropagation();
       this.scrollBy(dy);
+    };
+    this.boundClearScrollDrag = () => {
+      if (!this.visible) return;
+      endScrollDrag(this.scrollDrag);
+    };
+    this.boundScrollPointerMove = (pointer: Phaser.Input.Pointer) => {
+      if (!this.visible) return;
+      handleScrollDragMove(this.scrollDrag, pointer, 'y', (offset) => this.setScrollOffset(offset));
     };
 
     this.gridLeft = 0;
@@ -1238,21 +1253,12 @@ export class InventoryPanel {
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: false });
     this.scrollHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      this.scrollDragActive = true;
-      this.scrollDragStartY = pointer.y;
-      this.scrollDragStartOffset = this.scrollOffset;
-    });
-    this.scrollHit.on('pointerup', () => {
-      this.scrollDragActive = false;
-    });
-    this.scrollHit.on('pointerupoutside', () => {
-      this.scrollDragActive = false;
-    });
-    this.scrollHit.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (!this.scrollDragActive) return;
-      this.setScrollOffset(this.scrollDragStartOffset - (pointer.y - this.scrollDragStartY));
+      beginScrollDrag(this.scrollDrag, pointer, this.scrollOffset, 'y');
     });
 
+    scene.input.on('pointermove', this.boundScrollPointerMove);
+    scene.input.on('pointerup', this.boundClearScrollDrag);
+    scene.input.on('pointerupoutside', this.boundClearScrollDrag);
     scene.input.on('wheel', this.boundWheel);
 
     const stopHudLeak = (event?: Phaser.Types.Input.EventData) => event?.stopPropagation();
@@ -3618,8 +3624,11 @@ export class InventoryPanel {
           0.001
         )
         .setInteractive({ useHandCursor: true });
-      hit.on('pointerdown', () => {
-        if (slot.count > 0) this.selectSlot(slot.id);
+      hit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        if (slot.count <= 0) return;
+        beginScrollDrag(this.scrollDrag, pointer, this.scrollOffset, 'y', () =>
+          this.selectSlot(slot.id)
+        );
       });
       this.listContainer.add(hit);
     });
@@ -3627,6 +3636,7 @@ export class InventoryPanel {
 
   hide(): void {
     this.hideSellQtyInput();
+    clearScrollDrag(this.scrollDrag);
     this.container.setVisible(false);
     this.closeHit.setVisible(false);
     this.visible = false;
@@ -3796,6 +3806,9 @@ export class InventoryPanel {
     this.sellQtyInputEl?.remove();
     this.sellQtyInputEl = null;
     this.sceneRef.input.off('wheel', this.boundWheel);
+    this.sceneRef.input.off('pointermove', this.boundScrollPointerMove);
+    this.sceneRef.input.off('pointerup', this.boundClearScrollDrag);
+    this.sceneRef.input.off('pointerupoutside', this.boundClearScrollDrag);
     this.scrollViewport.clearMask(true);
     this.scrollGeometryMask?.destroy();
     this.scrollMaskGraphics?.destroy();

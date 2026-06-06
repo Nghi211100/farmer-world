@@ -17,6 +17,13 @@ import {
   type BuildModalLayout,
   type BuildTabId,
 } from './buildModalLayout';
+import {
+  beginScrollDrag,
+  clearScrollDrag,
+  createScrollDragSession,
+  endScrollDrag,
+  handleScrollDragMove,
+} from './scrollDragGesture';
 import { getModalUiFontScale } from './uiFontScale';
 import {
   applyWarehouseTitleLikeSizing,
@@ -103,9 +110,7 @@ export class BuildPanel {
   private activeTab: BuildTabId = 'buildings';
   private scrollOffset = 0;
   private scrollMax = 0;
-  private scrollDragging = false;
-  private scrollDragStartX = 0;
-  private scrollOffsetAtDrag = 0;
+  private scrollDrag = createScrollDragSession();
   private scrollViewportW = 0;
   private scrollLayoutCardW = 0;
   private scrollLayoutCardGap = 0;
@@ -200,27 +205,30 @@ export class BuildPanel {
       .setScrollFactor(0)
       .setInteractive();
     zone.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      this.scrollDragging = true;
-      this.scrollDragStartX = p.x;
-      this.scrollOffsetAtDrag = this.scrollOffset;
+      this.beginCardRowScrollDrag(p);
     });
     scene.input.on('pointermove', this.onScrollPointerMove);
     scene.input.on('pointerup', this.onScrollPointerUp);
+    scene.input.on('pointerupoutside', this.onScrollPointerUp);
     this.scrollDragZone = zone;
-    // Below scrollViewport so card hits receive taps (ShopPanel pattern).
+    // Below scrollViewport so card hits receive taps; scene handlers complete drag on items.
     this.modal.add(zone);
   }
 
   private scrollDragZone!: Phaser.GameObjects.Rectangle;
 
+  private beginCardRowScrollDrag(pointer: Phaser.Input.Pointer, pendingTap?: () => void): void {
+    beginScrollDrag(this.scrollDrag, pointer, this.scrollOffset, 'x', pendingTap);
+  }
+
   private readonly onScrollPointerMove = (p: Phaser.Input.Pointer): void => {
-    if (!this.scrollDragging || !p.isDown) return;
-    const dx = p.x - this.scrollDragStartX;
-    this.setScrollOffset(this.scrollOffsetAtDrag - dx);
+    if (!this.visible) return;
+    handleScrollDragMove(this.scrollDrag, p, 'x', (offset) => this.setScrollOffset(offset));
   };
 
   private readonly onScrollPointerUp = (): void => {
-    this.scrollDragging = false;
+    if (!this.visible) return;
+    endScrollDrag(this.scrollDrag);
   };
 
   setPlayerLevel(level: number): void {
@@ -256,7 +264,7 @@ export class BuildPanel {
   hide(): void {
     this.root.setVisible(false);
     this.visible = false;
-    this.scrollDragging = false;
+    clearScrollDrag(this.scrollDrag);
     this.resetBackdrop();
   }
 
@@ -272,6 +280,7 @@ export class BuildPanel {
   destroy(): void {
     this.root.scene.input.off('pointermove', this.onScrollPointerMove);
     this.root.scene.input.off('pointerup', this.onScrollPointerUp);
+    this.root.scene.input.off('pointerupoutside', this.onScrollPointerUp);
     this.root.destroy();
   }
 
@@ -509,10 +518,12 @@ export class BuildPanel {
         .setScrollFactor(0)
         .setInteractive({ useHandCursor: true });
 
-      hit.on('pointerdown', () => {
+      hit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         if (this.isItemLocked(item)) return;
-        this.onSelect?.(item);
-        this.hide();
+        this.beginCardRowScrollDrag(pointer, () => {
+          this.onSelect?.(item);
+          this.hide();
+        });
       });
 
       root.add([cardG, name, preview, priceG, ...(coin ? [coin] : []), priceText, lockOverlay, lockedText, hit]);

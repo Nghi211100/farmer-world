@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ASSET_MANIFEST,
   UI_COMING_TEXTURE_KEY,
+  UI_BUILD_TURN_TEXTURE_KEY,
   UI_OBJECT_FEED_TEXTURE_KEY,
   UI_OBJECT_SELL_TEXTURE_KEY,
   UI_TEXT_BACKGROUND_TEXTURE_KEY,
@@ -63,6 +64,13 @@ describe('asset manifest bundling', () => {
       expect(entry?.path).toBe(path);
       expect(map.get(path)).toBeTruthy();
     }
+  });
+
+  it('registers build placement rotate icon', () => {
+    const map = getAssetPathToUrlMap();
+    const entry = ASSET_MANIFEST.find((e) => e.key === UI_BUILD_TURN_TEXTURE_KEY);
+    expect(entry?.path).toBe('ui/turn.png');
+    expect(map.get('ui/turn.png')).toBeTruthy();
   });
 
   it('registers water shore border tiles including bottom-right', () => {

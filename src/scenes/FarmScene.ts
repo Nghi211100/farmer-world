@@ -22,6 +22,9 @@ import {
   getFarmForceSpawnWorld,
   isFarmGridDebug,
   isPersistentToolBarEnabled,
+  isRotatablePathVariant,
+  pathTileAngle,
+  pathTileIsFlipped,
   LAND_EXPAND_STRINGS,
   PlayerFarmAction,
   SOIL_IDLE_STRINGS,
@@ -37,7 +40,7 @@ import { BuildingSprite, renderBuildings } from '../entities/Building';
 import { cropKey, CropSprite, syncCropSprites } from '../entities/Crop';
 import { renderMapDecorations } from '../entities/Decoration';
 import { Player } from '../entities/Player';
-import { BuildSystem } from '../systems/BuildSystem';
+import { BuildSystem, isRotatableBuildItem } from '../systems/BuildSystem';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FarmingSystem } from '../systems/FarmingSystem';
 import { GridSystem, cellHasWaterBridgeOverlay } from '../systems/GridSystem';
@@ -881,6 +884,13 @@ export class FarmScene extends Phaser.Scene {
         applyIsoBridgeTileSprite(spr, BRIDGE_GROUND_BASE_DISPLAY_SCALE);
       } else {
         applyIsoTileSprite(spr, GROUND_TILE_SEAM_SCALE);
+        if (cell.type === 'path' && isRotatablePathVariant(cell.pathVariant)) {
+          spr.setAngle(pathTileAngle(cell.pathVariant, cell.pathRotation));
+          spr.setFlipX(pathTileIsFlipped(cell.pathVariant, cell.pathRotation));
+        } else {
+          spr.setAngle(0);
+          spr.setFlipX(false);
+        }
       }
     }
     spr.setDepth(this.grid.getDepth(gx, gy, 'ground'));
@@ -1796,6 +1806,10 @@ export class FarmScene extends Phaser.Scene {
         return;
       }
 
+      if (this.tryBeginBuildPlaceLongPress(pointer)) {
+        return;
+      }
+
       if (this.input.pointer1.isDown && this.input.pointer2?.isDown) {
         this.lastPinchDist = Phaser.Math.Distance.Between(
           this.input.pointer1.x,
@@ -1819,7 +1833,11 @@ export class FarmScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.buildSystem.active && !this.buildSystem.previewLocked) {
+      if (
+        this.buildSystem.active &&
+        this.buildSystem.placeDragging &&
+        !this.buildSystem.previewLocked
+      ) {
         const { x, y } = this.screenPointToGrid(pointer);
         this.buildSystem.updateGhost(x, y);
         this.updateGhostSprite();
@@ -1863,6 +1881,10 @@ export class FarmScene extends Phaser.Scene {
       }
 
       if (this.finishLivestockPlaceDrag(pointer)) {
+        return;
+      }
+
+      if (this.finishBuildPlaceDrag(pointer)) {
         return;
       }
 
@@ -1940,6 +1962,25 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
+  private handleBuildItemSelect(item: BuildItemDef): void {
+    this.livestockSystem.exitPlaceMode();
+    this.buildSystem.enterBuildMode(item);
+    const spot = this.buildSystem.findFirstValidPlacement();
+    if (!spot) {
+      this.buildSystem.exitBuildMode();
+      this.showToast('No space to build');
+      return;
+    }
+    this.buildSystem.lockPreviewAt(spot.gx, spot.gy);
+    this.setFarmMode('build');
+    this.updateGhostSprite();
+    this.showBuildPlacementConfirm();
+    this.events.emit('mode-hint', {
+      text: 'Chạm để kéo · Lưu / Hủy',
+      prominent: true,
+    });
+  }
+
   private handleBuildPreviewTap(gx: number, gy: number): void {
     if (!this.buildSystem.selectedItem) return;
     if (!this.buildSystem.canPlace(gx, gy)) {
@@ -1957,13 +1998,22 @@ export class FarmScene extends Phaser.Scene {
     if (!item) return;
     const canPlace = this.buildSystem.canPlace(ghostX, ghostY);
     const canAfford = this.economy.getCoins() >= item.cost;
+    const showRotate = isRotatableBuildItem(item);
     this.buildPlacementConfirm.show(
       ghostX,
       ghostY,
       canPlace && canAfford,
       () => this.confirmBuildPlacement(),
-      () => this.cancelBuildMode()
+      () => this.cancelBuildMode(),
+      showRotate
+        ? { showRotate: true, onRotate: () => this.rotateBuildPlacement() }
+        : undefined
     );
+  }
+
+  private rotateBuildPlacement(): void {
+    this.buildSystem.rotateGhostPath();
+    this.updateGhostSprite();
   }
 
   private confirmBuildPlacement(): void {
@@ -1995,18 +2045,19 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
-  /** Stay in build mode; lock preview on adjacent valid tile or unlock ghost. */
+  /** Stay in build mode; lock preview on adjacent valid tile or next open cell. */
   private advanceBuildPreviewAfterPlace(placedGx: number, placedGy: number): void {
-    const next = this.buildSystem.findNextPlacementTile(placedGx, placedGy);
+    const next =
+      this.buildSystem.findNextPlacementTile(placedGx, placedGy) ??
+      this.buildSystem.findFirstValidPlacement();
     if (next) {
       this.buildSystem.lockPreviewAt(next.gx, next.gy);
       this.updateGhostSprite();
       this.showBuildPlacementConfirm();
       return;
     }
-    this.buildSystem.unlockPreview();
-    this.buildPlacementConfirm.hide();
-    this.updateGhostSprite();
+    this.showToast('No space to build');
+    this.cancelBuildMode();
   }
 
   private cancelBuildMode(): void {
@@ -2558,6 +2609,40 @@ export class FarmScene extends Phaser.Scene {
     this.objectMoveLongPressTimer?.remove(false);
     this.objectMoveLongPressTimer = undefined;
     this.objectMovePressPointerId = -1;
+  }
+
+  private tryBeginBuildPlaceLongPress(pointer: Phaser.Input.Pointer): boolean {
+    if (
+      !this.buildSystem.active ||
+      !this.buildSystem.selectedItem ||
+      !this.buildSystem.previewLocked ||
+      this.buildSystem.placeDragging
+    ) {
+      return false;
+    }
+    const { x, y } = this.screenPointToGrid(pointer);
+    if (!this.buildSystem.isGridOnPlaceGhostFootprint(x, y)) {
+      return false;
+    }
+    this.cancelObjectMoveLongPress();
+    this.objectMovePressPointerId = pointer.id;
+    this.objectMovePressScreenX = pointer.x;
+    this.objectMovePressScreenY = pointer.y;
+    this.buildSystem.startPlaceDrag();
+    this.updateGhostSprite();
+    return true;
+  }
+
+  private finishBuildPlaceDrag(_pointer: Phaser.Input.Pointer): boolean {
+    const wasDragging = this.buildSystem.placeDragging;
+    this.objectMovePressPointerId = -1;
+    if (!wasDragging) {
+      return false;
+    }
+    this.buildSystem.finishPlaceDrag();
+    this.updateGhostSprite();
+    this.showBuildPlacementConfirm();
+    return true;
   }
 
   private tryBeginLivestockPlaceLongPress(pointer: Phaser.Input.Pointer): boolean {
@@ -4082,7 +4167,7 @@ export class FarmScene extends Phaser.Scene {
         ? getCropDef(this.inventory.cropKindFromSeedId(this.selectedSeedId)!).name
         : 'a crop';
     const hints: Record<Exclude<FarmMode, 'normal'>, string> = {
-      build: 'Tap a tile, then tap ✓ to build',
+      build: 'Chạm để kéo · Lưu / Hủy',
       livestock: 'Chọn ô 3×3, đặt chuồng/hồ, rồi bấm ✓',
       expand: LAND_EXPAND_STRINGS.selectHint,
       plant: this.selectedSeedId
@@ -4110,9 +4195,7 @@ export class FarmScene extends Phaser.Scene {
       }
     });
     this.events.on('build-select', (item: BuildItemDef) => {
-      this.buildSystem.enterBuildMode(item);
-      this.setFarmMode('build');
-      this.updateGhostSprite();
+      this.handleBuildItemSelect(item);
     });
     this.events.on('livestock-pen-place', (item: LivestockPenPlaceItemDef) => {
       this.handleLivestockPenPlaceSelect(item);
@@ -4326,6 +4409,15 @@ export class FarmScene extends Phaser.Scene {
         applyIsoBridgeTileSprite(this.ghostSprite, ghostScale);
       } else {
         applyIsoTileSprite(this.ghostSprite, ghostScale);
+        if (buildItem && isRotatableBuildItem(buildItem)) {
+          const variant = buildItem.pathVariant;
+          const rotation = this.buildSystem.ghostPathRotation;
+          this.ghostSprite.setAngle(pathTileAngle(variant, rotation));
+          this.ghostSprite.setFlipX(pathTileIsFlipped(variant, rotation));
+        } else {
+          this.ghostSprite.setAngle(0);
+          this.ghostSprite.setFlipX(false);
+        }
       }
       this.ghostSprite.setDepth(this.grid.getDepth(ghostX, ghostY, 'ground') + 50);
       if (bridgeOverWaterPreview) {

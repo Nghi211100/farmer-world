@@ -12,6 +12,8 @@ export const UI_TEXT_BACKGROUND_TEXTURE_KEY = 'ui_text_background';
 export const UI_BUILD_CHECK_TEXTURE_KEY = 'ui_build_check';
 /** Build placement cancel (see ui/cancel-icon.png). */
 export const UI_BUILD_CANCEL_TEXTURE_KEY = 'ui_build_cancel';
+/** Build placement rotate (see ui/turn.png). */
+export const UI_BUILD_TURN_TEXTURE_KEY = 'ui_build_turn';
 /** Object edit move (see ui/movement-icon.png). */
 export const UI_OBJECT_MOVE_TEXTURE_KEY = 'ui_object_move';
 /** Object edit upgrade (see ui/upgrade.png). */
@@ -381,6 +383,13 @@ export const ASSET_MANIFEST: AssetEntry[] = [
     key: UI_BUILD_CANCEL_TEXTURE_KEY,
     path: 'ui/cancel-icon.png',
     placeholderColor: 0xc0392b,
+    width: 48,
+    height: 48,
+  },
+  {
+    key: UI_BUILD_TURN_TEXTURE_KEY,
+    path: 'ui/turn.png',
+    placeholderColor: 0x5dade2,
     width: 48,
     height: 48,
   },

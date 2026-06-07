@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import {
   UI_BUILD_CANCEL_TEXTURE_KEY,
   UI_BUILD_CHECK_TEXTURE_KEY,
+  UI_BUILD_TURN_TEXTURE_KEY,
 } from '../config/assets';
 import type { GridSystem } from '../systems/GridSystem';
 import { placePopupAboveTile } from '../utils/popupPosition';
@@ -11,8 +12,6 @@ const BTN_SIZE = Math.round(44 * (2 / 3));
 const BTN_GAP = 12;
 /** Extra slop for touch on scrollFactor-0 confirm buttons. */
 const CONFIRM_HIT_SLOP_PX = 10;
-const PANEL_W = BTN_SIZE * 2 + BTN_GAP;
-const PANEL_H = BTN_SIZE;
 /** Extra gap above tile/building anchor (canvas px). */
 const ABOVE_PREVIEW_OFFSET_PX = 56;
 
@@ -22,16 +21,26 @@ type ButtonVisual = {
   extras: Phaser.GameObjects.GameObject[];
 };
 
+export type BuildPlacementConfirmOptions = {
+  showRotate?: boolean;
+  onRotate?: () => void;
+};
+
 /** Check / Cancel controls shown above a locked build preview. */
 export class BuildPlacementConfirm {
   private container: Phaser.GameObjects.Container;
   private checkBtn!: ButtonVisual;
   private cancelBtn!: ButtonVisual;
+  private rotateBtn!: ButtonVisual;
   private hitTargets: Phaser.GameObjects.GameObject[] = [];
   private visible = false;
   private onConfirm?: () => void;
   private onCancel?: () => void;
+  private onRotate?: () => void;
   private confirmEnabled = true;
+  private rotateVisible = false;
+  /** Prevents rotate firing on both pointerdown/up and duplicate scene handlers. */
+  private rotateTapLock = false;
   private tileGx = 0;
   private tileGy = 0;
 
@@ -44,34 +53,22 @@ export class BuildPlacementConfirm {
     this.container.setDepth(PANEL_DEPTH);
     this.container.setVisible(false);
 
-    const halfGap = BTN_GAP / 2;
-    this.checkBtn = this.createButton(
-      -BTN_SIZE / 2 - halfGap,
-      UI_BUILD_CHECK_TEXTURE_KEY,
-      () => this.activateConfirm()
-    );
-    this.cancelBtn = this.createButton(
-      BTN_SIZE / 2 + halfGap,
-      UI_BUILD_CANCEL_TEXTURE_KEY,
-      () => this.activateCancel()
-    );
+    this.checkBtn = this.createButton(UI_BUILD_CHECK_TEXTURE_KEY, () => this.activateConfirm());
+    this.rotateBtn = this.createButton(UI_BUILD_TURN_TEXTURE_KEY, () => this.activateRotate());
+    this.cancelBtn = this.createButton(UI_BUILD_CANCEL_TEXTURE_KEY, () => this.activateCancel());
 
-    this.hitTargets = [
-      this.checkBtn.hit,
-      this.checkBtn.root,
-      ...this.checkBtn.extras,
-      this.cancelBtn.hit,
-      this.cancelBtn.root,
-      ...this.cancelBtn.extras,
-    ];
     this.container.add([
       this.checkBtn.hit,
       this.checkBtn.root,
       ...this.checkBtn.extras,
+      this.rotateBtn.hit,
+      this.rotateBtn.root,
+      ...this.rotateBtn.extras,
       this.cancelBtn.hit,
       this.cancelBtn.root,
       ...this.cancelBtn.extras,
     ]);
+    this.setRotateVisible(false);
   }
 
   show(
@@ -79,12 +76,15 @@ export class BuildPlacementConfirm {
     gy: number,
     confirmEnabled: boolean,
     onConfirm: () => void,
-    onCancel: () => void
+    onCancel: () => void,
+    options?: BuildPlacementConfirmOptions
   ): void {
     this.tileGx = gx;
     this.tileGy = gy;
     this.onConfirm = onConfirm;
     this.onCancel = onCancel;
+    this.onRotate = options?.showRotate ? options.onRotate : undefined;
+    this.setRotateVisible(options?.showRotate === true);
     this.applyConfirmEnabled(confirmEnabled);
     this.layout();
     this.container.setVisible(true);
@@ -96,6 +96,8 @@ export class BuildPlacementConfirm {
     this.visible = false;
     this.onConfirm = undefined;
     this.onCancel = undefined;
+    this.onRotate = undefined;
+    this.setRotateVisible(false);
   }
 
   setConfirmEnabled(enabled: boolean): void {
@@ -120,6 +122,9 @@ export class BuildPlacementConfirm {
       this.activateConfirm();
       return true;
     }
+    if (action === 'rotate') {
+      return true;
+    }
     if (action === 'cancel') {
       this.activateCancel();
       return true;
@@ -136,6 +141,10 @@ export class BuildPlacementConfirm {
     const action = this.resolveButtonAction(pointer);
     if (action === 'confirm') {
       this.activateConfirm();
+      return true;
+    }
+    if (action === 'rotate') {
+      this.activateRotate();
       return true;
     }
     if (action === 'cancel') {
@@ -155,17 +164,13 @@ export class BuildPlacementConfirm {
     );
   }
 
-  private createButton(
-    x: number,
-    textureKey: string,
-    onPress: () => void
-  ): ButtonVisual {
+  private createButton(textureKey: string, onPress: () => void): ButtonVisual {
     const hit = this.scene.add
-      .rectangle(x, 0, BTN_SIZE, BTN_SIZE, 0x000000, 0.001)
+      .rectangle(0, 0, BTN_SIZE, BTN_SIZE, 0x000000, 0.001)
       .setScrollFactor(0);
 
     const extras: Phaser.GameObjects.GameObject[] = [];
-    const img = this.scene.add.image(x, 0, textureKey).setScrollFactor(0);
+    const img = this.scene.add.image(0, 0, textureKey).setScrollFactor(0);
     img.setDisplaySize(BTN_SIZE, BTN_SIZE);
     const root: Phaser.GameObjects.GameObject = img;
 
@@ -196,9 +201,36 @@ export class BuildPlacementConfirm {
     return { root, hit, extras };
   }
 
+  private setRotateVisible(visible: boolean): void {
+    this.rotateVisible = visible;
+    (this.rotateBtn.root as Phaser.GameObjects.Image).setVisible(visible);
+    this.rotateBtn.hit.setVisible(visible);
+    if (visible) {
+      this.rotateBtn.hit.setInteractive({ useHandCursor: true });
+    } else if (this.rotateBtn.hit.input) {
+      this.rotateBtn.hit.disableInteractive();
+    }
+    this.syncHitTargets();
+  }
+
+  private syncHitTargets(): void {
+    const targets: Phaser.GameObjects.GameObject[] = [
+      this.checkBtn.hit,
+      this.checkBtn.root,
+      ...this.checkBtn.extras,
+      this.cancelBtn.hit,
+      this.cancelBtn.root,
+      ...this.cancelBtn.extras,
+    ];
+    if (this.rotateVisible) {
+      targets.push(this.rotateBtn.hit, this.rotateBtn.root, ...this.rotateBtn.extras);
+    }
+    this.hitTargets = targets;
+  }
+
   private resolveButtonAction(
     pointer: Phaser.Input.Pointer
-  ): 'confirm' | 'cancel' | null {
+  ): 'confirm' | 'rotate' | 'cancel' | null {
     const hits = this.scene.input.hitTestPointer(pointer);
     if (
       this.confirmEnabled &&
@@ -206,26 +238,42 @@ export class BuildPlacementConfirm {
     ) {
       return 'confirm';
     }
+    if (
+      this.rotateVisible &&
+      (hits.includes(this.rotateBtn.hit) || hits.includes(this.rotateBtn.root))
+    ) {
+      return 'rotate';
+    }
     if (hits.includes(this.cancelBtn.hit) || hits.includes(this.cancelBtn.root)) {
       return 'cancel';
     }
     const lx = pointer.x - this.container.x;
     const ly = pointer.y - this.container.y;
-    const halfGap = BTN_GAP / 2;
-    const checkX = -BTN_SIZE / 2 - halfGap;
-    const cancelX = BTN_SIZE / 2 + halfGap;
+    const { checkX, rotateX, cancelX } = this.buttonCenters();
     const half = BTN_SIZE / 2 + CONFIRM_HIT_SLOP_PX;
-    if (
-      this.confirmEnabled &&
-      Math.abs(lx - checkX) <= half &&
-      Math.abs(ly) <= half
-    ) {
+    if (this.confirmEnabled && Math.abs(lx - checkX) <= half && Math.abs(ly) <= half) {
       return 'confirm';
+    }
+    if (this.rotateVisible && Math.abs(lx - rotateX) <= half && Math.abs(ly) <= half) {
+      return 'rotate';
     }
     if (Math.abs(lx - cancelX) <= half && Math.abs(ly) <= half) {
       return 'cancel';
     }
     return null;
+  }
+
+  private buttonCenters(): { checkX: number; rotateX: number; cancelX: number } {
+    if (this.rotateVisible) {
+      const step = BTN_SIZE + BTN_GAP;
+      return { checkX: -step, rotateX: 0, cancelX: step };
+    }
+    const halfGap = BTN_GAP / 2;
+    return {
+      checkX: -BTN_SIZE / 2 - halfGap,
+      rotateX: 0,
+      cancelX: BTN_SIZE / 2 + halfGap,
+    };
   }
 
   private applyConfirmEnabled(enabled: boolean): void {
@@ -240,9 +288,17 @@ export class BuildPlacementConfirm {
   }
 
   private layout(): void {
+    const { checkX, rotateX, cancelX } = this.buttonCenters();
+    this.positionButton(this.checkBtn, checkX);
+    this.positionButton(this.rotateBtn, rotateX);
+    this.positionButton(this.cancelBtn, cancelX);
+
+    const panelW = this.rotateVisible
+      ? BTN_SIZE * 3 + BTN_GAP * 2
+      : BTN_SIZE * 2 + BTN_GAP;
     const { cx, cy } = placePopupAboveTile(this.scene, this.grid, this.tileGx, this.tileGy, {
-      panelW: PANEL_W,
-      panelH: PANEL_H,
+      panelW,
+      panelH: BTN_SIZE,
       containerVisualScale: 1,
       aboveOffsetPx: ABOVE_PREVIEW_OFFSET_PX,
       anchorTop: true,
@@ -251,11 +307,30 @@ export class BuildPlacementConfirm {
     this.container.setScale(1);
   }
 
+  private positionButton(btn: ButtonVisual, x: number): void {
+    btn.hit.setPosition(x, 0);
+    (btn.root as Phaser.GameObjects.Image).setPosition(x, 0);
+    for (const extra of btn.extras) {
+      if ('setPosition' in extra && typeof extra.setPosition === 'function') {
+        extra.setPosition(x, 0);
+      }
+    }
+  }
+
   private activateConfirm(): void {
     if (!this.visible || !this.confirmEnabled) return;
     const cb = this.onConfirm;
     this.hide();
     cb?.();
+  }
+
+  private activateRotate(): void {
+    if (!this.visible || !this.rotateVisible || this.rotateTapLock) return;
+    this.rotateTapLock = true;
+    this.onRotate?.();
+    this.scene.time.delayedCall(150, () => {
+      this.rotateTapLock = false;
+    });
   }
 
   private activateCancel(): void {

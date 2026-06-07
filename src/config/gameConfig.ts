@@ -60,9 +60,20 @@ export const FARM_SOIL_BOUNDS = {
 /** Default farmer spawn on farm soil (matches placeholder map + {@link FarmScene} player). */
 export const FARM_PLAYER_SPAWN_GX = 10;
 export const FARM_PLAYER_SPAWN_GY = 10;
+
+/** Sparse scenery on outer grass at new game — [gx, gy, object texture key]. */
+export const DEFAULT_MAP_SCENERY: ReadonlyArray<readonly [number, number, string]> = [
+  [2, 3, 'tree_01'],
+  [14, 4, 'tree_01'],
+  [15, 7, 'tree_02'],
+  [2, 14, 'tree_02'],
+  [13, 3, 'rock_01'],
+  [5, 15, 'rock_01'],
+  [17, 9, 'bush_01'],
+] as const;
 export type MapObjectType = 'tree' | 'rock' | 'bush' | 'house' | 'barn' | 'silo' | 'coop';
 
-/** Decorative grass on locked soil and outer-map grass tiles */
+/** Decorative grass on locked soil or user-built outer grass (Build tab) */
 export type GroundDecorVariant = 'grass' | 'grass_light' | 'flower_ground';
 
 /** Walkable path ground texture (`type: 'path'`). */
@@ -72,6 +83,40 @@ export type PathGroundVariant =
   | 'road_corner'
   | 'field_border'
   | 'bridge_tile';
+
+/**
+ * Rotatable path tile orientation.
+ * - `path` / `road_corner`: 0 = normal, 180 = horizontal flip (not angle).
+ */
+export type PathTileRotation = 0 | 90 | 180 | 270;
+
+export function isRotatablePathVariant(
+  variant: PathGroundVariant | undefined
+): variant is 'path' | 'road_corner' {
+  return variant === 'path' || variant === 'road_corner';
+}
+
+export function isPathFlipVariant(
+  variant: PathGroundVariant | undefined
+): variant is 'path' | 'road_corner' {
+  return variant === 'path' || variant === 'road_corner';
+}
+
+/** Flip variants store 180 when horizontally flipped. */
+export function pathTileIsFlipped(
+  variant: PathGroundVariant | undefined,
+  rotation: PathTileRotation | undefined
+): boolean {
+  return isPathFlipVariant(variant) && rotation === 180;
+}
+
+/** Flip variants stay at 0° and use flipX instead of angle. */
+export function pathTileAngle(
+  _variant: PathGroundVariant | undefined,
+  _rotation: PathTileRotation | undefined
+): PathTileRotation {
+  return 0;
+}
 
 /** Per complete group of eligible decor tiles: 3 / 2 / 5, shuffled within each group */
 export const GROUND_DECOR_MIX = {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
+import { DEFAULT_MAP_SCENERY, FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { GridSystem } from '../../src/systems/GridSystem';
 
 describe('minimal placeholder map', () => {
-  it('keeps buildable grass with farm soil patch and no pre-placed items', () => {
+  it('keeps buildable grass with farm soil patch and sparse default scenery', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
 
@@ -48,10 +48,35 @@ describe('minimal placeholder map', () => {
     expect(grassCount).toBe(mapCells - soilCount);
     expect(waterCount).toBe(0);
     expect(pathCount).toBe(0);
-    expect(objectCount).toBe(0);
+    expect(objectCount).toBe(DEFAULT_MAP_SCENERY.length);
     expect(voidCount).toBe(0);
     expect(grid.getCell(10, 10)?.type).toBe('soil');
     expect(grid.getCell(2, 2)?.type).toBe('grass');
     expect(grid.getCell(2, 2)?.walkable).toBe(true);
+    expect(grid.getCell(2, 2)?.groundVariant).toBeUndefined();
+    expect(grid.hidesDefaultGroundSprite(2, 2)).toBe(true);
+  });
+
+  it('places default scenery only on outer grass cells', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+
+    let treeCount = 0;
+    let rockCount = 0;
+    let bushCount = 0;
+
+    for (const [x, y, key] of DEFAULT_MAP_SCENERY) {
+      expect(grid.isDefaultOuterGrassCell(x, y)).toBe(true);
+      expect(grid.isFarmSoilCell(x, y)).toBe(false);
+      expect(grid.getCell(x, y)?.object).toBe(key);
+      if (key.startsWith('tree_')) treeCount++;
+      else if (key.startsWith('rock_')) rockCount++;
+      else if (key.startsWith('bush_')) bushCount++;
+    }
+
+    expect(treeCount).toBe(4);
+    expect(rockCount).toBe(2);
+    expect(bushCount).toBe(1);
+    expect(grid.hidesDefaultGroundSprite(2, 3)).toBe(true);
   });
 });

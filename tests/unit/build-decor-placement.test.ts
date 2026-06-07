@@ -299,4 +299,68 @@ describe('Build decor placement (5 coins)', () => {
     expect(grid.isRiverWaterCell(14, 5)).toBe(true);
     expect(build.canPlace(14, 5)).toBe(true);
   });
+
+  it('allows buildings and naturals on path tiles, not farm soil', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const build = new BuildSystem(grid);
+
+    grid.setCell(1, 1, {
+      type: 'path',
+      walkable: true,
+      pathVariant: 'stone_path',
+      object: undefined,
+    });
+
+    const houseItem = BUILD_ITEMS.find((i) => i.label === 'House')!;
+    build.enterBuildMode(houseItem);
+    expect(build.canPlace(1, 1)).toBe(true);
+    expect(build.place(1, 1)).toBe(true);
+    expect(build.findBuildingAt(1, 1)?.type).toBe('house');
+
+    grid.setCell(1, 2, {
+      type: 'path',
+      walkable: true,
+      pathVariant: 'path',
+      object: undefined,
+    });
+    const rockItem = BUILD_ITEMS.find((i) => i.label === 'Rock')!;
+    build.enterBuildMode(rockItem);
+    expect(build.canPlace(1, 2)).toBe(true);
+    expect(build.place(1, 2)).toBe(true);
+    expect(grid.getCell(1, 2)?.object).toBe('rock_01');
+
+    build.enterBuildMode(houseItem);
+    expect(build.canPlace(10, 10)).toBe(false);
+  });
+
+  it('allows grass decor to replace path tiles', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    grid.setCell(3, 3, {
+      type: 'path',
+      walkable: true,
+      pathVariant: 'stone_path',
+      object: undefined,
+    });
+    const build = new BuildSystem(grid);
+    const grassItem = BUILD_ITEMS.find((i) => i.label === 'Grass')!;
+    build.enterBuildMode(grassItem);
+    expect(build.canPlace(3, 3)).toBe(true);
+    expect(build.place(3, 3)).toBe(true);
+    expect(grid.getCell(3, 3)?.type).toBe('grass');
+    expect(grid.getCell(3, 3)?.userGroundDecor).toBe(true);
+  });
+
+  it('does not store pathRotation for non-rotatable path variants', () => {
+    const grid = new GridSystem();
+    grid.generatePlaceholderMap();
+    const build = new BuildSystem(grid);
+    const stoneItem = BUILD_ITEMS.find((i) => i.label === 'Stone path')!;
+    build.enterBuildMode(stoneItem);
+    build.lockPreviewAt(2, 2);
+    build.rotateGhostPath();
+    expect(build.place(2, 2)).toBe(true);
+    expect(grid.getCell(2, 2)?.pathRotation).toBeUndefined();
+  });
 });

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MAP_SCENERY,
   FARM_PLAYER_SPAWN_GX,
   FARM_PLAYER_SPAWN_GY,
   FARM_SOIL_BOUNDS,
@@ -8,6 +9,7 @@ import {
   soilMoistureTextureKey,
   type GroundDecorVariant,
   type PathGroundVariant,
+  type PathTileRotation,
   type TileType,
 } from '../config/gameConfig';
 import {
@@ -56,10 +58,14 @@ export interface TileCell {
   unlocked?: boolean;
   /** Unlocked soil: moisture for empty/dug plots without a crop sprite (0–100) */
   soilWaterLevel?: number;
-  /** Locked soil / outer grass: decorative ground variant (assigned on new game) */
+  /** Locked soil decor or user-built grass decor (Build tab). */
   groundVariant?: GroundDecorVariant;
+  /** True when the player placed this grass decor via Build (not auto backfill). */
+  userGroundDecor?: boolean;
   /** Path tiles: which path texture to draw (defaults to stone_path). */
   pathVariant?: PathGroundVariant;
+  /** Rotatable path tiles (`path`, `road_corner`): 0 / 180 horizontal flip. */
+  pathRotation?: PathTileRotation;
   /** River water with a player-built bridge overlay (type stays `water`). */
   hasBridge?: boolean;
 }
@@ -769,7 +775,7 @@ export class GridSystem {
 
   /**
    * New-game 20×20 map: full buildable grass with an 8×8 farm soil patch.
-   * No pre-placed decor, water, paths, bridges, pens, or map objects — user builds via Build tab.
+   * Sparse trees/rocks on outer grass for polish; no auto grass/flower decor.
    */
   generatePlaceholderMap(): { spawnX: number; spawnY: number } {
     const spawnX = FARM_PLAYER_SPAWN_GX;
@@ -792,7 +798,19 @@ export class GridSystem {
       this.setCell(x, y, { unlocked: true, soilWaterLevel: 0 });
     }
 
+    this.spawnDefaultScenery();
+
     return { spawnX, spawnY };
+  }
+
+  /** Pre-place a few trees/rocks on outer grass (object sprites only; ground stays hidden). */
+  spawnDefaultScenery(): void {
+    for (const [x, y, key] of DEFAULT_MAP_SCENERY) {
+      if (!this.inBounds(x, y)) continue;
+      if (!this.isDefaultOuterGrassCell(x, y)) continue;
+      if (this.getCell(x, y)?.object) continue;
+      this.setObject(x, y, key);
+    }
   }
 
   /** Center cluster of the farm soil patch (matches FARM_SOIL_BOUNDS). */
@@ -807,6 +825,18 @@ export class GridSystem {
   isFarmSoilCell(gx: number, gy: number): boolean {
     const cell = this.getCell(gx, gy);
     return cell?.type === 'soil';
+  }
+
+  /**
+   * Open walkable land for buildings, naturals, and pen footprints.
+   * Grass and path qualify; farm soil, water, and void do not.
+   */
+  isOpenBuildCell(gx: number, gy: number): boolean {
+    if (!this.inBounds(gx, gy)) return false;
+    const cell = this.getCell(gx, gy);
+    if (!cell || !cell.walkable || cell.object) return false;
+    if (cell.type === 'void' || cell.type === 'water' || cell.type === 'soil') return false;
+    return cell.type === 'grass' || cell.type === 'path';
   }
 
   /** River / placed water tile (`type: 'water'`). Used for bridge placement. */
@@ -907,6 +937,7 @@ export class GridSystem {
     if (cell.type === 'water' || cell.type === 'path') return false;
 
     if (cell.type === 'grass') {
+      if (this.isDefaultOuterGrassCell(gx, gy) && !cell.userGroundDecor) return true;
       const variant = cell.groundVariant;
       if (variant && variant !== 'grass') return false;
       return true;
@@ -928,11 +959,15 @@ export class GridSystem {
     return this.hidesDefaultGroundSprite(gx, gy, options);
   }
 
+  /** Plain outer-map grass (buildable fill); excludes farm soil and user-built decor. */
+  isDefaultOuterGrassCell(gx: number, gy: number): boolean {
+    const cell = this.getCell(gx, gy);
+    return cell?.type === 'grass' && !this.isFarmSoilCell(gx, gy);
+  }
+
   /**
-   * All cells that show decorative grass textures:
-   * - outer grass (not water/path, no object)
-   * - locked farm soil (grass appearance via groundVariant)
-   * Excludes unlocked farm soil (farm_plot / moisture textures).
+   * Locked farm soil cells eligible for optional decor backfill on old saves.
+   * Outer grass is excluded — minimal map keeps island art visible until the user builds.
    */
   getGroundDecorEligiblePool(): { x: number; y: number }[] {
     const pool: { x: number; y: number }[] = [];
@@ -940,13 +975,8 @@ export class GridSystem {
       for (let x = 0; x < this.size; x++) {
         const cell = this.getCell(x, y);
         if (!cell || cell.object) continue;
-        if (cell.type === 'water' || cell.type === 'path') continue;
-        if (cell.type === 'soil') {
-          if (this.isFarmUnlocked(x, y)) continue;
-          pool.push({ x, y });
-          continue;
-        }
-        if (cell.type === 'grass') {
+        if (cell.type === 'water' || cell.type === 'path' || cell.type === 'grass') continue;
+        if (cell.type === 'soil' && !this.isFarmUnlocked(x, y)) {
           pool.push({ x, y });
         }
       }
@@ -981,8 +1011,21 @@ export class GridSystem {
     this.applyFarmPathRing();
   }
 
-  /** Backfill decor variants on eligible cells that lack groundVariant (e.g. old saves). */
+  /** Remove auto-assigned decor on outer grass (e.g. saves polluted by old ensureGroundDecor). */
+  stripAutoOuterGrassDecor(): void {
+    for (let y = 0; y < this.size; y++) {
+      for (let x = 0; x < this.size; x++) {
+        if (!this.isDefaultOuterGrassCell(x, y)) continue;
+        const cell = this.getCell(x, y);
+        if (!cell || cell.userGroundDecor || !cell.groundVariant) continue;
+        this.setCell(x, y, { groundVariant: undefined });
+      }
+    }
+  }
+
+  /** Backfill decor variants on locked soil lacking groundVariant (old saves only). */
   ensureGroundDecor(): void {
+    this.stripAutoOuterGrassDecor();
     const open = this.getGroundDecorEligiblePool().filter(
       ({ x, y }) => !this.getCell(x, y)?.groundVariant
     );
@@ -1164,7 +1207,7 @@ export class GridSystem {
     });
   }
 
-  /** On new game: ratio-based decor on every eligible cell (after path/objects). */
+  /** Ratio-based decor on locked soil cells only (not used for minimal new-game maps). */
   assignAllGroundDecorVariants(): void {
     const pool = this.getGroundDecorEligiblePool();
     this.assignGroundDecorVariants(pool, pool.length);

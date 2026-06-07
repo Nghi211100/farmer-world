@@ -2,10 +2,13 @@ import { buildingTextureKey } from '../config/assets';
 import {
   BUILD_DECOR_COST,
   ECONOMY,
+  isPathFlipVariant,
+  isRotatablePathVariant,
   type BuildingData,
   type BuildingType,
   type GroundDecorVariant,
   type PathGroundVariant,
+  type PathTileRotation,
 } from '../config/gameConfig';
 import type { GridSystem } from './GridSystem';
 
@@ -205,13 +208,25 @@ export function isNaturalBuildTexture(textureKey: string): boolean {
   );
 }
 
+export function isRotatableBuildItem(item: BuildItemDef): boolean {
+  return (
+    item.placement === 'ground' &&
+    item.groundTile === 'path' &&
+    isRotatablePathVariant(item.pathVariant)
+  );
+}
+
 export class BuildSystem {
   active = false;
   selectedItem: BuildItemDef | null = null;
   /** Preview snapped to a tile; ghost no longer follows the pointer. */
   previewLocked = false;
+  /** True while press-and-drag moves the build placement ghost. */
+  placeDragging = false;
   ghostX = 0;
   ghostY = 0;
+  /** Preview rotation for rotatable path tiles (path, road_corner). */
+  ghostPathRotation: PathTileRotation = 0;
   private buildings: BuildingData[] = [];
   private onChange?: () => void;
   private placementBlocked?: (gx: number, gy: number) => boolean;
@@ -231,18 +246,57 @@ export class BuildSystem {
     this.active = true;
     this.selectedItem = item;
     this.previewLocked = false;
+    this.placeDragging = false;
+    this.ghostPathRotation = 0;
   }
 
   exitBuildMode(): void {
     this.active = false;
     this.selectedItem = null;
     this.previewLocked = false;
+    this.placeDragging = false;
+    this.ghostPathRotation = 0;
+  }
+
+  startPlaceDrag(): void {
+    if (!this.active) return;
+    this.placeDragging = true;
+    this.previewLocked = false;
+  }
+
+  finishPlaceDrag(): void {
+    if (!this.active) return;
+    this.placeDragging = false;
+    this.previewLocked = true;
+  }
+
+  /** Scan the farm grid for the first cell where the selected item can be placed. */
+  findFirstValidPlacement(): { gx: number; gy: number } | null {
+    for (let gy = 0; gy < this.grid.size; gy++) {
+      for (let gx = 0; gx < this.grid.size; gx++) {
+        if (this.canPlace(gx, gy)) {
+          return { gx, gy };
+        }
+      }
+    }
+    return null;
   }
 
   updateGhost(gx: number, gy: number): void {
-    if (this.previewLocked) return;
+    if (!this.active || (this.previewLocked && !this.placeDragging)) return;
     this.ghostX = gx;
     this.ghostY = gy;
+  }
+
+  isGridOnPlaceGhostFootprint(gx: number, gy: number): boolean {
+    if (!this.selectedItem) return false;
+    const { w, h } = this.selectedItem.footprint;
+    return (
+      gx >= this.ghostX &&
+      gx < this.ghostX + w &&
+      gy >= this.ghostY &&
+      gy < this.ghostY + h
+    );
   }
 
   lockPreviewAt(gx: number, gy: number): void {
@@ -253,6 +307,13 @@ export class BuildSystem {
 
   unlockPreview(): void {
     this.previewLocked = false;
+  }
+
+  /** Toggle horizontal flip for rotatable path tiles (`path`, `road_corner`). */
+  rotateGhostPath(): void {
+    if (!this.selectedItem || !isRotatableBuildItem(this.selectedItem)) return;
+    if (!isPathFlipVariant(this.selectedItem.pathVariant)) return;
+    this.ghostPathRotation = this.ghostPathRotation === 0 ? 180 : 0;
   }
 
   /** Right, down, left, up — first valid neighbor after a placement. */
@@ -281,18 +342,13 @@ export class BuildSystem {
   }
 
   private canPlaceBuilding(gx: number, gy: number): boolean {
-    const cell = this.grid.getCell(gx, gy);
-    if (!cell || !cell.walkable || cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
+    if (!this.grid.isOpenBuildCell(gx, gy)) return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
     return true;
   }
 
   private canPlaceNatural(gx: number, gy: number): boolean {
-    const cell = this.grid.getCell(gx, gy);
-    if (!cell || !cell.walkable || cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
-    if (cell.type === 'soil') return false;
+    if (!this.grid.isOpenBuildCell(gx, gy)) return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
     return true;
   }
@@ -316,7 +372,9 @@ export class BuildSystem {
       return false;
     }
     if (cell.type === 'void' || cell.type === 'grass' || cell.type === 'water') return true;
-    if (cell.type === 'path') return item.groundTile === 'path';
+    if (cell.type === 'path') {
+      return item.groundTile === 'path' || item.groundTile === 'grass';
+    }
     return false;
   }
 
@@ -353,6 +411,7 @@ export class BuildSystem {
         type: 'grass',
         walkable: true,
         groundVariant: item.groundVariant,
+        userGroundDecor: true,
         object: undefined,
       });
       return;
@@ -377,11 +436,15 @@ export class BuildSystem {
       return;
     }
     if (tile === 'path') {
+      const pathVariant = item.pathVariant ?? 'stone_path';
       this.grid.setCell(gx, gy, {
         type: 'path',
         walkable: true,
         groundVariant: undefined,
-        pathVariant: item.pathVariant ?? 'stone_path',
+        pathVariant,
+        pathRotation: isRotatablePathVariant(pathVariant)
+          ? this.ghostPathRotation
+          : undefined,
         object: undefined,
       });
       return;
@@ -398,12 +461,9 @@ export class BuildSystem {
     return this.buildings.find((b) => b.gridX === gx && b.gridY === gy) ?? null;
   }
 
-  /** Empty walkable tile suitable for placing or moving a structure (not water/path). */
+  /** Empty walkable tile suitable for placing or moving a structure (grass or path, not soil/water). */
   canPlaceObjectAt(gx: number, gy: number): boolean {
-    if (!this.grid.inBounds(gx, gy)) return false;
-    const cell = this.grid.getCell(gx, gy);
-    if (!cell || !cell.walkable || cell.object) return false;
-    if (cell.type === 'water' || cell.type === 'path' || cell.type === 'void') return false;
+    if (!this.grid.isOpenBuildCell(gx, gy)) return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
     return true;
   }

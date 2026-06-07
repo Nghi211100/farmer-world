@@ -246,9 +246,7 @@ export class LivestockSystem {
       if (this.placementBlocked?.(gx, gy)) return false;
       return true;
     }
-    if (!cell.walkable) return false;
-    if (cell.object) return false;
-    if (cell.type === 'void' || cell.type === 'water' || cell.type === 'soil') return false;
+    if (!this.grid.isOpenBuildCell(gx, gy)) return false;
     if (this.placementBlocked?.(gx, gy)) return false;
     return true;
   }

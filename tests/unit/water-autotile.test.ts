@@ -496,6 +496,19 @@ describe('water autotile', () => {
       walkable: false,
       object: undefined,
     });
+    // Diagonal insets only fire on grass/path; keep cliff void like the old minimal map.
+    for (const [dx, dy] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ] as const) {
+      grid.setCell(waterNorth.gx + dx, waterNorth.gy + dy, {
+        type: 'void',
+        walkable: false,
+        object: undefined,
+      });
+    }
     grid.setCell(bridgeSouth.gx, bridgeSouth.gy, {
       type: 'path',
       walkable: true,

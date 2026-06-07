@@ -815,7 +815,12 @@ export class FarmScene extends Phaser.Scene {
       spr.setVisible(false);
       return;
     }
-    if (this.grid.hidesGroundForFarmIsland(gx, gy)) {
+    if (
+      this.grid.hidesDefaultGroundSprite(gx, gy, {
+        farmPlotGround: this.farming.showsFarmPlotGround(gx, gy),
+        dug: this.farming.showsSoilMoistureGround(gx, gy),
+      })
+    ) {
       spr.setVisible(false);
       return;
     }
@@ -895,7 +900,12 @@ export class FarmScene extends Phaser.Scene {
       spr.setVisible(false);
       return;
     }
-    if (this.grid.hidesGroundForFarmIsland(gx, gy)) {
+    if (
+      this.grid.hidesDefaultGroundSprite(gx, gy, {
+        farmPlotGround: this.farming.showsFarmPlotGround(gx, gy),
+        dug: this.farming.showsSoilMoistureGround(gx, gy),
+      })
+    ) {
       spr.setVisible(false);
       return;
     }

@@ -3,7 +3,7 @@ import { FARM_SOIL_BOUNDS } from '../../src/config/gameConfig';
 import { GridSystem } from '../../src/systems/GridSystem';
 
 describe('minimal placeholder map', () => {
-  it('keeps only farm soil and void elsewhere', () => {
+  it('keeps buildable grass with farm soil patch and no pre-placed items', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
 
@@ -42,13 +42,16 @@ describe('minimal placeholder map', () => {
     const soilTiles =
       (FARM_SOIL_BOUNDS.maxX - FARM_SOIL_BOUNDS.minX + 1) *
       (FARM_SOIL_BOUNDS.maxY - FARM_SOIL_BOUNDS.minY + 1);
+    const mapCells = grid.size * grid.size;
 
     expect(soilCount).toBe(soilTiles);
+    expect(grassCount).toBe(mapCells - soilCount);
     expect(waterCount).toBe(0);
-    expect(grassCount).toBe(0);
     expect(pathCount).toBe(0);
     expect(objectCount).toBe(0);
-    expect(voidCount).toBe(grid.size * grid.size - soilCount);
+    expect(voidCount).toBe(0);
     expect(grid.getCell(10, 10)?.type).toBe('soil');
+    expect(grid.getCell(2, 2)?.type).toBe('grass');
+    expect(grid.getCell(2, 2)?.walkable).toBe(true);
   });
 });

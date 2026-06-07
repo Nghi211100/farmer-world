@@ -87,6 +87,9 @@ export interface GroundTextureOptions {
   waterPlacementPreview?: boolean;
 }
 
+/** Options for {@link GridSystem.hidesDefaultGroundSprite} (subset of ground texture flags). */
+export type GroundHideOptions = Pick<GroundTextureOptions, 'farmPlotGround' | 'dug'>;
+
 export class GridSystem {
   readonly size = GRID_SIZE;
   readonly tileWidth = TILE_WIDTH;
@@ -764,14 +767,17 @@ export class GridSystem {
     return isoDepth(maxTileSum, 0, 0) + 20;
   }
 
-  /** Minimal 20×20 map: farm soil patch only; void elsewhere (paths/decor from Build). */
+  /**
+   * New-game 20×20 map: full buildable grass with an 8×8 farm soil patch.
+   * No pre-placed decor, water, paths, bridges, pens, or map objects — user builds via Build tab.
+   */
   generatePlaceholderMap(): { spawnX: number; spawnY: number } {
     const spawnX = FARM_PLAYER_SPAWN_GX;
     const spawnY = FARM_PLAYER_SPAWN_GY;
 
     for (let y = 0; y < this.size; y++) {
       for (let x = 0; x < this.size; x++) {
-        this.cells[y][x] = { type: 'void', walkable: false };
+        this.cells[y][x] = { type: 'grass', walkable: true };
       }
     }
 
@@ -890,11 +896,36 @@ export class GridSystem {
   }
 
   /**
-   * Farm land (soil, path ring, water) always draws ground tiles above island.png.
-   * Island art is only visible in the moat/margin where no ground sprites exist.
+   * Default outer-map grass skips per-tile ground sprites so island.png and ui_background
+   * show through. Farm soil (FARM_SOIL_BOUNDS) always keeps ground tiles so the planting
+   * patch reads as land. User-placed path/water/decor still render.
    */
-  hidesGroundForFarmIsland(_gx: number, _gy: number): boolean {
+  hidesDefaultGroundSprite(gx: number, gy: number, options?: GroundHideOptions): boolean {
+    const cell = this.getCell(gx, gy);
+    if (!cell) return true;
+
+    if (cell.type === 'water' || cell.type === 'path') return false;
+
+    if (cell.type === 'grass') {
+      const variant = cell.groundVariant;
+      if (variant && variant !== 'grass') return false;
+      return true;
+    }
+
+    if (cell.type === 'soil') {
+      if (options?.farmPlotGround || options?.dug) return false;
+      if (this.isFarmSoilCell(gx, gy)) return false;
+      return true;
+    }
+
+    if (cell.type === 'void') return true;
+
     return false;
+  }
+
+  /** @deprecated Use {@link hidesDefaultGroundSprite} — kept for call sites. */
+  hidesGroundForFarmIsland(gx: number, gy: number, options?: GroundHideOptions): boolean {
+    return this.hidesDefaultGroundSprite(gx, gy, options);
   }
 
   /**

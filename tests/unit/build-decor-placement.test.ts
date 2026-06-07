@@ -26,7 +26,7 @@ describe('Build decor placement (5 coins)', () => {
     ]);
   });
 
-  it('places grass on void and rock as natural object', () => {
+  it('places grass on open land and rock as natural object', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const build = new BuildSystem(grid);
@@ -107,7 +107,7 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.place(13, 10)).toBe(true);
   });
 
-  it('blocks bridge on void, soil, path; grass beside duck pen stays buildable', () => {
+  it('blocks bridge on bare grass, soil, path; grass beside duck pen stays buildable', () => {
     const grid = new GridSystem();
     grid.generatePlaceholderMap();
     const build = new BuildSystem(grid);
@@ -123,17 +123,9 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.canPlace(2, 2)).toBe(false);
     const soil = grid.getSoilTileCoords()[0]!;
     expect(build.canPlace(soil.x, soil.y)).toBe(false);
-    const voidBesideSoil = { x: 3, y: 5 };
-    expect(grid.getCell(voidBesideSoil.x, voidBesideSoil.y)?.type).toBe('void');
-    expect(build.canPlace(voidBesideSoil.x, voidBesideSoil.y)).toBe(false);
-
-    for (let y = 0; y < grid.size; y++) {
-      for (let x = 0; x < grid.size; x++) {
-        if (grid.getCell(x, y)?.type === 'void') {
-          grid.setCell(x, y, { type: 'grass', walkable: true, object: undefined });
-        }
-      }
-    }
+    const grassBesideSoil = { x: 3, y: 5 };
+    expect(grid.getCell(grassBesideSoil.x, grassBesideSoil.y)?.type).toBe('grass');
+    expect(build.canPlace(grassBesideSoil.x, grassBesideSoil.y)).toBe(false);
     for (let dy = -1; dy <= 3; dy++) {
       for (let dx = -1; dx <= 3; dx++) {
         grid.setCell(8 + dx, 8 + dy, { type: 'grass', walkable: true, object: undefined });

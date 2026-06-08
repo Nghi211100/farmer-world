@@ -6,6 +6,7 @@ import {
   GRID_SIZE,
   GROUND_DECOR_MIX,
   INITIAL_UNLOCKED_FARM_TILES,
+  roadCornerTextureKey,
   soilMoistureTextureKey,
   type GroundDecorVariant,
   type PathGroundVariant,
@@ -64,7 +65,7 @@ export interface TileCell {
   userGroundDecor?: boolean;
   /** Path tiles: which path texture to draw (defaults to stone_path). */
   pathVariant?: PathGroundVariant;
-  /** Rotatable path tiles (`path`, `road_corner`): 0 / 180 horizontal flip. */
+  /** Rotatable path tiles: `path` 0/180 flipX; `road_corner` 0/90/180/270 texture + flip. */
   pathRotation?: PathTileRotation;
   /** River water with a player-built bridge overlay (type stays `water`). */
   hasBridge?: boolean;
@@ -862,7 +863,7 @@ export class GridSystem {
 
     if (cell.type === 'path') {
       const variant = cell.pathVariant ?? 'stone_path';
-      if (variant === 'bridge_tile' || variant === 'stone_path' || variant === 'field_border') {
+      if (variant === 'bridge_tile' || variant === 'stone_path') {
         return false;
       }
       return (
@@ -1009,6 +1010,27 @@ export class GridSystem {
   /** Backfill path ring on saves created before path tiles existed. */
   ensureFarmPathRing(): void {
     this.applyFarmPathRing();
+  }
+
+  /** Convert legacy field-border path tiles to placed objects (pre-object model). */
+  migrateFieldBorderPathTiles(): void {
+    for (let y = 0; y < this.size; y++) {
+      for (let x = 0; x < this.size; x++) {
+        const cell = this.getCell(x, y);
+        if (cell?.type !== 'path' || (cell.pathVariant as string | undefined) !== 'field_border') {
+          continue;
+        }
+        this.setCell(x, y, {
+          type: 'grass',
+          walkable: true,
+          groundVariant: undefined,
+          pathVariant: undefined,
+          pathRotation: undefined,
+          object: undefined,
+        });
+        this.setObject(x, y, 'field_border');
+      }
+    }
   }
 
   /** Remove auto-assigned decor on outer grass (e.g. saves polluted by old ensureGroundDecor). */
@@ -1265,7 +1287,13 @@ export class GridSystem {
         : baseProbe;
       return waterTextureKeyAt(gx, gy, probe, this.getWaterDiagonalContext());
     }
-    if (cell.type === 'path') return cell.pathVariant ?? 'stone_path';
+    if (cell.type === 'path') {
+      const variant = cell.pathVariant ?? 'stone_path';
+      if (variant === 'road_corner') {
+        return roadCornerTextureKey(cell.pathRotation);
+      }
+      return variant;
+    }
     if (cell.type === 'soil') {
       if (!this.isFarmUnlocked(gx, gy)) {
         return cell.groundVariant ?? 'grass';

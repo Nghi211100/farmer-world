@@ -81,12 +81,12 @@ export type PathGroundVariant =
   | 'stone_path'
   | 'path'
   | 'road_corner'
-  | 'field_border'
   | 'bridge_tile';
 
 /**
- * Rotatable path tile orientation.
- * - `path` / `road_corner`: 0 = normal, 180 = horizontal flip (not angle).
+ * Rotatable path tile orientation (sprite angle stays 0; flips select the variant).
+ * - `path`: 0 = normal, 180 = horizontal flip (`flipX`).
+ * - `road_corner`: 0/180 on `road_corner` (+ `flipX` at 180); 90 on `road_corner_up`; 270 on `road_corner_down`.
  */
 export type PathTileRotation = 0 | 90 | 180 | 270;
 
@@ -98,19 +98,48 @@ export function isRotatablePathVariant(
 
 export function isPathFlipVariant(
   variant: PathGroundVariant | undefined
-): variant is 'path' | 'road_corner' {
-  return variant === 'path' || variant === 'road_corner';
+): variant is 'path' {
+  return variant === 'path';
 }
 
-/** Flip variants store 180 when horizontally flipped. */
+/** `road_corner` texture for a stored rotation (horizontal vs vertical art). */
+export function roadCornerTextureKey(rotation: PathTileRotation | undefined): string {
+  const r = rotation ?? 0;
+  if (r === 90) return 'road_corner_up';
+  if (r === 270) return 'road_corner_down';
+  return 'road_corner';
+}
+
+/** `road_corner` flip flags for a stored rotation. */
+export function roadCornerFlip(rotation: PathTileRotation | undefined): {
+  flipX: boolean;
+  flipY: boolean;
+} {
+  const r = rotation ?? 0;
+  return {
+    flipX: r === 180,
+    flipY: false,
+  };
+}
+
+export function pathTileFlip(
+  variant: PathGroundVariant | undefined,
+  rotation: PathTileRotation | undefined
+): { flipX: boolean; flipY: boolean } {
+  if (variant === 'road_corner') return roadCornerFlip(rotation);
+  if (variant === 'path') return { flipX: rotation === 180, flipY: false };
+  return { flipX: false, flipY: false };
+}
+
+/** Horizontal flip for rotatable path tiles (`path`: 180; `road_corner`: 180). */
 export function pathTileIsFlipped(
   variant: PathGroundVariant | undefined,
   rotation: PathTileRotation | undefined
 ): boolean {
-  return isPathFlipVariant(variant) && rotation === 180;
+  return pathTileFlip(variant, rotation).flipX;
 }
 
-/** Flip variants stay at 0° and use flipX instead of angle. */
+/** Rotatable path tiles stay at 0° and use texture + flip instead of angle. */
 export function pathTileAngle(
   _variant: PathGroundVariant | undefined,
   _rotation: PathTileRotation | undefined

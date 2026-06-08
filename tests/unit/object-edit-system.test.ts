@@ -22,6 +22,40 @@ describe('ObjectEditSystem', () => {
     expect(edit.findEditableAt(2, 2)?.kind).toBe('building');
   });
 
+  it('finds naturals on path tiles (field border on farm path ring)', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    grid.setCell(3, 5, {
+      type: 'path',
+      walkable: true,
+      pathVariant: 'stone_path',
+      object: undefined,
+    });
+    grid.setObject(3, 5, 'field_border');
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
+
+    const found = edit.findEditableAt(3, 5);
+    expect(found?.kind).toBe('natural');
+    if (found?.kind === 'natural') {
+      expect(found.textureKey).toBe('field_border');
+    }
+  });
+
+  it('finds rocks placed on path tiles', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    grid.setCell(1, 2, {
+      type: 'path',
+      walkable: true,
+      pathVariant: 'path',
+      object: undefined,
+    });
+    grid.setObject(1, 2, 'rock_01');
+    const edit = new ObjectEditSystem(grid, new BuildSystem(grid));
+
+    expect(edit.findEditableAt(1, 2)?.kind).toBe('natural');
+  });
+
   it('does not treat locked soil objects as editable', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();

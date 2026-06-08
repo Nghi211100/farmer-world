@@ -2,7 +2,6 @@ import { buildingTextureKey } from '../config/assets';
 import {
   BUILD_DECOR_COST,
   ECONOMY,
-  isPathFlipVariant,
   isRotatablePathVariant,
   type BuildingData,
   type BuildingType,
@@ -10,6 +9,7 @@ import {
   type PathGroundVariant,
   type PathTileRotation,
 } from '../config/gameConfig';
+import { findNearestValidGridPlacement, type GridPoint } from '../utils/placementSearch';
 import type { GridSystem } from './GridSystem';
 
 export type BuildItemType = BuildingType;
@@ -28,7 +28,7 @@ export interface BuildItemDef {
   groundTile?: 'grass' | 'water' | 'path' | 'bridge';
   groundVariant?: GroundDecorVariant;
   pathVariant?: PathGroundVariant;
-  /** Field border: must be adjacent to farm soil, not on soil. */
+  /** Natural decor (field border): must be adjacent to farm soil, not on soil. */
   requireAdjacentFarmSoil?: boolean;
   /** When set, card is locked until player level reaches this value. */
   requiredLevel?: number;
@@ -105,9 +105,7 @@ export const BUILD_ITEMS: BuildItemDef[] = [
     cost: DECOR,
     footprint: { w: 1, h: 1 },
     category: 'decor',
-    placement: 'ground',
-    groundTile: 'path',
-    pathVariant: 'field_border',
+    placement: 'natural',
     requireAdjacentFarmSoil: true,
   },
   {
@@ -204,8 +202,14 @@ export function isNaturalBuildTexture(textureKey: string): boolean {
   return (
     textureKey.startsWith('tree_') ||
     textureKey.startsWith('rock_') ||
-    textureKey.startsWith('bush_')
+    textureKey.startsWith('bush_') ||
+    textureKey === 'field_border'
   );
+}
+
+/** Iso-tile art placed on the object layer (field border fence). */
+export function isIsoTileDecorObject(textureKey: string): boolean {
+  return textureKey === 'field_border';
 }
 
 export function isRotatableBuildItem(item: BuildItemDef): boolean {
@@ -270,16 +274,13 @@ export class BuildSystem {
     this.previewLocked = true;
   }
 
-  /** Scan the farm grid for the first cell where the selected item can be placed. */
-  findFirstValidPlacement(): { gx: number; gy: number } | null {
-    for (let gy = 0; gy < this.grid.size; gy++) {
-      for (let gx = 0; gx < this.grid.size; gx++) {
-        if (this.canPlace(gx, gy)) {
-          return { gx, gy };
-        }
-      }
-    }
-    return null;
+  /**
+   * Scan the farm grid for a valid placement anchor nearest to `near` (Manhattan on grid).
+   * When `near` is omitted, uses the map center as the reference.
+   */
+  findFirstValidPlacement(near?: GridPoint): { gx: number; gy: number } | null {
+    const ref = near ?? { gx: Math.floor(this.grid.size / 2), gy: Math.floor(this.grid.size / 2) };
+    return findNearestValidGridPlacement(this.grid.size, ref, (gx, gy) => this.canPlace(gx, gy));
   }
 
   updateGhost(gx: number, gy: number): void {
@@ -309,11 +310,19 @@ export class BuildSystem {
     this.previewLocked = false;
   }
 
-  /** Toggle horizontal flip for rotatable path tiles (`path`, `road_corner`). */
+  /** Cycle path rotation: `path` toggles 0↔180; `road_corner` cycles 0→90→180→270→0. */
   rotateGhostPath(): void {
     if (!this.selectedItem || !isRotatableBuildItem(this.selectedItem)) return;
-    if (!isPathFlipVariant(this.selectedItem.pathVariant)) return;
-    this.ghostPathRotation = this.ghostPathRotation === 0 ? 180 : 0;
+    const variant = this.selectedItem.pathVariant;
+    if (variant === 'road_corner') {
+      const cycle: PathTileRotation[] = [0, 90, 180, 270];
+      const idx = cycle.indexOf(this.ghostPathRotation);
+      this.ghostPathRotation = cycle[(idx < 0 ? 0 : idx + 1) % cycle.length];
+      return;
+    }
+    if (variant === 'path') {
+      this.ghostPathRotation = this.ghostPathRotation === 0 ? 180 : 0;
+    }
   }
 
   /** Right, down, left, up — first valid neighbor after a placement. */
@@ -350,6 +359,12 @@ export class BuildSystem {
   private canPlaceNatural(gx: number, gy: number): boolean {
     if (!this.grid.isOpenBuildCell(gx, gy)) return false;
     if (this.buildings.some((b) => b.gridX === gx && b.gridY === gy)) return false;
+    const item = this.selectedItem;
+    if (item?.requireAdjacentFarmSoil) {
+      if (this.grid.isFarmSoilCell(gx, gy) || !this.grid.isAdjacentToFarmSoil(gx, gy)) {
+        return false;
+      }
+    }
     return true;
   }
 

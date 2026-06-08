@@ -45,6 +45,64 @@ export const BRIDGE_GROUND_BASE_DISPLAY_SCALE = 1.05;
 export const BRIDGE_TILE_DISPLAY_SCALE_X = 1.05;
 export const BRIDGE_TILE_DISPLAY_SCALE_Y = 1.2;
 
+/** Field border fence on the object layer — taller than standard iso tile seam scale. */
+export const FIELD_BORDER_SCALE_Y_OFFSET = 0.1;
+
+/** Vertical road corner art (`road_corner_up` / `road_corner_down`). */
+export const ROAD_CORNER_UP_TEXTURE_KEY = 'road_corner_up';
+export const ROAD_CORNER_DOWN_TEXTURE_KEY = 'road_corner_down';
+export const ROAD_CORNER_VERTICAL_SCALE_X_OFFSET = -0.05;
+/** Extra horizontal scale for `road_corner_down` only (on top of shared vertical offset). */
+export const ROAD_CORNER_DOWN_SCALE_X_OFFSET = 0.05;
+export const ROAD_CORNER_VERTICAL_SCALE_Y_OFFSET = 0.07;
+/** Shift vertical road corners up (fraction of rendered tile height; negative = toward top). */
+export const ROAD_CORNER_VERTICAL_OFFSET_Y = -0.01;
+
+export function isRoadCornerVerticalTextureKey(textureKey: string): boolean {
+  return (
+    textureKey === ROAD_CORNER_UP_TEXTURE_KEY || textureKey === ROAD_CORNER_DOWN_TEXTURE_KEY
+  );
+}
+
+/** Horizontal display scale for path ground tiles; vertical road corners are narrower. */
+export function getRoadCornerVerticalDisplayScaleX(
+  textureKey: string,
+  displayScale = GROUND_TILE_SEAM_SCALE
+): number {
+  if (!isRoadCornerVerticalTextureKey(textureKey)) {
+    return displayScale;
+  }
+  let scaleX = displayScale + ROAD_CORNER_VERTICAL_SCALE_X_OFFSET;
+  if (textureKey === ROAD_CORNER_DOWN_TEXTURE_KEY) {
+    scaleX += ROAD_CORNER_DOWN_SCALE_X_OFFSET;
+  }
+  return scaleX;
+}
+
+/** Vertical display scale for path ground tiles; vertical road corners are taller. */
+export function getRoadCornerVerticalDisplayScaleY(
+  textureKey: string,
+  displayScale = GROUND_TILE_SEAM_SCALE
+): number {
+  return isRoadCornerVerticalTextureKey(textureKey)
+    ? displayScale + ROAD_CORNER_VERTICAL_SCALE_Y_OFFSET
+    : displayScale;
+}
+
+/** Screen-space nudge for vertical road corner path ground tiles. */
+export function getRoadCornerVerticalDisplayOffset(
+  textureKey: string,
+  displayScale = GROUND_TILE_SEAM_SCALE
+): BridgeTileDisplayOffset {
+  if (!isRoadCornerVerticalTextureKey(textureKey)) {
+    return { dx: 0, dy: 0 };
+  }
+  return {
+    dx: 0,
+    dy: ROAD_CORNER_VERTICAL_OFFSET_Y * TILE_HEIGHT * displayScale,
+  };
+}
+
 /** Face-to-face water shore tiles — horizontal scale = uniform iso scale − 0.15 (1.0 → 0.85). */
 export const WATER_FACE_TO_FACE_DISPLAY_SCALE_X = 0.85;
 export const WATER_FACE_TO_FACE_LEFT_TEXTURE_KEY = 'water_2_borders_face_to_face_left';
@@ -300,6 +358,45 @@ export function applyIsoTileSprite(
   }
   sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
   sprite.setDisplaySize(TILE_WIDTH * displayScale, TILE_HEIGHT * displayScale);
+}
+
+/** Vertical display scale for field border fence (`field_border`). */
+export function getFieldBorderDisplayScaleY(
+  displayScale = GROUND_TILE_SEAM_SCALE
+): number {
+  return displayScale + FIELD_BORDER_SCALE_Y_OFFSET;
+}
+
+/** Field border at diamond top; scaleY uses {@link FIELD_BORDER_SCALE_Y_OFFSET}. */
+export function applyIsoFieldBorderSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = GROUND_TILE_SEAM_SCALE
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  const scaleY = getFieldBorderDisplayScaleY(displayScale);
+  sprite.setDisplaySize(TILE_WIDTH * displayScale, TILE_HEIGHT * scaleY);
+}
+
+/** Path / road ground tile at diamond top; vertical road corners use custom scaleX/scaleY. */
+export function applyIsoPathGroundSprite(
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image,
+  displayScale = 1,
+  textureKey?: string
+): void {
+  if ('resetCrop' in sprite && typeof sprite.resetCrop === 'function') {
+    sprite.resetCrop();
+  }
+  sprite.setOrigin(ISO_TILE_ORIGIN.x, ISO_TILE_ORIGIN.y);
+  const scaleX = textureKey
+    ? getRoadCornerVerticalDisplayScaleX(textureKey, displayScale)
+    : displayScale;
+  const scaleY = textureKey
+    ? getRoadCornerVerticalDisplayScaleY(textureKey, displayScale)
+    : displayScale;
+  sprite.setDisplaySize(TILE_WIDTH * scaleX, TILE_HEIGHT * scaleY);
 }
 
 /** Bridge tile at diamond top; width uses {@link BRIDGE_TILE_DISPLAY_SCALE_X}; height matches ground seam scale. */

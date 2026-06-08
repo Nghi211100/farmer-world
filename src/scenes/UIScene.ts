@@ -65,12 +65,12 @@ export class UIScene extends Phaser.Scene {
 
     this.buildPanel.setOnSelect((item) => {
       const farm = this.scene.get('FarmScene');
+      this.buildPanel.hide();
       if ('placeTarget' in item) {
         farm.events.emit('livestock-pen-place', item);
       } else {
         farm.events.emit('build-select', item);
       }
-      this.buildPanel.hide();
     });
 
     this.plantPanel.setOnSelect((seedId) => {
@@ -162,7 +162,7 @@ export class UIScene extends Phaser.Scene {
       if (this.gameRefs) this.upgradePanel.show(building, this.gameRefs.economy);
     });
     farm.events.on('cancel-build-mode', () => {
-      this.buildPanel.hide();
+      this.buildPanel.clearPlacingItem();
     });
 
     // FarmScene emits register-game in create() before this scene's listeners exist.

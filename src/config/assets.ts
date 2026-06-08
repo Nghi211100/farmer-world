@@ -53,6 +53,20 @@ export const ASSET_MANIFEST: AssetEntry[] = [
   { key: 'stone_path', path: 'tiles/stone_path.png', placeholderColor: 0x9e9e9e, width: 64, height: 32 },
   { key: 'path', path: 'tiles/path.png', placeholderColor: 0x8d6e63, width: 64, height: 32 },
   { key: 'road_corner', path: 'tiles/road_corner.png', placeholderColor: 0x757575, width: 64, height: 32 },
+  {
+    key: 'road_corner_up',
+    path: 'tiles/road_corner_up.png',
+    placeholderColor: 0x757575,
+    width: 64,
+    height: 32,
+  },
+  {
+    key: 'road_corner_down',
+    path: 'tiles/road_corner_down.png',
+    placeholderColor: 0x757575,
+    width: 64,
+    height: 32,
+  },
   { key: 'bridge_tile', path: 'tiles/bridge_tile.png', placeholderColor: 0x795548, width: 64, height: 32 },
   { key: 'water', path: 'tiles/water.png', placeholderColor: 0x3498db, width: 64, height: 32 },
   {

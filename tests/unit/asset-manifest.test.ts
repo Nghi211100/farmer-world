@@ -56,6 +56,8 @@ describe('asset manifest bundling', () => {
     const expected = [
       ['path', 'tiles/path.png'],
       ['road_corner', 'tiles/road_corner.png'],
+      ['road_corner_up', 'tiles/road_corner_up.png'],
+      ['road_corner_down', 'tiles/road_corner_down.png'],
       ['bridge_tile', 'tiles/bridge_tile.png'],
       ['field_border', 'tiles/field_border.png'],
     ] as const;

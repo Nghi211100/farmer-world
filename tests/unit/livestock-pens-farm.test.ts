@@ -90,6 +90,28 @@ describe('LivestockSystem — player-placed pens', () => {
     }
   });
 
+  it('findFirstValidPenPlacement picks valid pen nearest to reference', () => {
+    const { grid, livestock } = emptyFarm();
+    const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;
+    livestock.enterPlaceMode(item);
+    const near = { gx: 14, gy: 13 };
+    const spot = livestock.findFirstValidPenPlacement('chicken', 1, near);
+    expect(spot).not.toBeNull();
+    if (!spot) return;
+    expect(livestock.canPlace(spot.gx, spot.gy)).toBe(true);
+
+    let bestDist = Infinity;
+    for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        if (!livestock.canPlace(gx, gy)) continue;
+        const dist = Math.abs(gx - near.gx) + Math.abs(gy - near.gy);
+        bestDist = Math.min(bestDist, dist);
+      }
+    }
+    const pickedDist = Math.abs(spot.gx - near.gx) + Math.abs(spot.gy - near.gy);
+    expect(pickedDist).toBe(bestDist);
+  });
+
   it('findFirstValidPenPlacement returns null when no 3×3 grass fits', () => {
     const { grid, livestock } = emptyFarm(false);
     const item = LIVESTOCK_PEN_PLACE_ITEMS.find((i) => i.placeTarget === 'chicken')!;

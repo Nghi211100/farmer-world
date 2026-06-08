@@ -43,7 +43,7 @@ export class ObjectEditSystem {
     if (building) return { kind: 'building', building };
     const cell = this.grid.getCell(gx, gy);
     if (!cell?.object) return null;
-    if (cell.type === 'water' || cell.type === 'path') return null;
+    if (cell.type === 'water') return null;
     if (this.grid.isLockedSoil(gx, gy)) return null;
     return { kind: 'natural', textureKey: cell.object };
   }

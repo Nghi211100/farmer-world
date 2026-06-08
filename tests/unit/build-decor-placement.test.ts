@@ -56,8 +56,10 @@ describe('Build decor placement (5 coins)', () => {
     expect(build.canPlace(2, 2)).toBe(false);
     expect(build.canPlace(3, 5)).toBe(true);
     expect(build.place(3, 5)).toBe(true);
-    expect(grid.getCell(3, 5)?.type).toBe('path');
-    expect(grid.getCell(3, 5)?.pathVariant).toBe('field_border');
+    const cell = grid.getCell(3, 5);
+    expect(cell?.type).toBe('grass');
+    expect(cell?.object).toBe('field_border');
+    expect(cell?.walkable).toBe(false);
   });
 
   it('autotiles water with top-right border when land is to the north', () => {

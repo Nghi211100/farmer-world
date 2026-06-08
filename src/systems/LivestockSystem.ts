@@ -15,6 +15,7 @@ import {
   clearLegacyPenMoatWater,
   type LivestockPenLevel,
 } from '../config/livestockAssets';
+import { findNearestValidGridPlacement, type GridPoint } from '../utils/placementSearch';
 import type { GridSystem } from './GridSystem';
 import {
   canCollectFromPen,
@@ -133,23 +134,20 @@ export class LivestockSystem {
   }
 
   /**
-   * Scan the farm grid for the first anchor where a pen footprint fits
-   * (grass/walkable, not soil/water, not blocked by pens/buildings).
+   * Scan the farm grid for a pen anchor nearest to `near` (Manhattan on grid).
+   * Grass/walkable, not soil/water, not blocked by pens/buildings.
    * Level-1 anchors must also have a clear 4×4 upgrade ring.
    */
   findFirstValidPenPlacement(
     _placeTarget: LivestockPenPlaceTarget,
-    level: number = 1
+    level: number = 1,
+    near?: GridPoint
   ): { gx: number; gy: number } | null {
     const penLevel = level as LivestockPenLevel;
-    for (let gy = 0; gy < this.grid.size; gy++) {
-      for (let gx = 0; gx < this.grid.size; gx++) {
-        if (this.canPlacePenAt(gx, gy, penLevel)) {
-          return { gx, gy };
-        }
-      }
-    }
-    return null;
+    const ref = near ?? { gx: Math.floor(this.grid.size / 2), gy: Math.floor(this.grid.size / 2) };
+    return findNearestValidGridPlacement(this.grid.size, ref, (gx, gy) =>
+      this.canPlacePenAt(gx, gy, penLevel)
+    );
   }
 
   lockPreviewAt(gx: number, gy: number): void {
@@ -342,7 +340,11 @@ export class LivestockSystem {
         if (objectId.startsWith('tree_') || objectId === 'tree_01' || objectId === 'tree_02') {
           return 'Vùng 4×4 bị chặn — gỡ cây/đá quanh chuồng';
         }
-        if (objectId.startsWith('rock_') || objectId.startsWith('bush_')) {
+        if (
+          objectId === 'field_border' ||
+          objectId.startsWith('rock_') ||
+          objectId.startsWith('bush_')
+        ) {
           return 'Vùng 4×4 bị chặn — gỡ đá/bụi cây quanh chuồng';
         }
         return 'Vùng 4×4 bị chặn — dọn ô trống quanh chuồng';

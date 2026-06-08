@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   pathTileAngle,
+  pathTileFlip,
   pathTileIsFlipped,
+  roadCornerFlip,
+  roadCornerTextureKey,
 } from '../../src/config/gameConfig';
 import { BUILD_ITEMS, BuildSystem, isRotatableBuildItem } from '../../src/systems/BuildSystem';
 import { GridSystem } from '../../src/systems/GridSystem';
@@ -42,6 +45,31 @@ describe('BuildSystem placement preview', () => {
     expect(build.ghostY).toBe(spot!.gy + 1);
     build.finishPlaceDrag();
     expect(build.previewLocked).toBe(true);
+  });
+
+  it('findFirstValidPlacement picks valid cell nearest to reference', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    const build = new BuildSystem(grid);
+    const item = BUILD_ITEMS.find((i) => i.label === 'Grass')!;
+
+    build.enterBuildMode(item);
+    const near = { gx: 12, gy: 11 };
+    const spot = build.findFirstValidPlacement(near);
+    expect(spot).not.toBeNull();
+    if (!spot) return;
+    expect(build.canPlace(spot.gx, spot.gy)).toBe(true);
+
+    let bestDist = Infinity;
+    for (let gy = 0; gy < grid.size; gy++) {
+      for (let gx = 0; gx < grid.size; gx++) {
+        if (!build.canPlace(gx, gy)) continue;
+        const dist = Math.abs(gx - near.gx) + Math.abs(gy - near.gy);
+        bestDist = Math.min(bestDist, dist);
+      }
+    }
+    const pickedDist = Math.abs(spot.gx - near.gx) + Math.abs(spot.gy - near.gy);
+    expect(pickedDist).toBe(bestDist);
   });
 
   it('findFirstValidPlacement returns null when no cell fits', () => {
@@ -118,7 +146,7 @@ describe('BuildSystem placement preview', () => {
     expect(afterPlace).toEqual({ gx: origin.gx + 1, gy: origin.gy });
   });
 
-  it('rotateGhostPath toggles flip for path and road_corner', () => {
+  it('rotateGhostPath toggles path 0↔180 and cycles road_corner 0→90→180→270', () => {
     const grid = new GridSystem(20);
     grid.generatePlaceholderMap();
     const build = new BuildSystem(grid);
@@ -140,7 +168,11 @@ describe('BuildSystem placement preview', () => {
     build.enterBuildMode(cornerItem);
     expect(build.ghostPathRotation).toBe(0);
     build.rotateGhostPath();
+    expect(build.ghostPathRotation).toBe(90);
+    build.rotateGhostPath();
     expect(build.ghostPathRotation).toBe(180);
+    build.rotateGhostPath();
+    expect(build.ghostPathRotation).toBe(270);
     build.rotateGhostPath();
     expect(build.ghostPathRotation).toBe(0);
 
@@ -190,6 +222,7 @@ describe('BuildSystem placement preview', () => {
     build.enterBuildMode(cornerItem);
     build.lockPreviewAt(5, 4);
     build.rotateGhostPath();
+    build.rotateGhostPath();
     expect(build.place(5, 4)).toBe(true);
     expect(grid.getCell(5, 4)).toMatchObject({
       type: 'path',
@@ -200,17 +233,43 @@ describe('BuildSystem placement preview', () => {
 });
 
 describe('path tile orientation helpers', () => {
-  it('path and road_corner use flip (180) not angle', () => {
+  it('path uses flipX at 180 only', () => {
     expect(pathTileAngle('path', 0)).toBe(0);
     expect(pathTileAngle('path', 180)).toBe(0);
     expect(pathTileIsFlipped('path', 0)).toBe(false);
     expect(pathTileIsFlipped('path', 180)).toBe(true);
-    expect(pathTileIsFlipped('path', 90)).toBe(false);
+    expect(pathTileFlip('path', 180)).toEqual({ flipX: true, flipY: false });
+  });
 
-    expect(pathTileAngle('road_corner', 0)).toBe(0);
-    expect(pathTileAngle('road_corner', 180)).toBe(0);
-    expect(pathTileIsFlipped('road_corner', 0)).toBe(false);
-    expect(pathTileIsFlipped('road_corner', 180)).toBe(true);
-    expect(pathTileIsFlipped('road_corner', 90)).toBe(false);
+  it('road_corner maps rotation to texture and flips', () => {
+    expect(roadCornerTextureKey(0)).toBe('road_corner');
+    expect(roadCornerTextureKey(180)).toBe('road_corner');
+    expect(roadCornerTextureKey(90)).toBe('road_corner_up');
+    expect(roadCornerTextureKey(270)).toBe('road_corner_down');
+
+    expect(roadCornerFlip(0)).toEqual({ flipX: false, flipY: false });
+    expect(roadCornerFlip(180)).toEqual({ flipX: true, flipY: false });
+    expect(roadCornerFlip(90)).toEqual({ flipX: false, flipY: false });
+    expect(roadCornerFlip(270)).toEqual({ flipX: false, flipY: false });
+
+    expect(pathTileAngle('road_corner', 90)).toBe(0);
+    expect(pathTileFlip('road_corner', 270)).toEqual({ flipX: false, flipY: false });
+  });
+
+  it('getGroundTextureKey picks road_corner art from pathRotation', () => {
+    const grid = new GridSystem(20);
+    grid.generatePlaceholderMap();
+    grid.setCell(3, 3, {
+      type: 'path',
+      pathVariant: 'road_corner',
+      pathRotation: 90,
+    });
+    grid.setCell(4, 3, {
+      type: 'path',
+      pathVariant: 'road_corner',
+      pathRotation: 0,
+    });
+    expect(grid.getGroundTextureKey(3, 3)).toBe('road_corner_up');
+    expect(grid.getGroundTextureKey(4, 3)).toBe('road_corner');
   });
 });

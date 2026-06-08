@@ -4,6 +4,7 @@ import {
   LIVESTOCK_PEN_PLACE_ITEMS,
   type LivestockPenPlaceItemDef,
 } from '../systems/LivestockSystem';
+import { buildPanelPlacingItemKey } from '../utils/buildPlacementFlow';
 
 export type BuildPanelItem = BuildItemDef | LivestockPenPlaceItemDef;
 
@@ -40,6 +41,8 @@ const COLOR_INNER_PANEL = 0xffe0b6;
 const COLOR_INNER_STROKE = 0xbf8c45;
 const COLOR_CARD_BG = 0xfff8e1;
 const COLOR_CARD_STROKE = 0xc79248;
+const COLOR_CARD_SELECTED_STROKE = 0x2e7d32;
+const COLOR_CARD_SELECTED_FILL = 0xe8f5e9;
 const COLOR_TAB_ACTIVE = 0xfff8e1;
 const COLOR_TAB_INACTIVE = COLOR_PRIMARY;
 const COLOR_TAB_INACTIVE_TEXT = '#3d2817';
@@ -115,6 +118,7 @@ export class BuildPanel {
   private scrollLayoutCardW = 0;
   private scrollLayoutCardGap = 0;
   private playerLevel = 99;
+  private placingItemKey: string | null = null;
   private viewportW: number;
   private viewportH: number;
   private onSelect?: (item: BuildPanelItem) => void;
@@ -240,6 +244,16 @@ export class BuildPanel {
     this.onSelect = cb;
   }
 
+  /** Highlight the card for the active build / pen placement session. */
+  setPlacingItem(item: BuildPanelItem | null): void {
+    this.placingItemKey = item ? buildPanelPlacingItemKey(item) : null;
+    if (this.visible) this.refreshCardSelectionStyles();
+  }
+
+  clearPlacingItem(): void {
+    this.setPlacingItem(null);
+  }
+
   /** True when pointer hits the dim backdrop (tap-outside dismiss). */
   hitsBackdrop(pointer: Phaser.Input.Pointer): boolean {
     if (!this.visible) return false;
@@ -264,6 +278,7 @@ export class BuildPanel {
   hide(): void {
     this.root.setVisible(false);
     this.visible = false;
+    this.placingItemKey = null;
     clearScrollDrag(this.scrollDrag);
     this.resetBackdrop();
   }
@@ -522,7 +537,6 @@ export class BuildPanel {
         if (this.isItemLocked(item)) return;
         this.beginCardRowScrollDrag(pointer, () => {
           this.onSelect?.(item);
-          this.hide();
         });
       });
 
@@ -544,6 +558,7 @@ export class BuildPanel {
     });
 
     this.refreshCardLockStates();
+    this.refreshCardSelectionStyles();
   }
 
   private isItemLocked(item: BuildPanelItem): boolean {
@@ -593,10 +608,12 @@ export class BuildPanel {
       const left = -layout.cardW / 2;
       const top = -layout.cardH / 2;
 
+      const selected =
+        this.placingItemKey != null && buildPanelPlacingItemKey(item) === this.placingItemKey;
       cardG.clear();
-      cardG.fillStyle(COLOR_CARD_BG, 1);
+      cardG.fillStyle(selected ? COLOR_CARD_SELECTED_FILL : COLOR_CARD_BG, 1);
       cardG.fillRoundedRect(left, top, layout.cardW, layout.cardH, cardRadius);
-      cardG.lineStyle(2, COLOR_CARD_STROKE, 1);
+      cardG.lineStyle(selected ? 3 : 2, selected ? COLOR_CARD_SELECTED_STROKE : COLOR_CARD_STROKE, 1);
       cardG.strokeRoundedRect(left, top, layout.cardW, layout.cardH, cardRadius);
 
       name.setPosition(0, top + layout.cardH * (layout.compact ? 0.06 : 0.08));
@@ -650,6 +667,29 @@ export class BuildPanel {
     this.cardsRow.setPosition(0, 0);
     this.clampScroll();
     this.updateCardVisibility();
+    this.refreshCardSelectionStyles();
+  }
+
+  private refreshCardSelectionStyles(): void {
+    if (this.cardNodes.length === 0) return;
+    const layout = computeBuildModalLayout(
+      this.viewportW,
+      this.viewportH,
+      getModalUiFontScale(this.viewportW, this.viewportH)
+    );
+    const cardRadius = Math.max(4, layout.cardW * 0.1);
+    for (const node of this.cardNodes) {
+      const { item, cardG } = node;
+      const left = -layout.cardW / 2;
+      const top = -layout.cardH / 2;
+      const selected =
+        this.placingItemKey != null && buildPanelPlacingItemKey(item) === this.placingItemKey;
+      cardG.clear();
+      cardG.fillStyle(selected ? COLOR_CARD_SELECTED_FILL : COLOR_CARD_BG, 1);
+      cardG.fillRoundedRect(left, top, layout.cardW, layout.cardH, cardRadius);
+      cardG.lineStyle(selected ? 3 : 2, selected ? COLOR_CARD_SELECTED_STROKE : COLOR_CARD_STROKE, 1);
+      cardG.strokeRoundedRect(left, top, layout.cardW, layout.cardH, cardRadius);
+    }
   }
 
   /** Hide cards outside the scroll viewport (no geometry mask). */
